@@ -43,6 +43,7 @@
 		B00000000000000000000026 /* Paperlogy-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000026 /* Paperlogy-OFL.txt */; };
 		B00000000000000000000027 /* NEXONLv1Gothic-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000027 /* NEXONLv1Gothic-LICENSE.txt */; };
 		B00000000000000000000028 /* Poppins-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000028 /* Poppins-OFL.txt */; };
+		B0000000000000000000002A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002A /* Assets.xcassets */; };
 		B00000000000000000000101 /* AudioAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000101 /* AudioAnalysisTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -107,6 +108,7 @@
 		F0000000000000000000001D /* WakeMotionMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeMotionMonitor.swift; sourceTree = "<group>"; };
 		F0000000000000000000001E /* STandWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STandWidget.swift; sourceTree = "<group>"; };
 		F0000000000000000000001F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		F0000000000000000000002A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F00000000000000000000020 /* sample-snore-5s.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = "sample-snore-5s.m4a"; sourceTree = "<group>"; };
 		F00000000000000000000021 /* sample-snore-10s.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = "sample-snore-10s.m4a"; sourceTree = "<group>"; };
 		F00000000000000000000022 /* sample-snore-15s.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = "sample-snore-15s.m4a"; sourceTree = "<group>"; };
@@ -285,6 +287,7 @@
 			children = (
 				F0000000000000000000001E /* STandWidget.swift */,
 				F0000000000000000000001F /* Info.plist */,
+				F0000000000000000000002A /* Assets.xcassets */,
 			);
 			path = STandWidget;
 			sourceTree = "<group>";
@@ -456,6 +459,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B0000000000000000000002A /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

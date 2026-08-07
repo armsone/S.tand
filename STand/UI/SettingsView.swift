@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @ObservedObject var store: SettingsStore
@@ -64,6 +65,19 @@ struct SettingsView: View {
                     Toggle("자동 디밍 사용", isOn: $store.value.automaticDimmingEnabled)
 
                     SettingSlider(
+                        title: "잠자기 기준선",
+                        valueText: "\(Int((store.value.brightnessModeThreshold * 100).rounded()))%",
+                        value: $store.value.brightnessModeThreshold,
+                        range: 0...1
+                    )
+
+                    LabeledContent("현재 화면 밝기") {
+                        Text("\(Int((UIScreen.main.brightness * 100).rounded()))%")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+
+                    SettingSlider(
                         title: "최대 밝기",
                         valueText: "\(Int(store.value.lampIntensity * 100))%",
                         value: $store.value.lampIntensity,
@@ -106,7 +120,7 @@ struct SettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
-                    Text("첫 화면의 얇은 밝기 기준선에서 주황색 표시는 현재 화면 밝기이고, 슬라이더는 수면·스탠드 모드의 경계입니다. 현재 밝기가 경계보다 낮으면 수면 모드, 높으면 스탠드 모드입니다. 경계를 맨 왼쪽에 두면 계속 스탠드 모드로 유지됩니다.")
+                    Text("주황색 점은 현재 화면 밝기이고, 세로 기준선은 잠자기·스탠드 모드의 경계입니다. 기준선이 현재 밝기보다 왼쪽이면 설정 시간이 지난 뒤 잠자기 모드로 감광하고, 오른쪽이면 스탠드 모드를 유지합니다. 첫 화면에서는 플래시 연동과 감지 종료 사이의 밝기 기준 타일에서 바로 조절할 수 있습니다.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 

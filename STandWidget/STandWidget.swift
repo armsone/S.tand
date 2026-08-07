@@ -20,38 +20,38 @@ struct STandWidgetProvider: TimelineProvider {
 }
 
 struct STandLaunchWidgetView: View {
-    @Environment(\.widgetFamily) private var family
-
     var body: some View {
-        Group {
-            if family == .accessoryCircular {
-                ZStack {
-                    AccessoryWidgetBackground()
-                    Image(systemName: "moon.stars.fill")
-                        .font(.system(size: 20, weight: .semibold))
-                }
-                .widgetLabel("S.tand 열기")
-            } else {
-                VStack(spacing: 8) {
-                    Image(systemName: "moon.stars.fill")
-                        .font(.system(size: 34, weight: .semibold))
-                        .foregroundStyle(.orange)
-                    Text("S.tand")
-                        .font(.headline)
-                    Text("잠자리 케어 시작")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+        accessoryIcon
+            .widgetLabel("S.tand 열기")
+            .containerBackground(.clear, for: .widget)
+            .widgetURL(URL(string: "stand://open"))
+    }
+
+    private var accessoryIcon: some View {
+        ZStack {
+            AccessoryWidgetBackground()
+
+            // Lock Screen accessory widgets are rendered in vibrant mode.
+            // This dedicated asset has a transparent canvas and preserves the
+            // app icon's lamp/waveform as a WidgetKit-safe template glyph.
+            Image("STandWidgetGlyph")
+                .resizable()
+                .renderingMode(.template)
+                .scaledToFit()
+                .foregroundStyle(.white)
+                .padding(3)
+                .widgetAccentable()
+                .unredacted()
         }
-        .containerBackground(.black, for: .widget)
-        .widgetURL(URL(string: "stand://open"))
+        .unredacted()
+        .accessibilityLabel("S.tand 열기")
     }
 }
 
 struct STandLaunchWidget: Widget {
-    let kind = "STandLaunchWidget"
+    // Keep this identifier distinct from the legacy widget so WidgetKit
+    // doesn't reuse its cached placeholder in the gallery.
+    let kind = "com.armsone.stand.launch.v2"
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: STandWidgetProvider()) { _ in
@@ -59,7 +59,7 @@ struct STandLaunchWidget: Widget {
         }
         .configurationDisplayName("S.tand 바로 열기")
         .description("잠금화면에서 S.tand를 바로 실행합니다.")
-        .supportedFamilies([.accessoryCircular, .systemSmall])
+        .supportedFamilies([.accessoryCircular])
     }
 }
 

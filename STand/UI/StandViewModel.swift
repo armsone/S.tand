@@ -56,7 +56,7 @@ enum EnvironmentDisplayMode: Equatable {
     case stand
 
     static func resolve(brightness: Double, threshold: Double) -> Self {
-        brightness < threshold ? .sleeping : .stand
+        threshold < brightness ? .sleeping : .stand
     }
 }
 

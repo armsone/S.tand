@@ -65,6 +65,17 @@ private enum ScreenAdjustmentAxis {
     case horizontal
 }
 
+enum StandControlLayoutMetrics {
+    static let itemHeight: CGFloat = 60
+    static let rowSpacing: CGFloat = 6
+    static let editorToolbarHeight: CGFloat = 46
+    static let tileOpacity = 1.0
+
+    static func bottomPadding(isPortrait: Bool) -> CGFloat {
+        isPortrait ? 18 : 6
+    }
+}
+
 struct RootView: View {
     @ObservedObject private var model: StandViewModel
     @ObservedObject private var audio: AudioCaptureService
@@ -120,7 +131,7 @@ struct RootView: View {
                     }
                     .padding(.horizontal, isPortrait ? 20 : 32)
                     .padding(.top, isPortrait ? 18 : 20)
-                    .padding(.bottom, isPortrait ? 18 : 6)
+                    .padding(.bottom, StandControlLayoutMetrics.bottomPadding(isPortrait: isPortrait))
                     .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
 
                     centerContent(isPortrait: isPortrait, canvasSize: proxy.size)
@@ -160,12 +171,7 @@ struct RootView: View {
                             get: { settings.value.clockHourMode },
                             set: { settings.value.clockHourMode = $0 }
                         ),
-                        threshold: Binding(
-                            get: { settings.value.brightnessModeThreshold },
-                            set: { settings.value.brightnessModeThreshold = $0 }
-                        ),
                         screenScale: settings.value.clockScale,
-                        currentBrightness: model.displayBrightness,
                         batteryText: silhouetteBatteryText,
                         onReset: {
                             editingLayout = editingIsPortrait ? .portrait : .landscape
@@ -185,6 +191,8 @@ struct RootView: View {
             }
             .onChange(of: isPortrait) { _, value in currentIsPortrait = value }
         }
+        .grayscale(settings.value.displayTheme == .grayscale ? 1 : 0)
+        .animation(.easeInOut(duration: 0.28), value: settings.value.displayTheme)
         .contentShape(Rectangle())
         .gesture(screenAdjustmentGesture.exclusively(before: screenPressGesture))
         .simultaneousGesture(clockMagnificationGesture)
@@ -338,18 +346,20 @@ struct RootView: View {
             batteryText: silhouetteBatteryText,
             batterySystemImage: model.batteryStatus.isCharging
                 ? "battery.100percent.bolt"
-                : "battery.50percent",
-            currentBrightness: model.displayBrightness,
-            brightnessThreshold: Binding(
-                get: { settings.value.brightnessModeThreshold },
-                set: { settings.value.brightnessModeThreshold = $0 }
-            )
+                : "battery.50percent"
         )
     }
 
     private var dashboardStatusText: String {
-        if model.displayBrightness < settings.value.brightnessModeThreshold {
-            return "현재 상태 · 슬리핑 모드"
+        if EnvironmentDisplayMode.resolve(
+            brightness: model.displayBrightness,
+            threshold: settings.value.brightnessModeThreshold
+        ) == .sleeping {
+            return switch model.lampPhase {
+            case .off: "현재 상태 · 잠자기 모드"
+            case .holding: "현재 상태 · 잠자기 전환 대기"
+            case .fading: "현재 상태 · 잠자기 감광 중"
+            }
         }
         return switch model.lampPhase {
         case .off: "현재 상태 · 잠자기 모드"
@@ -445,19 +455,35 @@ struct RootView: View {
 
     private var screenPressGesture: some Gesture {
         LongPressGesture(minimumDuration: 0.8, maximumDistance: 12)
-            .exclusively(before: TapGesture())
+            .exclusively(
+                before: TapGesture(count: 2)
+                    .exclusively(before: TapGesture())
+            )
             .onEnded { result in
                 switch result {
                 case .first(true):
                     guard !isEditingScreen else { return }
                     enterScreenEditing(isPortrait: currentIsPortrait)
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                case .second:
-                    handleScreenTap()
+                case .second(let tapResult):
+                    switch tapResult {
+                    case .first:
+                        toggleDisplayTheme()
+                    case .second:
+                        handleScreenTap()
+                    }
                 default:
                     break
                 }
             }
+    }
+
+    private func toggleDisplayTheme() {
+        guard !isEditingScreen else { return }
+        withAnimation(.easeInOut(duration: 0.28)) {
+            settings.value.displayTheme.toggle()
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     private func handleScreenTap() {
@@ -586,10 +612,10 @@ struct RootView: View {
     }
 
     private var landscapeBottomControls: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: StandControlLayoutMetrics.rowSpacing) {
             if model.isNightSessionActive {
                 if model.controlsVisible {
-                    nightControlButtons(compact: true)
+                    nightControlButtons
                 } else {
                     tapToControlText
                 }
@@ -604,11 +630,11 @@ struct RootView: View {
     }
 
     private var portraitBottomControls: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: StandControlLayoutMetrics.rowSpacing) {
             if model.isNightSessionActive {
                 if model.controlsVisible {
-                    HStack(spacing: 8) {
-                        nightControlButtons(compact: true)
+                    HStack(spacing: StandControlLayoutMetrics.rowSpacing) {
+                        nightControlButtons
                     }
                 } else {
                     tapToControlText
@@ -616,7 +642,7 @@ struct RootView: View {
             }
 
             if model.controlsVisible || !model.isNightSessionActive {
-                HStack(spacing: 10) {
+                HStack(spacing: StandControlLayoutMetrics.rowSpacing) {
                     Spacer(minLength: 0)
                     secondaryControlButtons
                     Spacer(minLength: 0)
@@ -627,7 +653,7 @@ struct RootView: View {
     }
 
     @ViewBuilder
-    private func nightControlButtons(compact: Bool) -> some View {
+    private var nightControlButtons: some View {
         ControlButton(
             title: "플래시 연동",
             systemImage: settings.value.torchEnabled ? "flashlight.on.fill" : "flashlight.off.fill",
@@ -637,6 +663,15 @@ struct RootView: View {
             settings.value.torchEnabled.toggle()
             if settings.value.torchEnabled { model.activateLamp() }
         }
+        brightnessThresholdControl
+        ControlButton(
+            title: "감지 종료",
+            systemImage: "stop.circle.fill",
+            role: .destructive,
+            hint: "소리 감지와 자동 녹음을 종료합니다"
+        ) {
+            model.stopNightSession()
+        }
         ControlButton(
             title: "AiShot 실행",
             systemImage: "camera.aperture",
@@ -644,14 +679,16 @@ struct RootView: View {
         ) {
             if let url = URL(string: "hanclip://aishot") { openURL(url) }
         }
-        ControlButton(
-            title: compact ? "감지 종료" : "취침 감지 종료",
-            systemImage: "stop.circle.fill",
-            role: .destructive,
-            hint: "소리 감지와 자동 녹음을 종료합니다"
-        ) {
-            model.stopNightSession()
-        }
+    }
+
+    private var brightnessThresholdControl: some View {
+        CompactBrightnessRuleControl(
+            currentBrightness: model.displayBrightness,
+            threshold: Binding(
+                get: { settings.value.brightnessModeThreshold },
+                set: { settings.value.brightnessModeThreshold = $0 }
+            )
+        )
     }
 
     @ViewBuilder
@@ -980,8 +1017,6 @@ private struct DashboardCanvas: View {
     let statusText: String
     let batteryText: String
     let batterySystemImage: String
-    let currentBrightness: Double
-    @Binding var brightnessThreshold: Double
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -1003,14 +1038,6 @@ private struct DashboardCanvas: View {
                 Text(statusText)
                     .font(.caption.weight(.medium))
                     .panelTransform(layout.status, canvasSize: canvasSize)
-
-                BrightnessRuleBar(
-                    currentBrightness: currentBrightness,
-                    threshold: $brightnessThreshold,
-                    isDimmed: isDimmed
-                )
-                .panelTransform(layout.brightnessRule, canvasSize: canvasSize)
-                .allowsHitTesting(!isDimmed)
 
                 if isDimmed {
                     Label(batteryText, systemImage: batterySystemImage)
@@ -1092,29 +1119,195 @@ private struct WeatherGroupPanel: View {
     let isDimmed: Bool
 
     var body: some View {
-        let totalWidth: CGFloat = isPortrait ? 282 : 370
-        let cell = totalWidth / 3
+        let geometry = WeatherPanelGeometry(isPortrait: isPortrait)
+        let cell = geometry.cellSide
+        let panelWidth = cell * CGFloat(pieces.count)
         HStack(spacing: 0) {
             ForEach(pieces) { piece in
-                WeatherPieceContent(service: service, piece: piece, isPortrait: isPortrait)
+                WeatherPieceContent(
+                    service: service,
+                    piece: piece,
+                    geometry: geometry
+                )
                     .frame(width: cell, height: cell)
             }
         }
-        .frame(width: cell * CGFloat(pieces.count), height: cell)
+        .frame(width: panelWidth, height: cell)
         .background(
             FlipPanelSurface(
                 isDimmed: isDimmed,
                 cornerRadius: isPortrait ? 18 : 20,
-                splitGap: isPortrait ? 4 : 3
+                splitGap: geometry.splitGap
             )
         )
+        .overlay(alignment: .top) {
+            if pieces.contains(.temperature) {
+                WeatherLocationLabel(
+                    locationName: locationText,
+                    isPortrait: isPortrait
+                )
+                .frame(width: panelWidth, height: geometry.metadataHeight)
+                .padding(.top, geometry.metadataEdgeInset)
+            }
+        }
+    }
+
+    private var locationText: String {
+        if let locationName = service.locationName {
+            return locationName
+        }
+
+        return switch service.availability {
+        case .locationDenied: "위치 권한 필요"
+        case .failed: "위치 확인 필요"
+        default: "현재 위치"
+        }
+    }
+}
+
+struct WeatherPanelGeometry: Equatable {
+    let cellSide: CGFloat
+    let splitGap: CGFloat
+    let metadataHeight: CGFloat
+    let metadataEdgeInset: CGFloat
+    let temperatureOpticalOffset: CGFloat
+
+    init(isPortrait: Bool) {
+        cellSide = (isPortrait ? 282 : 370) / 3
+        splitGap = isPortrait ? 4 : 3
+        metadataHeight = 18
+        metadataEdgeInset = isPortrait ? 7 : 8
+        // The raised degree mark makes the temperature's ink look high even when
+        // SwiftUI's line box is mathematically centered.
+        temperatureOpticalOffset = isPortrait ? 2 : 2.5
+    }
+
+    var panelCenterY: CGFloat { cellSide / 2 }
+    var locationCenterY: CGFloat { metadataEdgeInset + metadataHeight / 2 }
+    var apparentTemperatureCenterY: CGFloat {
+        cellSide - metadataEdgeInset - metadataHeight / 2
+    }
+}
+
+enum WeatherLocationMarquee {
+    static func offset(
+        elapsed: TimeInterval,
+        overflow: CGFloat,
+        speed: CGFloat = 18,
+        pause: TimeInterval = 1.2
+    ) -> CGFloat {
+        guard overflow > 0, speed > 0 else { return 0 }
+
+        let travelDuration = TimeInterval(overflow / speed)
+        let cycleDuration = (travelDuration * 2) + (pause * 2)
+        let phase = max(0, elapsed).truncatingRemainder(dividingBy: cycleDuration)
+
+        if phase < pause { return 0 }
+        if phase < pause + travelDuration {
+            return -CGFloat(phase - pause) * speed
+        }
+        if phase < (pause * 2) + travelDuration {
+            return -overflow
+        }
+
+        let returnElapsed = phase - ((pause * 2) + travelDuration)
+        return min(0, -overflow + CGFloat(returnElapsed) * speed)
+    }
+}
+
+private struct WeatherLocationLabel: View {
+    let locationName: String
+    let isPortrait: Bool
+
+    private var font: Font {
+        .system(size: isPortrait ? 11 : 13, weight: .medium, design: .rounded)
+    }
+
+    var body: some View {
+        WeatherLocationMarqueeText(
+            text: locationName,
+            font: font,
+            iconSize: isPortrait ? 9 : 11
+        )
+        .opacity(0.72)
+        .padding(.horizontal, isPortrait ? 8 : 10)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("현재 위치, \(locationName)")
+    }
+}
+
+private struct WeatherLocationMarqueeText: View {
+    let text: String
+    let font: Font
+    let iconSize: CGFloat
+
+    @State private var textWidth: CGFloat = 0
+    @State private var startedAt = Date.now
+
+    var body: some View {
+        GeometryReader { proxy in
+            let spacing: CGFloat = 5
+            let iconWidth = iconSize
+            let availableTextWidth = max(0, proxy.size.width - iconWidth - spacing)
+            let textViewportWidth = min(textWidth, availableTextWidth)
+            let overflow = max(0, textWidth - textViewportWidth)
+
+            HStack(spacing: spacing) {
+                Image(systemName: "location.fill")
+                    .font(.system(size: iconSize, weight: .semibold))
+                    .frame(width: iconWidth)
+
+                TimelineView(.animation(minimumInterval: 1 / 30, paused: overflow <= 0)) { context in
+                    Text(text)
+                        .font(font)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .background {
+                            GeometryReader { textProxy in
+                                Color.clear.preference(
+                                    key: WeatherLocationTextWidthKey.self,
+                                    value: textProxy.size.width
+                                )
+                            }
+                        }
+                        .offset(
+                            x: WeatherLocationMarquee.offset(
+                                elapsed: context.date.timeIntervalSince(startedAt),
+                                overflow: overflow
+                            )
+                        )
+                }
+                .frame(width: textViewportWidth, alignment: .leading)
+                .clipped()
+            }
+            .frame(
+                width: iconWidth + spacing + textViewportWidth,
+                alignment: .leading
+            )
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .frame(height: isFiniteHeight)
+        .clipped()
+        .onPreferenceChange(WeatherLocationTextWidthKey.self) { textWidth = $0 }
+    }
+
+    private var isFiniteHeight: CGFloat { 18 }
+}
+
+private struct WeatherLocationTextWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
 private struct WeatherPieceContent: View {
     @ObservedObject var service: WeatherService
     let piece: WeatherPiece
-    let isPortrait: Bool
+    let geometry: WeatherPanelGeometry
+
+    private var isPortrait: Bool { geometry.cellSide < 100 }
 
     var body: some View {
         Group {
@@ -1124,12 +1317,17 @@ private struct WeatherPieceContent: View {
                     .symbolRenderingMode(.hierarchical)
                     .font(.system(size: isPortrait ? 34 : 40, weight: .medium))
             case .temperature:
-                VStack(spacing: isPortrait ? 2 : 3) {
+                ZStack {
                     Text(service.weather.map { "\(Int($0.temperature.rounded()))°" } ?? "--°")
                         .font(.system(size: isPortrait ? 28 : 34, weight: .semibold, design: .rounded))
+                        .offset(y: geometry.temperatureOpticalOffset)
+
                     Text(service.weather.map { "체감 \(Int($0.apparentTemperature.rounded()))°" } ?? "체감 --°")
                         .font(.system(size: isPortrait ? 11 : 13, weight: .medium, design: .rounded))
                         .opacity(0.72)
+                        .frame(height: geometry.metadataHeight)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .padding(.bottom, geometry.metadataEdgeInset)
                 }
             case .condition:
                 Text(service.weather?.summary ?? "날씨")
@@ -1142,46 +1340,89 @@ private struct WeatherPieceContent: View {
     }
 }
 
-private struct BrightnessRuleBar: View {
+private struct CompactBrightnessRuleControl: View {
     let currentBrightness: Double
     @Binding var threshold: Double
-    let isDimmed: Bool
 
     var body: some View {
-        VStack(spacing: 1) {
+        VStack(spacing: 3) {
             HStack {
-                Text("슬리핑")
-                    .foregroundStyle(currentBrightness < threshold ? Color.orange : Color.white.opacity(0.42))
+                Label("잠자기", systemImage: "moon.fill")
+                    .foregroundStyle(threshold < currentBrightness ? Color.orange : Color.white.opacity(0.42))
                 Spacer()
-                Text("현재 \(Int((currentBrightness * 100).rounded()))%")
-                    .monospacedDigit()
-                    .foregroundStyle(.white.opacity(0.5))
-                Spacer()
-                Text("스탠드")
-                    .foregroundStyle(currentBrightness >= threshold ? Color.orange : Color.white.opacity(0.42))
+                Label("스탠드", systemImage: "sun.max.fill")
+                    .foregroundStyle(threshold >= currentBrightness ? Color.orange : Color.white.opacity(0.42))
             }
-            .font(.system(size: 8, weight: .medium))
+            .font(.system(size: 7, weight: .semibold))
+            .labelStyle(.titleAndIcon)
 
             GeometryReader { proxy in
+                let width = max(1, proxy.size.width)
+                let gap: CGFloat = 2
+                let availableWidth = max(0, width - gap)
+                let splitX = availableWidth * threshold
+
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.14)).frame(height: 2)
+                    HStack(spacing: gap) {
+                        Capsule()
+                            .fill(.white.opacity(0.24))
+                            .frame(width: splitX, height: 4)
+                        Capsule()
+                            .fill(.white.opacity(0.10))
+                            .frame(width: availableWidth - splitX, height: 4)
+                    }
+
+                    Rectangle()
+                        .fill(.white.opacity(0.48))
+                        .frame(width: 1, height: 12)
+                        .offset(x: max(0, width - 1) * threshold)
+
                     Circle()
                         .fill(Color.orange.opacity(0.9))
-                        .frame(width: 6, height: 6)
-                        .offset(x: max(0, proxy.size.width - 6) * currentBrightness)
+                        .frame(width: 5, height: 5)
+                        .overlay(Circle().stroke(.white.opacity(0.24), lineWidth: 0.5))
+                        .offset(x: max(0, width - 5) * currentBrightness)
                 }
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            threshold = BrightnessThresholdPolicy.value(
+                                locationX: value.location.x,
+                                width: width
+                            )
+                        }
+                )
             }
-            .frame(height: 6)
+            .frame(height: 12)
 
-            Slider(value: $threshold, in: 0...1)
-                .tint(.white.opacity(0.48))
-                .controlSize(.mini)
+            Text("현재 \(Int((currentBrightness * 100).rounded())) · 기준 \(Int((threshold * 100).rounded()))")
+                .font(.system(size: 7, weight: .medium, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(0.52))
         }
-        .padding(.horizontal, 10)
-        .frame(width: 240, height: 38)
-        .background(.black.opacity(isDimmed ? 0.06 : 0.12), in: Capsule())
-        .opacity(isDimmed ? 0.5 : 0.8)
+        .padding(.horizontal, 8)
+        .frame(width: 112, height: StandControlLayoutMetrics.itemHeight)
+        .background {
+            FlipPanelSurface(isDimmed: false, cornerRadius: 13, splitGap: 2)
+        }
+        .opacity(StandControlLayoutMetrics.tileOpacity)
         .accessibilityLabel("밝기 기준, 현재 \(Int(currentBrightness * 100))퍼센트, 기준 \(Int(threshold * 100))퍼센트")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: threshold = min(1, threshold + 0.05)
+            case .decrement: threshold = max(0, threshold - 0.05)
+            @unknown default: break
+            }
+        }
+    }
+}
+
+enum BrightnessThresholdPolicy {
+    static func value(locationX: CGFloat, width: CGFloat) -> Double {
+        guard width > 0 else { return 0 }
+        return min(1, max(0, Double(locationX / width)))
     }
 }
 
@@ -1191,9 +1432,7 @@ private struct ScreenEditorView: View {
     @ObservedObject var weather: WeatherService
     @Binding var clockFont: ClockFontChoice
     @Binding var hourMode: ClockHourMode
-    @Binding var threshold: Double
     let screenScale: Double
-    let currentBrightness: Double
     let batteryText: String
     let onReset: () -> Void
     let onSave: () -> Void
@@ -1201,17 +1440,22 @@ private struct ScreenEditorView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let protectedInsets = PanelEditingPolicy.protectedInsets(
+            let editingRegion = PanelEditingPolicy.editingRegion(
+                canvasSize: proxy.size,
                 safeAreaInsets: proxy.safeAreaInsets,
                 isPortrait: isPortrait,
                 fontPaletteVisible: showFontPalette
             )
+            let protectedInsets = editingRegion.insets
 
             ZStack {
                 Color.black.opacity(0.32).ignoresSafeArea()
 
                 Rectangle().fill(.white.opacity(0.16)).frame(width: 0.5)
                 Rectangle().fill(.white.opacity(0.16)).frame(height: 0.5)
+
+                EditorBoundaryGuides(frame: editingRegion.frame)
+                    .zIndex(4)
 
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     FlipClockFace(
@@ -1262,19 +1506,6 @@ private struct ScreenEditorView: View {
                 }
 
                 EditablePanel(
-                    transform: $layout.brightnessRule,
-                    canvasSize: proxy.size,
-                    protectedInsets: protectedInsets,
-                    screenScale: screenScale
-                ) {
-                    BrightnessRuleBar(
-                        currentBrightness: currentBrightness,
-                        threshold: $threshold,
-                        isDimmed: false
-                    )
-                }
-
-                EditablePanel(
                     transform: $layout.battery,
                     canvasSize: proxy.size,
                     protectedInsets: protectedInsets,
@@ -1309,7 +1540,7 @@ private struct ScreenEditorView: View {
                             .fontWeight(.semibold)
                     }
                     .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
+                    .frame(height: StandControlLayoutMetrics.editorToolbarHeight)
                     .background(.ultraThinMaterial, in: Capsule())
                     Spacer()
                 }
@@ -1454,21 +1685,95 @@ private struct ScreenEditorView: View {
     }
 }
 
+private struct EditorBoundaryGuides: View {
+    let frame: CGRect
+
+    var body: some View {
+        GeometryReader { _ in
+            Path { path in
+                path.move(to: CGPoint(x: frame.minX, y: frame.minY))
+                path.addLine(to: CGPoint(x: frame.maxX, y: frame.minY))
+                path.move(to: CGPoint(x: frame.minX, y: frame.maxY))
+                path.addLine(to: CGPoint(x: frame.maxX, y: frame.maxY))
+            }
+            .stroke(
+                Color.orange.opacity(0.62),
+                style: StrokeStyle(lineWidth: 1, dash: [5, 4])
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+struct PanelEditingRegion: Equatable {
+    let frame: CGRect
+    let insets: EdgeInsets
+}
+
 enum PanelEditingPolicy {
     static func protectedInsets(
         safeAreaInsets: EdgeInsets,
         isPortrait: Bool,
         fontPaletteVisible: Bool = false
     ) -> EdgeInsets {
-        let controlBoundary = safeAreaInsets.bottom + (isPortrait ? 184 : 84)
-        let fontPaletteBoundary = safeAreaInsets.bottom + (isPortrait ? 250 : 148)
+        let topOuterPadding: CGFloat = isPortrait ? 18 : 14
+        let topGuideClearance: CGFloat = 12
+        let bottomOuterPadding = StandControlLayoutMetrics.bottomPadding(isPortrait: isPortrait)
+        let bottomGuideClearance: CGFloat = 6
+        let bottomRowCount: CGFloat = isPortrait ? 2 : 1
+        let bottomRowsHeight = StandControlLayoutMetrics.itemHeight * bottomRowCount
+            + StandControlLayoutMetrics.rowSpacing * max(0, bottomRowCount - 1)
+        let controlBoundary = safeAreaInsets.bottom
+            + bottomOuterPadding
+            + bottomRowsHeight
+            + bottomGuideClearance
+
+        let paletteHeight: CGFloat = isPortrait ? 190 : 126
+        let paletteBottomPadding: CGFloat = isPortrait ? 22 : 14
+        let paletteGuideClearance: CGFloat = 8
+        let fontPaletteBoundary = safeAreaInsets.bottom
+            + paletteBottomPadding
+            + paletteHeight
+            + paletteGuideClearance
+
         return EdgeInsets(
-            top: safeAreaInsets.top + (isPortrait ? 76 : 66),
-            leading: isPortrait ? 14 : 24,
+            top: safeAreaInsets.top
+                + topOuterPadding
+                + StandControlLayoutMetrics.editorToolbarHeight
+                + topGuideClearance,
+            leading: safeAreaInsets.leading + (isPortrait ? 14 : 24),
             bottom: fontPaletteVisible
                 ? max(controlBoundary, fontPaletteBoundary)
                 : controlBoundary,
-            trailing: isPortrait ? 14 : 24
+            trailing: safeAreaInsets.trailing + (isPortrait ? 14 : 24)
+        )
+    }
+
+    static func editingRegion(
+        canvasSize: CGSize,
+        safeAreaInsets: EdgeInsets,
+        isPortrait: Bool,
+        fontPaletteVisible: Bool = false
+    ) -> PanelEditingRegion {
+        let insets = protectedInsets(
+            safeAreaInsets: safeAreaInsets,
+            isPortrait: isPortrait,
+            fontPaletteVisible: fontPaletteVisible
+        )
+        let minimumX = min(canvasSize.width, insets.leading)
+        let maximumX = max(minimumX, canvasSize.width - insets.trailing)
+        let minimumY = min(canvasSize.height, insets.top)
+        let maximumY = max(minimumY, canvasSize.height - insets.bottom)
+        return PanelEditingRegion(
+            frame: CGRect(
+                x: minimumX,
+                y: minimumY,
+                width: maximumX - minimumX,
+                height: maximumY - minimumY
+            ),
+            insets: insets
         )
     }
 
@@ -1554,7 +1859,6 @@ enum PanelEditingPolicy {
             (layout.weatherCondition, weatherHeight),
             (layout.date, 36),
             (layout.status, 36),
-            (layout.brightnessRule, 38),
             (layout.battery, 36),
             (.init(x: 0, y: 0), isPortrait ? 92 : 116)
         ]
@@ -1605,6 +1909,15 @@ private struct EditablePanel<Content: View>: View {
             .onChange(of: protectedInsets.bottom) { _, _ in
                 constrainToEditableArea()
             }
+            .onChange(of: protectedInsets.top) { _, _ in
+                constrainToEditableArea()
+            }
+            .onChange(of: canvasSize) { _, _ in
+                constrainToEditableArea()
+            }
+            .onChange(of: screenScale) { _, _ in
+                constrainToEditableArea()
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(.orange.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4]))
@@ -1630,6 +1943,7 @@ private struct EditablePanel<Content: View>: View {
                             UISelectionFeedbackGenerator().selectionChanged()
                         }
                         if abs(transform.y) < 0.045 { transform.y = 0 }
+                        constrainToEditableArea()
                         dragStart = nil
                         onEnded()
                     }
@@ -1781,7 +2095,7 @@ private struct FlipClockFace: View {
                     Text(String(format: "%02d", components.second ?? 0))
                         .font(clockFont.font(size: isPortrait ? 13 : 16))
                         .monospacedDigit()
-                        .foregroundStyle(.white.opacity(isDimmed ? 0.04 : 0.10))
+                        .foregroundStyle(.white.opacity(isDimmed ? 0.08 : 0.20))
                         .contentTransition(.numericText())
                         .frame(width: isPortrait ? 24 : 30)
                         .padding(.trailing, isPortrait ? 20 : 26)
@@ -1964,31 +2278,32 @@ private struct ControlButton: View {
 
     var body: some View {
         Button(role: role, action: action) {
-            VStack(spacing: 5) {
+            VStack(spacing: 3) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 18, weight: .semibold))
-                    .frame(width: 24, height: 20)
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 20, height: 16)
 
                 Text(title)
-                    .font(.caption.weight(.semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
-                    .minimumScaleFactor(0.78)
+                    .minimumScaleFactor(0.7)
 
                 if let status {
                     Text(status)
-                        .font(.caption2)
+                        .font(.system(size: 7.5, weight: .medium))
                         .foregroundStyle(.white.opacity(0.52))
                         .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+                        .minimumScaleFactor(0.65)
                 }
             }
             .foregroundStyle(role == .destructive ? Color.red.opacity(0.9) : Color.white.opacity(0.78))
-            .padding(.horizontal, 6)
-            .frame(width: 102, height: 72)
+            .padding(.horizontal, 4)
+            .frame(width: 74, height: StandControlLayoutMetrics.itemHeight)
             .background {
-                FlipPanelSurface(isDimmed: false, cornerRadius: 15, splitGap: 3)
+                FlipPanelSurface(isDimmed: false, cornerRadius: 13, splitGap: 2)
             }
+            .opacity(StandControlLayoutMetrics.tileOpacity)
         }
         .buttonStyle(.plain)
         .accessibilityHint(hint ?? "")

@@ -131,6 +131,21 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(decoded.brightnessModeThreshold, 0.18)
     }
 
+    func testDisplayThemeRoundTripsAndLegacySettingsUseColor() throws {
+        var settings = AppSettings.recommended
+        settings.displayTheme = .grayscale
+        let encoded = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: encoded)
+        XCTAssertEqual(decoded.displayTheme, .grayscale)
+
+        let legacy = try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        var legacyValues = try XCTUnwrap(legacy)
+        legacyValues.removeValue(forKey: "displayTheme")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyValues)
+        let legacyDecoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
+        XCTAssertEqual(legacyDecoded.displayTheme, .color)
+    }
+
     func testWeatherPanelsMergeAtTenPercentOverlap() {
         let source = CGRect(x: 0, y: 0, width: 100, height: 100)
         let tenPercent = CGRect(x: 90, y: 0, width: 100, height: 100)
@@ -170,10 +185,93 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(bottomRight.y, 540)
     }
 
+    func testEditorBoundaryGuidesMatchCurrentPortraitControlRows() {
+        let region = PanelEditingPolicy.editingRegion(
+            canvasSize: CGSize(width: 393, height: 852),
+            safeAreaInsets: EdgeInsets(top: 59, leading: 0, bottom: 34, trailing: 0),
+            isPortrait: true
+        )
+
+        // Top: 59 safe + 18 outer + 46 toolbar + 12 clearance.
+        XCTAssertEqual(region.frame.minY, 135)
+        // Bottom: 34 safe + 18 outer + (60 + 6 + 60) rows + 6 clearance.
+        XCTAssertEqual(region.frame.maxY, 668)
+        XCTAssertEqual(region.insets.bottom, 184)
+    }
+
+    func testEditorBoundaryGuidesMatchCurrentLandscapeControlRow() {
+        let region = PanelEditingPolicy.editingRegion(
+            canvasSize: CGSize(width: 852, height: 393),
+            safeAreaInsets: EdgeInsets(top: 0, leading: 59, bottom: 21, trailing: 59),
+            isPortrait: false
+        )
+
+        // Top: 14 outer + 46 toolbar + 12 clearance.
+        XCTAssertEqual(region.frame.minY, 72)
+        // Bottom: 21 safe + 6 outer + 60 row + 6 clearance.
+        XCTAssertEqual(region.frame.maxY, 300)
+        XCTAssertEqual(region.insets.bottom, 93)
+        XCTAssertEqual(region.frame.minX, 83)
+        XCTAssertEqual(region.frame.maxX, 769)
+    }
+
+    func testLandscapePanelBoundingBoxCannotCrossVisibleEditorGuidesAtScreenScale() {
+        let canvas = CGSize(width: 852, height: 393)
+        let region = PanelEditingPolicy.editingRegion(
+            canvasSize: canvas,
+            safeAreaInsets: EdgeInsets(top: 0, leading: 59, bottom: 21, trailing: 59),
+            isPortrait: false
+        )
+        let panelSize = CGSize(width: 370 / 3, height: 370 / 3)
+        let screenScale = 1.35
+
+        for requestedY in [-0.44, 0.44] {
+            let result = PanelEditingPolicy.clampedTransform(
+                PanelTransform(x: 0, y: requestedY, scale: 1),
+                panelSize: panelSize,
+                canvasSize: canvas,
+                insets: region.insets,
+                screenScale: screenScale
+            )
+            let centerY = canvas.height / 2
+                + CGFloat(result.y) * canvas.height * screenScale
+            let halfHeight = panelSize.height * result.scale * screenScale / 2
+
+            XCTAssertGreaterThanOrEqual(centerY - halfHeight, region.frame.minY - 0.001)
+            XCTAssertLessThanOrEqual(centerY + halfHeight, region.frame.maxY + 0.001)
+        }
+    }
+
+    func testFontPaletteRaisesEditorBottomGuideToItsActualTopEdge() {
+        let region = PanelEditingPolicy.editingRegion(
+            canvasSize: CGSize(width: 393, height: 852),
+            safeAreaInsets: EdgeInsets(top: 59, leading: 0, bottom: 34, trailing: 0),
+            isPortrait: true,
+            fontPaletteVisible: true
+        )
+
+        // 34 safe + 22 palette padding + 190 palette + 8 clearance.
+        XCTAssertEqual(region.insets.bottom, 254)
+        XCTAssertEqual(region.frame.maxY, 598)
+    }
+
+    func testLandscapeFontPaletteRaisesBottomGuideAbovePalette() {
+        let region = PanelEditingPolicy.editingRegion(
+            canvasSize: CGSize(width: 852, height: 393),
+            safeAreaInsets: EdgeInsets(top: 0, leading: 59, bottom: 21, trailing: 59),
+            isPortrait: false,
+            fontPaletteVisible: true
+        )
+
+        // 21 safe + 14 palette padding + 126 palette + 8 clearance.
+        XCTAssertEqual(region.insets.bottom, 169)
+        XCTAssertEqual(region.frame.maxY, 224)
+    }
+
     func testSavedPanelStaysAboveBottomControlsAfterWholeScreenScaling() {
         let canvasSize = CGSize(width: 393, height: 852)
         let insets = EdgeInsets(top: 123, leading: 14, bottom: 218, trailing: 14)
-        let panelSize = CGSize(width: 240, height: 38)
+        let panelSize = CGSize(width: 240, height: 46)
         let screenScale = 1.35
         let result = PanelEditingPolicy.clampedTransform(
             PanelTransform(x: 0, y: 0.44, scale: 1),
@@ -194,7 +292,7 @@ final class AudioAnalysisTests: XCTestCase {
     func testShrunkScreenStillUsesEditorButtonBoundaryForPanelMovement() {
         let canvasSize = CGSize(width: 393, height: 852)
         let insets = EdgeInsets(top: 123, leading: 14, bottom: 218, trailing: 14)
-        let panelSize = CGSize(width: 240, height: 38)
+        let panelSize = CGSize(width: 240, height: 46)
         let result = PanelEditingPolicy.clampedTransform(
             PanelTransform(x: 0, y: 0.44, scale: 1),
             panelSize: panelSize,
@@ -212,7 +310,7 @@ final class AudioAnalysisTests: XCTestCase {
 
     func testPinchMaximumScaleStopsBeforePanelsCrossVerticalControls() {
         var layout = StandScreenLayout.portrait
-        layout.brightnessRule = .init(x: 0, y: 0.2)
+        layout.status = .init(x: 0, y: 0.2)
         let canvas = CGSize(width: 393, height: 852)
         let insets = EdgeInsets(top: 123, leading: 14, bottom: 218, trailing: 14)
         let maximum = PanelEditingPolicy.maximumScreenScale(
@@ -223,20 +321,30 @@ final class AudioAnalysisTests: XCTestCase {
             hardLimit: 1.35
         )
         let bottomEdge = canvas.height / 2
-            + (CGFloat(layout.brightnessRule.y) * canvas.height
-                + 38 * layout.brightnessRule.scale / 2) * maximum
+            + (CGFloat(layout.status.y) * canvas.height
+                + 36 * layout.status.scale / 2) * maximum
 
         XCTAssertLessThanOrEqual(bottomEdge, canvas.height - insets.bottom + 0.001)
     }
 
-    func testBrightnessLeftOfThresholdIsSleepingAndRightIsStand() {
+    func testBrightnessThresholdTrackMapsAndClampsDragLocation() {
+        XCTAssertEqual(BrightnessThresholdPolicy.value(locationX: 60, width: 240), 0.25)
+        XCTAssertEqual(BrightnessThresholdPolicy.value(locationX: -20, width: 240), 0)
+        XCTAssertEqual(BrightnessThresholdPolicy.value(locationX: 300, width: 240), 1)
+    }
+
+    func testBrightnessAndActionTilesShareFullContainerOpacity() {
+        XCTAssertEqual(StandControlLayoutMetrics.tileOpacity, 1)
+    }
+
+    func testThresholdLeftOfBrightnessIsSleepingAndRightIsStand() {
         XCTAssertEqual(
             EnvironmentDisplayMode.resolve(brightness: 0.2, threshold: 0.5),
-            .sleeping
+            .stand
         )
         XCTAssertEqual(
             EnvironmentDisplayMode.resolve(brightness: 0.8, threshold: 0.5),
-            .stand
+            .sleeping
         )
     }
 
@@ -260,6 +368,93 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(weather.precipitation, 0.4)
         XCTAssertEqual(weather.summary, "비")
         XCTAssertEqual(weather.systemImage, "cloud.rain.fill")
+    }
+
+    func testWeatherLocationNameKeepsUniqueRegionalComponents() {
+        XCTAssertEqual(
+            WeatherService.locationName(
+                administrativeArea: "서울특별시",
+                locality: "서울특별시",
+                subAdministrativeArea: "강남구",
+                subLocality: "삼성동",
+                country: "대한민국"
+            ),
+            "서울특별시 강남구 삼성동"
+        )
+        XCTAssertEqual(
+            WeatherService.locationName(
+                administrativeArea: nil,
+                locality: nil,
+                subAdministrativeArea: nil,
+                subLocality: nil,
+                country: "대한민국"
+            ),
+            "대한민국"
+        )
+    }
+
+    func testWeatherLocationMarqueePausesTravelsAndReturns() {
+        let overflow: CGFloat = 36
+        let speed: CGFloat = 18
+        let pause = 1.2
+
+        XCTAssertEqual(
+            WeatherLocationMarquee.offset(
+                elapsed: 0.6,
+                overflow: overflow,
+                speed: speed,
+                pause: pause
+            ),
+            0,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            WeatherLocationMarquee.offset(
+                elapsed: 2.2,
+                overflow: overflow,
+                speed: speed,
+                pause: pause
+            ),
+            -18,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            WeatherLocationMarquee.offset(
+                elapsed: 3.7,
+                overflow: overflow,
+                speed: speed,
+                pause: pause
+            ),
+            -36,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            WeatherLocationMarquee.offset(
+                elapsed: 5.4,
+                overflow: overflow,
+                speed: speed,
+                pause: pause
+            ),
+            -18,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            WeatherLocationMarquee.offset(elapsed: 2, overflow: 0),
+            0,
+            accuracy: 0.001
+        )
+    }
+
+    func testWeatherPanelMetadataIsBalancedAroundTransparentSplit() {
+        for isPortrait in [true, false] {
+            let geometry = WeatherPanelGeometry(isPortrait: isPortrait)
+            let locationDistance = geometry.panelCenterY - geometry.locationCenterY
+            let apparentDistance = geometry.apparentTemperatureCenterY - geometry.panelCenterY
+
+            XCTAssertEqual(locationDistance, apparentDistance, accuracy: 0.001)
+            XCTAssertEqual(geometry.splitGap, isPortrait ? 4 : 3)
+            XCTAssertEqual(geometry.temperatureOpticalOffset, isPortrait ? 2 : 2.5)
+        }
     }
 
     func testBatteryProtectionOnlyStopsWhenLowAndUnplugged() {
@@ -638,11 +833,15 @@ final class AudioAnalysisTests: XCTestCase {
 
         let library = RecordingLibrary(directory: directory)
         let older = try XCTUnwrap(library.clips.first { $0.url == olderURL })
+        let newer = try XCTUnwrap(library.clips.first { $0.url == newerURL })
         let previousDay = try XCTUnwrap(library.clips.first { $0.url == previousDayURL })
         let selectedDuration = older.duration + previousDay.duration
         let selectedMerge = try await library.merge([older, previousDay], kind: .selected)
 
-        XCTAssertEqual(selectedMerge.mergedTitle, "선택 녹음 합본")
+        XCTAssertEqual(
+            selectedMerge.mergedTitle,
+            previousDay.createdAt.formatted(.dateTime.hour().minute().second())
+        )
         XCTAssertTrue(FileManager.default.fileExists(atPath: selectedMerge.url.path))
         XCTAssertEqual(selectedMerge.createdAt, previousDay.createdAt)
         XCTAssertTrue(FileManager.default.fileExists(atPath: olderURL.path))
@@ -663,6 +862,29 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: newerURL.path))
         XCTAssertEqual(library.clips.count, 5)
         XCTAssertEqual(todayMerge.duration, todayDuration + 0.5, accuracy: 0.12)
+
+        XCTAssertEqual(
+            RecordingSelectionPolicy.all(in: library.mergeableClips),
+            Set([olderURL, newerURL, previousDayURL])
+        )
+        XCTAssertEqual(
+            RecordingSelectionPolicy.today(
+                in: library.mergeableClips,
+                date: mergeDate
+            ),
+            Set([olderURL, newerURL])
+        )
+
+        let destructiveMerge = try await library.merge(
+            [older, newer],
+            kind: .selected,
+            deleteSources: true
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destructiveMerge.url.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: olderURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: newerURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: previousDayURL.path))
+        XCTAssertEqual(library.clips.count, 4)
     }
 
     private func writeAudioFile(

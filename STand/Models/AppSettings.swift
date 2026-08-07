@@ -118,6 +118,15 @@ enum ClockHourMode: String, Codable, CaseIterable {
     }
 }
 
+enum StandDisplayTheme: String, Codable, CaseIterable {
+    case color
+    case grayscale
+
+    mutating func toggle() {
+        self = self == .color ? .grayscale : .color
+    }
+}
+
 struct PanelTransform: Codable, Equatable {
     var x: Double
     var y: Double
@@ -207,6 +216,7 @@ struct AppSettings: Codable, Equatable {
     var clockScale = 1.0
     var clockFont = ClockFontChoice.systemRounded
     var clockHourMode = ClockHourMode.twelve
+    var displayTheme = StandDisplayTheme.color
     var portraitLayout = StandScreenLayout.portrait
     var landscapeLayout = StandScreenLayout.landscape
     var brightnessModeThreshold = 0.35
@@ -230,6 +240,7 @@ struct AppSettings: Codable, Equatable {
         clockScale: Double = 1,
         clockFont: ClockFontChoice = .systemRounded,
         clockHourMode: ClockHourMode = .twelve,
+        displayTheme: StandDisplayTheme = .color,
         portraitLayout: StandScreenLayout = .portrait,
         landscapeLayout: StandScreenLayout = .landscape,
         brightnessModeThreshold: Double = 0.35,
@@ -250,6 +261,7 @@ struct AppSettings: Codable, Equatable {
         self.clockScale = clockScale
         self.clockFont = clockFont
         self.clockHourMode = clockHourMode
+        self.displayTheme = displayTheme
         self.portraitLayout = portraitLayout
         self.landscapeLayout = landscapeLayout
         self.brightnessModeThreshold = brightnessModeThreshold
@@ -272,6 +284,7 @@ struct AppSettings: Codable, Equatable {
         case clockScale
         case clockFont
         case clockHourMode
+        case displayTheme
         case portraitLayout
         case landscapeLayout
         case brightnessModeThreshold
@@ -307,6 +320,10 @@ struct AppSettings: Codable, Equatable {
             ClockHourMode.self,
             forKey: .clockHourMode
         ) ?? .twelve
+        displayTheme = try container.decodeIfPresent(
+            StandDisplayTheme.self,
+            forKey: .displayTheme
+        ) ?? .color
         portraitLayout = try container.decodeIfPresent(
             StandScreenLayout.self,
             forKey: .portraitLayout

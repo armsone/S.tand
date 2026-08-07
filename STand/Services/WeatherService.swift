@@ -52,10 +52,12 @@ enum WeatherAvailability: Equatable {
 @MainActor
 final class WeatherService: NSObject, ObservableObject {
     @Published private(set) var weather: CurrentWeather?
+    @Published private(set) var locationName: String?
     @Published private(set) var availability = WeatherAvailability.idle
     @Published private(set) var lastUpdated: Date?
 
     private let locationManager = CLLocationManager()
+    private let geocoder = CLGeocoder()
     private let session: URLSession
     private var refreshTask: Task<Void, Never>?
 
@@ -100,6 +102,21 @@ final class WeatherService: NSObject, ObservableObject {
                 self.weather = weather
                 self.lastUpdated = .now
                 self.availability = .available
+
+                if let placemark = try? await geocoder.reverseGeocodeLocation(
+                    location,
+                    preferredLocale: Locale(identifier: "ko_KR")
+                ).first,
+                   let resolvedName = Self.locationName(
+                       administrativeArea: placemark.administrativeArea,
+                       locality: placemark.locality,
+                       subAdministrativeArea: placemark.subAdministrativeArea,
+                       subLocality: placemark.subLocality,
+                       country: placemark.country
+                   ),
+                   !Task.isCancelled {
+                    self.locationName = resolvedName
+                }
             } catch is CancellationError {
                 return
             } catch {
@@ -146,6 +163,39 @@ final class WeatherService: NSObject, ObservableObject {
             weatherCode: payload.current.weatherCode,
             isDay: payload.current.isDay == 1
         )
+    }
+
+    nonisolated static func locationName(
+        administrativeArea: String?,
+        locality: String?,
+        subAdministrativeArea: String?,
+        subLocality: String?,
+        country: String?
+    ) -> String? {
+        let regionalComponents = [
+            administrativeArea,
+            locality,
+            subAdministrativeArea,
+            subLocality
+        ]
+        .compactMap { value -> String? in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        .reduce(into: [String]()) { result, component in
+            guard !result.contains(where: {
+                $0.compare(component, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            }) else { return }
+            result.append(component)
+        }
+
+        if !regionalComponents.isEmpty {
+            return regionalComponents.joined(separator: " ")
+        }
+
+        let trimmedCountry = country?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedCountry?.isEmpty == false ? trimmedCountry : nil
     }
 }
 

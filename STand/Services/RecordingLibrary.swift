@@ -21,7 +21,9 @@ struct RecordingClip: Identifiable, Hashable {
         guard isMerged else { return nil }
         let name = url.deletingPathExtension().lastPathComponent
         if name.contains("-today-merged") { return "오늘 녹음 합본" }
-        if name.contains("-selected-merged") { return "선택 녹음 합본" }
+        if name.contains("-selected-merged") {
+            return createdAt.formatted(.dateTime.hour().minute().second())
+        }
         return "합친 녹음"
     }
 }
@@ -35,6 +37,7 @@ enum RecordingMergeError: LocalizedError {
     case notEnoughRecordings
     case missingAudioTrack
     case cannotCreateExporter
+    case cannotDeleteSources(String)
     case exportFailed(String)
 
     var errorDescription: String? {
@@ -45,6 +48,8 @@ enum RecordingMergeError: LocalizedError {
             "오디오가 없는 녹음이 포함되어 있습니다."
         case .cannotCreateExporter:
             "합친 녹음 파일을 만들 수 없습니다."
+        case .cannotDeleteSources(let message):
+            "합본은 만들었지만 원본 일부를 삭제하지 못했습니다. \(message)"
         case .exportFailed(let message):
             "녹음을 합치지 못했습니다. \(message)"
         }
@@ -116,6 +121,14 @@ final class RecordingLibrary: ObservableObject {
         reload()
     }
 
+    func delete(_ selectedClips: [RecordingClip]) throws {
+        let availableURLs = Set(clips.map(\.url))
+        for clip in selectedClips where availableURLs.contains(clip.url) {
+            try FileManager.default.removeItem(at: clip.url)
+        }
+        reload()
+    }
+
     func deleteAll() {
         for clip in clips {
             try? FileManager.default.removeItem(at: clip.url)
@@ -123,7 +136,11 @@ final class RecordingLibrary: ObservableObject {
         reload()
     }
 
-    func merge(_ selectedClips: [RecordingClip], kind: RecordingMergeKind) async throws -> RecordingClip {
+    func merge(
+        _ selectedClips: [RecordingClip],
+        kind: RecordingMergeKind,
+        deleteSources: Bool = false
+    ) async throws -> RecordingClip {
         let availableURLs = Set(mergeableClips.map(\.url))
         let sourceClips = selectedClips
             .filter { availableURLs.contains($0.url) }
@@ -141,6 +158,18 @@ final class RecordingLibrary: ObservableObject {
             gapDuration: 0.5
         )
         reload()
+
+        guard clips.contains(where: { $0.url == outputURL }) else {
+            throw RecordingMergeError.cannotCreateExporter
+        }
+
+        if deleteSources {
+            do {
+                try delete(sourceClips)
+            } catch {
+                throw RecordingMergeError.cannotDeleteSources(error.localizedDescription)
+            }
+        }
 
         guard let mergedClip = clips.first(where: { $0.url == outputURL }) else {
             throw RecordingMergeError.cannotCreateExporter
