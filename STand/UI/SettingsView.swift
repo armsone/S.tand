@@ -255,6 +255,7 @@ private struct ClockFontFlipPreview: View {
                 .minimumScaleFactor(0.7)
                 .foregroundStyle(.white.opacity(0.88))
                 .offset(y: choice.clockVerticalOffset(size: 38))
+                .mask(FlipTextSplitMask(gap: 2.5))
         }
         .frame(width: 78, height: 58)
     }

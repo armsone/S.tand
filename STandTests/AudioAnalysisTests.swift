@@ -170,6 +170,65 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(bottomRight.y, 540)
     }
 
+    func testSavedPanelStaysAboveBottomControlsAfterWholeScreenScaling() {
+        let canvasSize = CGSize(width: 393, height: 852)
+        let insets = EdgeInsets(top: 123, leading: 14, bottom: 218, trailing: 14)
+        let panelSize = CGSize(width: 240, height: 38)
+        let screenScale = 1.35
+        let result = PanelEditingPolicy.clampedTransform(
+            PanelTransform(x: 0, y: 0.44, scale: 1),
+            panelSize: panelSize,
+            canvasSize: canvasSize,
+            insets: insets,
+            screenScale: screenScale
+        )
+        let renderedCenterY = canvasSize.height / 2 + result.y * canvasSize.height * screenScale
+        let renderedHalfHeight = panelSize.height * result.scale * screenScale / 2
+
+        XCTAssertLessThanOrEqual(
+            renderedCenterY + renderedHalfHeight,
+            canvasSize.height - insets.bottom + 0.001
+        )
+    }
+
+    func testShrunkScreenStillUsesEditorButtonBoundaryForPanelMovement() {
+        let canvasSize = CGSize(width: 393, height: 852)
+        let insets = EdgeInsets(top: 123, leading: 14, bottom: 218, trailing: 14)
+        let panelSize = CGSize(width: 240, height: 38)
+        let result = PanelEditingPolicy.clampedTransform(
+            PanelTransform(x: 0, y: 0.44, scale: 1),
+            panelSize: panelSize,
+            canvasSize: canvasSize,
+            insets: insets,
+            screenScale: 0.7
+        )
+        let editorCenterY = canvasSize.height / 2 + result.y * canvasSize.height
+
+        XCTAssertLessThanOrEqual(
+            editorCenterY + panelSize.height / 2,
+            canvasSize.height - insets.bottom + 0.001
+        )
+    }
+
+    func testPinchMaximumScaleStopsBeforePanelsCrossVerticalControls() {
+        var layout = StandScreenLayout.portrait
+        layout.brightnessRule = .init(x: 0, y: 0.2)
+        let canvas = CGSize(width: 393, height: 852)
+        let insets = EdgeInsets(top: 123, leading: 14, bottom: 218, trailing: 14)
+        let maximum = PanelEditingPolicy.maximumScreenScale(
+            layout: layout,
+            isPortrait: true,
+            canvasSize: canvas,
+            insets: insets,
+            hardLimit: 1.35
+        )
+        let bottomEdge = canvas.height / 2
+            + (CGFloat(layout.brightnessRule.y) * canvas.height
+                + 38 * layout.brightnessRule.scale / 2) * maximum
+
+        XCTAssertLessThanOrEqual(bottomEdge, canvas.height - insets.bottom + 0.001)
+    }
+
     func testBrightnessLeftOfThresholdIsSleepingAndRightIsStand() {
         XCTAssertEqual(
             EnvironmentDisplayMode.resolve(brightness: 0.2, threshold: 0.5),

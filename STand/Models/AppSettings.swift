@@ -70,16 +70,16 @@ enum ClockFontChoice: String, Codable, CaseIterable, Identifiable {
 
     func clockVerticalOffset(size: CGFloat) -> CGFloat {
         let adjustmentAt64Points: CGFloat = switch self {
-        case .systemRounded: 0
-        case .pretendard: 1
-        case .kakaoBigSans: 2
-        case .nanumGothic: 2
-        case .tenada: 5
-        case .blackHanSans: 7
-        case .doHyeon: 4
-        case .paperlogyBold: 1
-        case .nexonLv1Gothic: 2
-        case .poppins: 0
+        case .systemRounded: -1.5
+        case .pretendard: 0
+        case .kakaoBigSans: -3
+        case .nanumGothic: 1.5
+        case .tenada: 8
+        case .blackHanSans: 1.5
+        case .doHyeon: 2.5
+        case .paperlogyBold: 0
+        case .nexonLv1Gothic: 3.5
+        case .poppins: 0.5
         }
         return adjustmentAt64Points * size / 64
     }
@@ -137,7 +137,46 @@ struct StandScreenLayout: Codable, Equatable {
     var date: PanelTransform
     var status: PanelTransform
     var brightnessRule: PanelTransform
+    var battery: PanelTransform
     var weatherGroupIDs: [Int]
+
+    init(
+        weatherIcon: PanelTransform,
+        weatherTemperature: PanelTransform,
+        weatherCondition: PanelTransform,
+        date: PanelTransform,
+        status: PanelTransform,
+        brightnessRule: PanelTransform,
+        battery: PanelTransform = .init(x: 0, y: 0.18),
+        weatherGroupIDs: [Int]
+    ) {
+        self.weatherIcon = weatherIcon
+        self.weatherTemperature = weatherTemperature
+        self.weatherCondition = weatherCondition
+        self.date = date
+        self.status = status
+        self.brightnessRule = brightnessRule
+        self.battery = battery
+        self.weatherGroupIDs = weatherGroupIDs
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case weatherIcon, weatherTemperature, weatherCondition
+        case date, status, brightnessRule, battery, weatherGroupIDs
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        weatherIcon = try values.decode(PanelTransform.self, forKey: .weatherIcon)
+        weatherTemperature = try values.decode(PanelTransform.self, forKey: .weatherTemperature)
+        weatherCondition = try values.decode(PanelTransform.self, forKey: .weatherCondition)
+        date = try values.decode(PanelTransform.self, forKey: .date)
+        status = try values.decode(PanelTransform.self, forKey: .status)
+        brightnessRule = try values.decode(PanelTransform.self, forKey: .brightnessRule)
+        battery = try values.decodeIfPresent(PanelTransform.self, forKey: .battery)
+            ?? .init(x: 0, y: 0.18)
+        weatherGroupIDs = try values.decode([Int].self, forKey: .weatherGroupIDs)
+    }
 
     static let portrait = StandScreenLayout(
         weatherIcon: .init(x: -0.22, y: -0.24),
@@ -146,6 +185,7 @@ struct StandScreenLayout: Codable, Equatable {
         date: .init(x: 0, y: 0.10),
         status: .init(x: 0, y: 0.15),
         brightnessRule: .init(x: 0, y: 0.21),
+        battery: .init(x: 0, y: 0.15),
         weatherGroupIDs: [0, 1, 2]
     )
 
@@ -156,6 +196,7 @@ struct StandScreenLayout: Codable, Equatable {
         date: .init(x: 0, y: 0.18),
         status: .init(x: 0, y: 0.25),
         brightnessRule: .init(x: 0, y: 0.32),
+        battery: .init(x: 0, y: 0.18),
         weatherGroupIDs: [0, 1, 2]
     )
 }

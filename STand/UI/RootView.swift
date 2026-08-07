@@ -89,6 +89,8 @@ struct RootView: View {
     @State private var editingLayout = StandScreenLayout.portrait
     @State private var editingIsPortrait = true
     @State private var currentIsPortrait = true
+    @State private var currentCanvasSize = CGSize.zero
+    @State private var currentProtectedInsets = EdgeInsets()
 
     init(model: StandViewModel) {
         _model = ObservedObject(wrappedValue: model)
@@ -162,7 +164,9 @@ struct RootView: View {
                             get: { settings.value.brightnessModeThreshold },
                             set: { settings.value.brightnessModeThreshold = $0 }
                         ),
+                        screenScale: settings.value.clockScale,
                         currentBrightness: model.displayBrightness,
+                        batteryText: silhouetteBatteryText,
                         onReset: {
                             editingLayout = editingIsPortrait ? .portrait : .landscape
                         },
@@ -172,7 +176,13 @@ struct RootView: View {
                     .zIndex(20)
                 }
             }
-            .onAppear { currentIsPortrait = isPortrait }
+            .onAppear {
+                currentIsPortrait = isPortrait
+                updateCanvasMetrics(proxy: proxy, isPortrait: isPortrait)
+            }
+            .onChange(of: proxy.size) { _, _ in
+                updateCanvasMetrics(proxy: proxy, isPortrait: isPortrait)
+            }
             .onChange(of: isPortrait) { _, value in currentIsPortrait = value }
         }
         .contentShape(Rectangle())
@@ -298,19 +308,7 @@ struct RootView: View {
     }
 
     private func silhouetteInfo(isPortrait: Bool, canvasSize: CGSize) -> some View {
-        ZStack {
-            clockAndWeather(isPortrait: isPortrait, isDimmed: true, canvasSize: canvasSize)
-
-            Label(
-                silhouetteBatteryText,
-                systemImage: model.batteryStatus.isCharging
-                    ? "battery.100percent.bolt"
-                    : "battery.50percent"
-            )
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.white.opacity(settings.value.silhouetteIntensity * 0.72))
-            .offset(y: (isPortrait ? 92 : 116) * settings.value.clockScale / 2 + 52)
-        }
+        clockAndWeather(isPortrait: isPortrait, isDimmed: true, canvasSize: canvasSize)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
@@ -337,6 +335,10 @@ struct RootView: View {
             clockFont: settings.value.clockFont,
             hourMode: settings.value.clockHourMode,
             statusText: dashboardStatusText,
+            batteryText: silhouetteBatteryText,
+            batterySystemImage: model.batteryStatus.isCharging
+                ? "battery.100percent.bolt"
+                : "battery.50percent",
             currentBrightness: model.displayBrightness,
             brightnessThreshold: Binding(
                 get: { settings.value.brightnessModeThreshold },
@@ -350,7 +352,7 @@ struct RootView: View {
             return "현재 상태 · 슬리핑 모드"
         }
         return switch model.lampPhase {
-        case .off: "현재 상태 · 스탠드 대기"
+        case .off: "현재 상태 · 잠자기 모드"
         case .holding: "현재 상태 · 스탠드 모드"
         case .fading: "현재 상태 · 스탠드 감광 중"
         }
@@ -502,7 +504,18 @@ struct RootView: View {
                     clockScaleGestureStart = startingScale
                 }
 
-                let scale = min(1.35, max(0.7, startingScale * Double(magnification)))
+                let requestedScale = max(0.7, startingScale * Double(magnification))
+                let layout = currentIsPortrait
+                    ? settings.value.portraitLayout
+                    : settings.value.landscapeLayout
+                let maximumScale = PanelEditingPolicy.maximumScreenScale(
+                    layout: layout,
+                    isPortrait: currentIsPortrait,
+                    canvasSize: currentCanvasSize,
+                    insets: currentProtectedInsets,
+                    hardLimit: 1.35
+                )
+                let scale = min(max(maximumScale, startingScale), requestedScale)
                 settings.value.clockScale = scale
                 clockScaleFeedbackTask?.cancel()
                 withAnimation(.easeOut(duration: 0.12)) {
@@ -514,6 +527,14 @@ struct RootView: View {
                 clockScaleGestureStart = nil
                 scheduleClockScaleFeedbackHide()
             }
+    }
+
+    private func updateCanvasMetrics(proxy: GeometryProxy, isPortrait: Bool) {
+        currentCanvasSize = proxy.size
+        currentProtectedInsets = PanelEditingPolicy.protectedInsets(
+            safeAreaInsets: proxy.safeAreaInsets,
+            isPortrait: isPortrait
+        )
     }
 
     private func scheduleBrightnessFeedbackHide() {
@@ -737,7 +758,7 @@ private struct BrightnessFeedbackView: View {
             Image(systemName: feedback.target == .lamp ? "sun.max.fill" : "moon.stars.fill")
                 .font(.title2)
 
-            Text(feedback.target == .lamp ? "화면 조명 밝기" : "실루엣 밝기")
+            Text(feedback.target == .lamp ? "화면 조명 밝기" : "슬리핑 모드 밝기")
                 .font(.caption.weight(.semibold))
 
             ProgressView(value: normalizedValue)
@@ -957,6 +978,8 @@ private struct DashboardCanvas: View {
     let clockFont: ClockFontChoice
     let hourMode: ClockHourMode
     let statusText: String
+    let batteryText: String
+    let batterySystemImage: String
     let currentBrightness: Double
     @Binding var brightnessThreshold: Double
 
@@ -988,6 +1011,15 @@ private struct DashboardCanvas: View {
                 )
                 .panelTransform(layout.brightnessRule, canvasSize: canvasSize)
                 .allowsHitTesting(!isDimmed)
+
+                if isDimmed {
+                    Label(batteryText, systemImage: batterySystemImage)
+                        .font(.caption.monospacedDigit())
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.white.opacity(0.04), in: Capsule())
+                        .panelTransform(layout.battery, canvasSize: canvasSize)
+                }
 
                 WeatherPanelCollection(
                     service: service,
@@ -1160,18 +1192,19 @@ private struct ScreenEditorView: View {
     @Binding var clockFont: ClockFontChoice
     @Binding var hourMode: ClockHourMode
     @Binding var threshold: Double
+    let screenScale: Double
     let currentBrightness: Double
+    let batteryText: String
     let onReset: () -> Void
     let onSave: () -> Void
     @State private var showFontPalette = false
 
     var body: some View {
         GeometryReader { proxy in
-            let protectedInsets = EdgeInsets(
-                top: proxy.safeAreaInsets.top + (isPortrait ? 76 : 66),
-                leading: isPortrait ? 14 : 24,
-                bottom: proxy.safeAreaInsets.bottom + (isPortrait ? 104 : 58),
-                trailing: isPortrait ? 14 : 24
+            let protectedInsets = PanelEditingPolicy.protectedInsets(
+                safeAreaInsets: proxy.safeAreaInsets,
+                isPortrait: isPortrait,
+                fontPaletteVisible: showFontPalette
             )
 
             ZStack {
@@ -1207,7 +1240,8 @@ private struct ScreenEditorView: View {
                 EditablePanel(
                     transform: $layout.date,
                     canvasSize: proxy.size,
-                    protectedInsets: protectedInsets
+                    protectedInsets: protectedInsets,
+                    screenScale: screenScale
                 ) {
                     Text(Date.now, format: .dateTime.month().day().weekday(.wide))
                         .font(.subheadline.weight(.medium))
@@ -1218,7 +1252,8 @@ private struct ScreenEditorView: View {
                 EditablePanel(
                     transform: $layout.status,
                     canvasSize: proxy.size,
-                    protectedInsets: protectedInsets
+                    protectedInsets: protectedInsets,
+                    screenScale: screenScale
                 ) {
                     Text("현재 상태 · 스탠드 모드")
                         .font(.caption.weight(.medium))
@@ -1229,13 +1264,27 @@ private struct ScreenEditorView: View {
                 EditablePanel(
                     transform: $layout.brightnessRule,
                     canvasSize: proxy.size,
-                    protectedInsets: protectedInsets
+                    protectedInsets: protectedInsets,
+                    screenScale: screenScale
                 ) {
                     BrightnessRuleBar(
                         currentBrightness: currentBrightness,
                         threshold: $threshold,
                         isDimmed: false
                     )
+                }
+
+                EditablePanel(
+                    transform: $layout.battery,
+                    canvasSize: proxy.size,
+                    protectedInsets: protectedInsets,
+                    screenScale: screenScale
+                ) {
+                    Label(batteryText, systemImage: "battery.100percent.bolt")
+                        .font(.caption.monospacedDigit())
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.white.opacity(0.08), in: Capsule())
                 }
 
                 if showFontPalette {
@@ -1285,6 +1334,7 @@ private struct ScreenEditorView: View {
                 transform: weatherBinding(for: groupID),
                 canvasSize: canvasSize,
                 protectedInsets: protectedInsets,
+                screenScale: screenScale,
                 onEnded: { mergeWeatherGroup(groupID, canvasSize: canvasSize) }
             ) {
                 WeatherGroupPanel(
@@ -1405,6 +1455,23 @@ private struct ScreenEditorView: View {
 }
 
 enum PanelEditingPolicy {
+    static func protectedInsets(
+        safeAreaInsets: EdgeInsets,
+        isPortrait: Bool,
+        fontPaletteVisible: Bool = false
+    ) -> EdgeInsets {
+        let controlBoundary = safeAreaInsets.bottom + (isPortrait ? 184 : 84)
+        let fontPaletteBoundary = safeAreaInsets.bottom + (isPortrait ? 250 : 148)
+        return EdgeInsets(
+            top: safeAreaInsets.top + (isPortrait ? 76 : 66),
+            leading: isPortrait ? 14 : 24,
+            bottom: fontPaletteVisible
+                ? max(controlBoundary, fontPaletteBoundary)
+                : controlBoundary,
+            trailing: isPortrait ? 14 : 24
+        )
+    }
+
     static func shouldSnapToVerticalCenter(centerOffset: CGFloat, panelWidth: CGFloat) -> Bool {
         panelWidth > 0 && abs(centerOffset) <= panelWidth * 0.05
     }
@@ -1434,6 +1501,75 @@ enum PanelEditingPolicy {
             y: min(maximumY, max(minimumY, proposed.y))
         )
     }
+
+    static func clampedTransform(
+        _ transform: PanelTransform,
+        panelSize: CGSize,
+        canvasSize: CGSize,
+        insets: EdgeInsets,
+        screenScale: Double
+    ) -> PanelTransform {
+        guard canvasSize.width > 0, canvasSize.height > 0, panelSize != .zero else {
+            return transform
+        }
+
+        // 편집 화면 자체와 저장 후 전체 확대 화면 중 더 큰 쪽을 기준으로 제한한다.
+        // 전체 화면이 축소된 상태에서도 편집 패널이 버튼 경계를 넘어가지 않는다.
+        let groupScale = max(1, screenScale)
+        let renderedSize = CGSize(
+            width: panelSize.width * transform.scale * groupScale,
+            height: panelSize.height * transform.scale * groupScale
+        )
+        let proposedCenter = CGPoint(
+            x: canvasSize.width / 2 + transform.x * canvasSize.width * groupScale,
+            y: canvasSize.height / 2 + transform.y * canvasSize.height * groupScale
+        )
+        let center = clampedCenter(
+            proposedCenter,
+            panelSize: renderedSize,
+            canvasSize: canvasSize,
+            insets: insets
+        )
+        var result = transform
+        result.x = (center.x - canvasSize.width / 2) / (canvasSize.width * groupScale)
+        result.y = (center.y - canvasSize.height / 2) / (canvasSize.height * groupScale)
+        return result
+    }
+
+    static func maximumScreenScale(
+        layout: StandScreenLayout,
+        isPortrait: Bool,
+        canvasSize: CGSize,
+        insets: EdgeInsets,
+        hardLimit: Double
+    ) -> Double {
+        guard canvasSize.height > 0 else { return hardLimit }
+        let canvasCenterY = canvasSize.height / 2
+        let topRoom = max(0, canvasCenterY - insets.top)
+        let bottomRoom = max(0, canvasSize.height - insets.bottom - canvasCenterY)
+        let weatherHeight: CGFloat = (isPortrait ? 282 : 370) / 3
+        let panels: [(PanelTransform, CGFloat)] = [
+            (layout.weatherIcon, weatherHeight),
+            (layout.weatherTemperature, weatherHeight),
+            (layout.weatherCondition, weatherHeight),
+            (layout.date, 36),
+            (layout.status, 36),
+            (layout.brightnessRule, 38),
+            (layout.battery, 36),
+            (.init(x: 0, y: 0), isPortrait ? 92 : 116)
+        ]
+
+        var maximum = hardLimit
+        for (transform, baseHeight) in panels {
+            let centerOffset = CGFloat(transform.y) * canvasSize.height
+            let halfHeight = baseHeight * transform.scale / 2
+            let topReach = halfHeight - centerOffset
+            let bottomReach = halfHeight + centerOffset
+            if topReach > 0 { maximum = min(maximum, Double(topRoom / topReach)) }
+            if bottomReach > 0 { maximum = min(maximum, Double(bottomRoom / bottomReach)) }
+        }
+        return max(0.7, maximum)
+    }
 }
 
 private struct EditablePanelSizeKey: PreferenceKey {
@@ -1448,6 +1584,7 @@ private struct EditablePanel<Content: View>: View {
     @Binding var transform: PanelTransform
     let canvasSize: CGSize
     let protectedInsets: EdgeInsets
+    let screenScale: Double
     var onEnded: () -> Void = {}
     @ViewBuilder let content: () -> Content
     @State private var dragStart: PanelTransform?
@@ -1461,7 +1598,13 @@ private struct EditablePanel<Content: View>: View {
                     Color.clear.preference(key: EditablePanelSizeKey.self, value: proxy.size)
                 }
             }
-            .onPreferenceChange(EditablePanelSizeKey.self) { panelSize = $0 }
+            .onPreferenceChange(EditablePanelSizeKey.self) { measuredSize in
+                panelSize = measuredSize
+                constrainToEditableArea(panelSize: measuredSize)
+            }
+            .onChange(of: protectedInsets.bottom) { _, _ in
+                constrainToEditableArea()
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(.orange.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4]))
@@ -1504,23 +1647,14 @@ private struct EditablePanel<Content: View>: View {
     }
 
 
-    private func constrainToEditableArea() {
-        let scaledSize = CGSize(
-            width: panelSize.width * transform.scale,
-            height: panelSize.height * transform.scale
-        )
-        let proposedCenter = CGPoint(
-            x: canvasSize.width / 2 + transform.x * canvasSize.width,
-            y: canvasSize.height / 2 + transform.y * canvasSize.height
-        )
-        let center = PanelEditingPolicy.clampedCenter(
-            proposedCenter,
-            panelSize: scaledSize,
+    private func constrainToEditableArea(panelSize measuredSize: CGSize? = nil) {
+        transform = PanelEditingPolicy.clampedTransform(
+            transform,
+            panelSize: measuredSize ?? panelSize,
             canvasSize: canvasSize,
-            insets: protectedInsets
+            insets: protectedInsets,
+            screenScale: screenScale
         )
-        transform.x = (center.x - canvasSize.width / 2) / canvasSize.width
-        transform.y = (center.y - canvasSize.height / 2) / canvasSize.height
     }
 }
 
@@ -1542,6 +1676,7 @@ private struct FontMiniClock: View {
         Text(value)
             .font(choice.font(size: 20))
             .offset(y: choice.clockVerticalOffset(size: 20))
+            .mask(FlipTextSplitMask(gap: 2))
             .frame(width: 38, height: 30)
             .background(FlipPanelSurface(isDimmed: false, cornerRadius: 7, splitGap: 2))
     }
@@ -1605,7 +1740,7 @@ private struct NightClock: View {
             return "현재 상태 · 밝은 환경으로 판단해 자동 감광 보류 중"
         }
         return switch phase {
-        case .off: "대기 상태 · 박수 또는 화면 탭을 기다리는 중"
+        case .off: "잠자기 모드 · 박수 또는 화면 탭을 기다리는 중"
         case .holding: "현재 상태 · 조명 켜짐 · 탭하면 자연스럽게 어두워짐"
         case .fading: "현재 상태 · 화면 조명이 서서히 어두워지는 중"
         }
@@ -1680,11 +1815,23 @@ private struct FlipClockCard: View {
                 .contentTransition(.numericText())
                 .animation(.snappy(duration: 0.42), value: value)
                 .offset(y: clockFont.clockVerticalOffset(size: isPortrait ? 64 : 82))
+                .mask(FlipTextSplitMask(gap: isPortrait ? 4 : 3))
         }
         .frame(
             width: isPortrait ? 126 : 164,
             height: isPortrait ? 92 : 116
         )
+    }
+}
+
+struct FlipTextSplitMask: View {
+    let gap: CGFloat
+
+    var body: some View {
+        VStack(spacing: gap) {
+            Rectangle()
+            Rectangle()
+        }
     }
 }
 
