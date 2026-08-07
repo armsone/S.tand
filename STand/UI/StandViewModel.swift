@@ -209,6 +209,30 @@ final class StandViewModel: ObservableObject {
         }
     }
 
+    func beginManualLampAdjustment() {
+        guard isNightSessionActive else { return }
+        lampTask?.cancel()
+        lampPhase = .holding
+        activeLampMaximumIntensity = settings.value.lampIntensity
+        lampIntensity = settings.value.lampIntensity
+        syncTorch()
+    }
+
+    func updateManualLampBrightness(_ value: Double) {
+        guard isNightSessionActive else { return }
+        let intensity = min(1, max(0.15, value))
+        settings.value.lampIntensity = intensity
+        activeLampMaximumIntensity = intensity
+        lampPhase = .holding
+        lampIntensity = intensity
+        syncTorch()
+    }
+
+    func endManualLampAdjustment() {
+        guard isNightSessionActive else { return }
+        activateLamp()
+    }
+
     private func syncTorch() {
         guard settings.value.torchEnabled, isNightSessionActive, lampPhase != .off else {
             torch.turnOff()
@@ -227,9 +251,16 @@ final class StandViewModel: ObservableObject {
 
     var orientationControlTitle: String {
         switch orientationPreference {
-        case .automatic: "화면 방향 고정"
-        case .portrait: "세로 고정 해제"
-        case .landscape: "가로 고정 해제"
+        case .automatic: "현재 방향 고정하기"
+        case .portrait, .landscape: "기기 회전 따르기"
+        }
+    }
+
+    var orientationControlStatus: String {
+        switch orientationPreference {
+        case .automatic: "현재: 자동 회전"
+        case .portrait: "현재: 세로 고정"
+        case .landscape: "현재: 가로 고정"
         }
     }
 

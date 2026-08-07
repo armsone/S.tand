@@ -20,6 +20,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertFalse(settings.torchEnabled)
         XCTAssertEqual(settings.torchIntensity, 0.25)
         XCTAssertFalse(settings.wakeOnSleepSound)
+        XCTAssertEqual(settings.silhouetteIntensity, 0.035)
     }
 
     func testOrientationPreferenceRoundTripsThroughSettingsEncoding() throws {
@@ -33,6 +34,7 @@ final class AudioAnalysisTests: XCTestCase {
 
     func testTorchAndSoundWakeSettingsRoundTrip() throws {
         let settings = AppSettings(
+            silhouetteIntensity: 0.08,
             torchEnabled: true,
             torchIntensity: 0.4,
             wakeOnSleepSound: true
@@ -44,6 +46,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertTrue(decoded.torchEnabled)
         XCTAssertEqual(decoded.torchIntensity, 0.4)
         XCTAssertTrue(decoded.wakeOnSleepSound)
+        XCTAssertEqual(decoded.silhouetteIntensity, 0.08)
     }
 
     func testBatteryProtectionOnlyStopsWhenLowAndUnplugged() {
@@ -344,7 +347,7 @@ final class AudioAnalysisTests: XCTestCase {
     }
 
     @MainActor
-    func testRecordingLibraryMergesClipsChronologically() async throws {
+    func testRecordingLibraryMergesSelectedAndTodayClipsChronologically() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -355,23 +358,33 @@ final class AudioAnalysisTests: XCTestCase {
         )
         let olderURL = directory.appendingPathComponent("sleep-sound-20260807-010000-000.m4a")
         let newerURL = directory.appendingPathComponent("sleep-sound-20260807-020000-000.m4a")
+        let previousDayURL = directory.appendingPathComponent("sleep-sound-20260806-230000-000.m4a")
         try writeAudioFile(at: newerURL, format: format, bufferCount: 3)
         try writeAudioFile(at: olderURL, format: format, bufferCount: 2)
+        try writeAudioFile(at: previousDayURL, format: format, bufferCount: 4)
 
         let library = RecordingLibrary(directory: directory)
-        let originalDuration = library.totalDuration
-        let merged = try await library.mergeAll()
+        let older = try XCTUnwrap(library.clips.first { $0.url == olderURL })
+        let previousDay = try XCTUnwrap(library.clips.first { $0.url == previousDayURL })
+        let selectedDuration = older.duration + previousDay.duration
+        let selectedMerge = try await library.merge([older, previousDay], kind: .selected)
 
-        XCTAssertTrue(merged.isMerged)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: merged.url.path))
-        XCTAssertEqual(library.clips.count, 3)
-        XCTAssertEqual(merged.duration, originalDuration, accuracy: 0.08)
+        XCTAssertEqual(selectedMerge.mergedTitle, "선택 녹음 합본")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: selectedMerge.url.path))
+        XCTAssertEqual(library.clips.count, 4)
+        XCTAssertEqual(selectedMerge.duration, selectedDuration, accuracy: 0.08)
 
-        let replacement = try await library.mergeAll()
-        XCTAssertNotEqual(replacement.url, merged.url)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: merged.url.path))
-        XCTAssertEqual(library.clips.count, 3)
-        XCTAssertEqual(replacement.duration, originalDuration, accuracy: 0.08)
+        let mergeDate = try XCTUnwrap(
+            Calendar.current.date(from: DateComponents(year: 2026, month: 8, day: 7, hour: 12))
+        )
+        let todayDuration = library.mergeableClips(on: mergeDate).reduce(0) { $0 + $1.duration }
+        let todayMerge = try await library.mergeToday(on: mergeDate)
+
+        XCTAssertEqual(todayMerge.mergedTitle, "오늘 녹음 합본")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: todayMerge.url.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: selectedMerge.url.path))
+        XCTAssertEqual(library.clips.count, 5)
+        XCTAssertEqual(todayMerge.duration, todayDuration, accuracy: 0.08)
     }
 
     private func writeAudioFile(

@@ -12,6 +12,19 @@ struct RecordingClip: Identifiable, Hashable {
     var isMerged: Bool {
         url.deletingPathExtension().lastPathComponent.hasSuffix("-merged")
     }
+
+    var mergedTitle: String? {
+        guard isMerged else { return nil }
+        let name = url.deletingPathExtension().lastPathComponent
+        if name.contains("-today-merged") { return "오늘 녹음 합본" }
+        if name.contains("-selected-merged") { return "선택 녹음 합본" }
+        return "합친 녹음"
+    }
+}
+
+enum RecordingMergeKind: String {
+    case selected
+    case today
 }
 
 enum RecordingMergeError: LocalizedError {
@@ -59,8 +72,12 @@ final class RecordingLibrary: ObservableObject {
         clips.reduce(0) { $0 + $1.duration }
     }
 
-    var mergeableClipCount: Int {
-        clips.lazy.filter { !$0.isMerged }.count
+    var mergeableClips: [RecordingClip] {
+        clips.filter { !$0.isMerged }
+    }
+
+    func mergeableClips(on date: Date, calendar: Calendar = .current) -> [RecordingClip] {
+        mergeableClips.filter { calendar.isDate($0.createdAt, inSameDayAs: date) }
     }
 
     func reload() {
@@ -99,29 +116,30 @@ final class RecordingLibrary: ObservableObject {
         reload()
     }
 
-    func mergeAll() async throws -> RecordingClip {
-        let sourceClips = clips
-            .filter { !$0.isMerged }
+    func merge(_ selectedClips: [RecordingClip], kind: RecordingMergeKind) async throws -> RecordingClip {
+        let availableURLs = Set(mergeableClips.map(\.url))
+        let sourceClips = selectedClips
+            .filter { availableURLs.contains($0.url) }
             .sorted { $0.createdAt < $1.createdAt }
         guard sourceClips.count >= 2 else {
             throw RecordingMergeError.notEnoughRecordings
         }
-        let previousMergedClips = clips.filter(\.isMerged)
 
-        let outputURL = directory.appendingPathComponent(Self.mergedFileName())
+        let outputURL = directory.appendingPathComponent(Self.mergedFileName(kind: kind))
         try await RecordingMerger.merge(
             sourceURLs: sourceClips.map(\.url),
             outputURL: outputURL
         )
-        for clip in previousMergedClips where clip.url != outputURL {
-            try? FileManager.default.removeItem(at: clip.url)
-        }
         reload()
 
         guard let mergedClip = clips.first(where: { $0.url == outputURL }) else {
             throw RecordingMergeError.cannotCreateExporter
         }
         return mergedClip
+    }
+
+    func mergeToday(on date: Date = Date(), calendar: Calendar = .current) async throws -> RecordingClip {
+        try await merge(mergeableClips(on: date, calendar: calendar), kind: .today)
     }
 
     private func makeClip(_ url: URL) -> RecordingClip? {
@@ -146,12 +164,12 @@ final class RecordingLibrary: ObservableObject {
         return formatter.date(from: timestamp)
     }
 
-    private static func mergedFileName(date: Date = Date()) -> String {
+    private static func mergedFileName(kind: RecordingMergeKind, date: Date = Date()) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
         let nonce = UUID().uuidString.prefix(8).lowercased()
-        return "sleep-sound-\(formatter.string(from: date))-\(nonce)-merged.m4a"
+        return "sleep-sound-\(formatter.string(from: date))-\(nonce)-\(kind.rawValue)-merged.m4a"
     }
 }
 

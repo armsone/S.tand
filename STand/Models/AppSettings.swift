@@ -27,6 +27,7 @@ enum OrientationPreference: String, Codable, CaseIterable, Identifiable {
 
 struct AppSettings: Codable, Equatable {
     var lampIntensity = 0.72
+    var silhouetteIntensity = 0.035
     var holdDuration = 60.0
     var fadeDuration = 30.0
     var soundThresholdDB: Float = -36
@@ -40,6 +41,7 @@ struct AppSettings: Codable, Equatable {
 
     init(
         lampIntensity: Double = 0.72,
+        silhouetteIntensity: Double = 0.035,
         holdDuration: Double = 60,
         fadeDuration: Double = 30,
         soundThresholdDB: Float = -36,
@@ -50,6 +52,7 @@ struct AppSettings: Codable, Equatable {
         wakeOnSleepSound: Bool = false
     ) {
         self.lampIntensity = lampIntensity
+        self.silhouetteIntensity = silhouetteIntensity
         self.holdDuration = holdDuration
         self.fadeDuration = fadeDuration
         self.soundThresholdDB = soundThresholdDB
@@ -62,6 +65,7 @@ struct AppSettings: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case lampIntensity
+        case silhouetteIntensity
         case holdDuration
         case fadeDuration
         case soundThresholdDB
@@ -75,6 +79,10 @@ struct AppSettings: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         lampIntensity = try container.decodeIfPresent(Double.self, forKey: .lampIntensity) ?? 0.72
+        silhouetteIntensity = try container.decodeIfPresent(
+            Double.self,
+            forKey: .silhouetteIntensity
+        ) ?? 0.035
         holdDuration = try container.decodeIfPresent(Double.self, forKey: .holdDuration) ?? 60
         fadeDuration = try container.decodeIfPresent(Double.self, forKey: .fadeDuration) ?? 30
         soundThresholdDB = try container.decodeIfPresent(Float.self, forKey: .soundThresholdDB) ?? -36
@@ -128,7 +136,7 @@ enum AppVersion {
     }
 
     static var build: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.3.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.4.0"
     }
 
     static var display: String { "\(marketing) (\(build))" }

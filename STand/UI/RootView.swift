@@ -8,18 +8,38 @@ private enum PresentedSheet: String, Identifiable {
     var id: String { rawValue }
 }
 
+private enum BrightnessTarget: Equatable {
+    case lamp
+    case silhouette
+}
+
+private struct BrightnessDragState {
+    let target: BrightnessTarget
+    let startingValue: Double
+}
+
+private struct BrightnessFeedback: Equatable {
+    let target: BrightnessTarget
+    let value: Double
+}
+
 struct RootView: View {
     @ObservedObject private var model: StandViewModel
     @ObservedObject private var audio: AudioCaptureService
     @ObservedObject private var library: RecordingLibrary
+    @ObservedObject private var settings: SettingsStore
     @Environment(\.scenePhase) private var scenePhase
     @State private var presentedSheet: PresentedSheet?
     @State private var didInitialize = false
+    @State private var brightnessDragState: BrightnessDragState?
+    @State private var brightnessFeedback: BrightnessFeedback?
+    @State private var brightnessFeedbackTask: Task<Void, Never>?
 
     init(model: StandViewModel) {
         _model = ObservedObject(wrappedValue: model)
         _audio = ObservedObject(wrappedValue: model.audio)
         _library = ObservedObject(wrappedValue: model.library)
+        _settings = ObservedObject(wrappedValue: model.settings)
     }
 
     var body: some View {
@@ -47,15 +67,15 @@ struct RootView: View {
 
                 statusBanners
                     .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
+
+                if let brightnessFeedback {
+                    BrightnessFeedbackView(feedback: brightnessFeedback)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture {
-            if model.isNightSessionActive {
-                model.activateLamp()
-                model.revealControls()
-            }
-        }
+        .gesture(verticalBrightnessGesture.exclusively(before: tapToWakeGesture))
         .persistentSystemOverlays(.hidden)
         .sheet(item: $presentedSheet) { sheet in
             switch sheet {
@@ -163,6 +183,7 @@ struct RootView: View {
                 isPortrait: isPortrait,
                 isDimmed: true
             )
+            .opacity(settings.value.silhouetteIntensity / 0.035)
 
             Label(
                 silhouetteBatteryText,
@@ -171,7 +192,7 @@ struct RootView: View {
                     : "battery.50percent"
             )
             .font(.caption.monospacedDigit())
-            .foregroundStyle(.white.opacity(0.025))
+            .foregroundStyle(.white.opacity(settings.value.silhouetteIntensity * 0.72))
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -180,6 +201,77 @@ struct RootView: View {
     private var silhouetteBatteryText: String {
         guard let level = model.batteryStatus.level else { return "배터리 --%" }
         return "배터리 \(Int((level * 100).rounded()))%"
+    }
+
+    private var verticalBrightnessGesture: some Gesture {
+        DragGesture(minimumDistance: 10)
+            .onChanged { value in
+                guard abs(value.translation.height) > abs(value.translation.width) else { return }
+
+                let state: BrightnessDragState
+                if let brightnessDragState {
+                    state = brightnessDragState
+                } else {
+                    let target: BrightnessTarget = model.isDisplayDark ? .silhouette : .lamp
+                    let startingValue = target == .silhouette
+                        ? settings.value.silhouetteIntensity
+                        : settings.value.lampIntensity
+                    state = BrightnessDragState(target: target, startingValue: startingValue)
+                    brightnessDragState = state
+                    if target == .lamp {
+                        model.beginManualLampAdjustment()
+                    }
+                }
+
+                let change = -value.translation.height / 280
+                let adjustedValue: Double
+                switch state.target {
+                case .lamp:
+                    adjustedValue = min(1, max(0.15, state.startingValue + change))
+                    model.updateManualLampBrightness(adjustedValue)
+                case .silhouette:
+                    adjustedValue = min(0.12, max(0.005, state.startingValue + change * 0.12))
+                    settings.value.silhouetteIntensity = adjustedValue
+                }
+
+                brightnessFeedbackTask?.cancel()
+                withAnimation(.easeOut(duration: 0.12)) {
+                    brightnessFeedback = BrightnessFeedback(
+                        target: state.target,
+                        value: adjustedValue
+                    )
+                }
+            }
+            .onEnded { _ in
+                if brightnessDragState?.target == .lamp {
+                    model.endManualLampAdjustment()
+                }
+                brightnessDragState = nil
+                scheduleBrightnessFeedbackHide()
+            }
+    }
+
+    private var tapToWakeGesture: some Gesture {
+        TapGesture()
+            .onEnded {
+                if model.isNightSessionActive {
+                    model.activateLamp()
+                    model.revealControls()
+                }
+            }
+    }
+
+    private func scheduleBrightnessFeedbackHide() {
+        brightnessFeedbackTask?.cancel()
+        brightnessFeedbackTask = Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    brightnessFeedback = nil
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -192,21 +284,20 @@ struct RootView: View {
     }
 
     private var landscapeBottomControls: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             if model.isNightSessionActive {
                 if model.controlsVisible {
-                    nightControlButtons(compact: false)
+                    nightControlButtons(compact: true)
                 } else {
                     tapToControlText
                 }
             }
 
-            Spacer(minLength: 16)
-
             if model.controlsVisible || !model.isNightSessionActive {
                 secondaryControlButtons
             }
         }
+        .frame(maxWidth: .infinity)
         .animation(.easeOut(duration: 0.3), value: model.controlsVisible)
     }
 
@@ -236,21 +327,24 @@ struct RootView: View {
     @ViewBuilder
     private func nightControlButtons(compact: Bool) -> some View {
         ControlButton(
-            title: compact ? "켜기" : "불빛 켜기",
-            systemImage: "lightbulb.fill"
+            title: compact ? "조명 켜기" : "화면 조명 켜기",
+            systemImage: "lightbulb.fill",
+            hint: "화면을 밝히고 설정에 따라 플래시도 켭니다"
         ) {
             model.activateLamp()
         }
         ControlButton(
-            title: compact ? "끄기" : "지금 끄기",
-            systemImage: "moon.fill"
+            title: "화면 어둡게",
+            systemImage: "moon.fill",
+            hint: "화면 조명과 플래시를 지금 끕니다"
         ) {
             model.turnOffLamp(animated: true)
         }
         ControlButton(
-            title: compact ? "종료" : "세션 종료",
+            title: compact ? "감지 종료" : "취침 감지 종료",
             systemImage: "stop.circle.fill",
-            role: .destructive
+            role: .destructive,
+            hint: "소리 감지와 자동 녹음을 종료합니다"
         ) {
             model.stopNightSession()
         }
@@ -260,17 +354,27 @@ struct RootView: View {
     private var secondaryControlButtons: some View {
         ControlButton(
             title: model.orientationControlTitle,
-            systemImage: model.orientationControlImage
+            systemImage: model.orientationControlImage,
+            status: model.orientationControlStatus,
+            hint: model.orientationPreference == .automatic
+                ? "현재 화면 방향으로 고정합니다"
+                : "화면 방향이 iPhone 회전을 따르도록 바꿉니다"
         ) {
             model.toggleOrientationLock()
         }
         ControlButton(
-            title: library.clips.isEmpty ? "수면 소리" : "수면 소리 \(library.clips.count)",
-            systemImage: "waveform"
+            title: "녹음 목록 보기",
+            systemImage: "waveform",
+            status: library.clips.isEmpty ? "저장된 녹음 없음" : "\(library.clips.count)개 저장됨",
+            hint: "저장된 수면 소리 녹음 목록을 엽니다"
         ) {
             presentedSheet = .recordings
         }
-        ControlButton(title: "설정", systemImage: "slider.horizontal.3") {
+        ControlButton(
+            title: "설정 열기",
+            systemImage: "slider.horizontal.3",
+            hint: "밝기, 감지, 녹음 설정을 엽니다"
+        ) {
             presentedSheet = .settings
         }
     }
@@ -356,6 +460,44 @@ private struct LampBackground: View {
     }
 }
 
+private struct BrightnessFeedbackView: View {
+    let feedback: BrightnessFeedback
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: feedback.target == .lamp ? "sun.max.fill" : "moon.stars.fill")
+                .font(.title2)
+
+            Text(feedback.target == .lamp ? "화면 조명 밝기" : "실루엣 밝기")
+                .font(.caption.weight(.semibold))
+
+            ProgressView(value: normalizedValue)
+                .tint(.white.opacity(0.82))
+                .frame(width: 120)
+
+            Text("\(displayPercent)%")
+                .font(.caption2.monospacedDigit())
+        }
+        .foregroundStyle(.white.opacity(feedback.target == .lamp ? 0.86 : 0.34))
+        .padding(.horizontal, 22)
+        .padding(.vertical, 16)
+        .background(.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var normalizedValue: Double {
+        switch feedback.target {
+        case .lamp: (feedback.value - 0.15) / 0.85
+        case .silhouette: (feedback.value - 0.005) / 0.115
+        }
+    }
+
+    private var displayPercent: Int {
+        Int((normalizedValue * 100).rounded())
+    }
+}
+
 private struct NightClock: View {
     let phase: LampPhase
     let intensity: Double
@@ -391,9 +533,9 @@ private struct NightClock: View {
 
     private var statusText: String {
         switch phase {
-        case .off: "박수 또는 화면 탭을 기다리는 중"
-        case .holding: "불빛 켜짐"
-        case .fading: "불빛이 서서히 어두워지는 중"
+        case .off: "대기 상태 · 박수 또는 화면 탭을 기다리는 중"
+        case .holding: "현재 상태 · 화면 조명 켜짐"
+        case .fading: "현재 상태 · 화면 조명이 서서히 어두워지는 중"
         }
     }
 }
@@ -549,16 +691,38 @@ private struct ControlButton: View {
     let title: String
     let systemImage: String
     var role: ButtonRole? = nil
+    var status: String? = nil
+    var hint: String? = nil
     let action: () -> Void
 
     var body: some View {
         Button(role: role, action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.subheadline.weight(.semibold))
-                .padding(.horizontal, 4)
-                .frame(minHeight: 44)
+            VStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 19, weight: .semibold))
+                    .frame(width: 24, height: 22)
+
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.78)
+
+                if let status {
+                    Text(status)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.52))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, minHeight: 68)
         }
+        .frame(maxWidth: .infinity)
         .buttonStyle(.bordered)
         .tint(role == .destructive ? .red : .white.opacity(0.78))
+        .accessibilityHint(hint ?? "")
     }
 }
