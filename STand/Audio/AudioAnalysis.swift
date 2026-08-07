@@ -14,6 +14,107 @@ struct AudioDetection: Equatable {
     let isAboveSoundThreshold: Bool
 }
 
+enum SleepSoundKind: String, Equatable {
+    case snore
+    case movement
+    case other
+}
+
+struct SleepSoundFeatures: Equatable {
+    let rmsDB: Float
+    let peakDB: Float
+    let zeroCrossingRate: Double
+    let lowFrequencyRatio: Double
+    let duration: TimeInterval
+}
+
+struct SleepSoundClassification: Equatable {
+    let kind: SleepSoundKind
+    let confidence: Double
+    let duration: TimeInterval
+}
+
+struct SleepSoundClassifier {
+    private let releaseDuration: TimeInterval
+    private var isCollecting = false
+    private var soundDuration: TimeInterval = 0
+    private var silenceDuration: TimeInterval = 0
+    private var weightedCrestDB: Double = 0
+    private var weightedZeroCrossingRate: Double = 0
+    private var weightedLowFrequencyRatio: Double = 0
+
+    init(releaseDuration: TimeInterval = 0.18) {
+        self.releaseDuration = releaseDuration
+    }
+
+    mutating func analyze(
+        features: SleepSoundFeatures,
+        detection: AudioDetection
+    ) -> SleepSoundClassification? {
+        if detection.soundBegan, !isCollecting {
+            isCollecting = true
+        }
+        guard isCollecting else { return nil }
+
+        if detection.isAboveSoundThreshold {
+            silenceDuration = 0
+            soundDuration += features.duration
+            let crestDB = Double(features.peakDB - features.rmsDB)
+            weightedCrestDB += crestDB * features.duration
+            weightedZeroCrossingRate += features.zeroCrossingRate * features.duration
+            weightedLowFrequencyRatio += features.lowFrequencyRatio * features.duration
+            return nil
+        }
+
+        silenceDuration += features.duration
+        guard silenceDuration >= releaseDuration else { return nil }
+        let classification = classifyCurrentSound()
+        reset()
+        return classification
+    }
+
+    mutating func reset() {
+        isCollecting = false
+        soundDuration = 0
+        silenceDuration = 0
+        weightedCrestDB = 0
+        weightedZeroCrossingRate = 0
+        weightedLowFrequencyRatio = 0
+    }
+
+    private func classifyCurrentSound() -> SleepSoundClassification {
+        let duration = max(soundDuration, 0.001)
+        let crestDB = weightedCrestDB / duration
+        let zeroCrossingRate = weightedZeroCrossingRate / duration
+        let lowFrequencyRatio = weightedLowFrequencyRatio / duration
+
+        let movementScore = min(1, max(0,
+            (1.4 - duration) / 1.4 * 0.35
+            + max(0, crestDB - 7) / 14 * 0.25
+            + zeroCrossingRate / 0.28 * 0.2
+            + max(0, 0.5 - lowFrequencyRatio) / 0.5 * 0.2
+        ))
+        let snoreScore = min(1, max(0,
+            min(1, duration / 1.2) * 0.35
+            + lowFrequencyRatio * 0.4
+            + max(0, 0.2 - zeroCrossingRate) / 0.2 * 0.15
+            + max(0, 14 - crestDB) / 14 * 0.1
+        ))
+
+        if duration <= 1.5, movementScore >= 0.55, movementScore > snoreScore {
+            return SleepSoundClassification(kind: .movement, confidence: movementScore, duration: soundDuration)
+        }
+        if duration >= 0.45, lowFrequencyRatio >= 0.45, snoreScore >= 0.58 {
+            return SleepSoundClassification(kind: .snore, confidence: snoreScore, duration: soundDuration)
+        }
+        return SleepSoundClassification(
+            kind: .other,
+            confidence: max(movementScore, snoreScore),
+            duration: soundDuration
+        )
+    }
+}
+
 struct AudioEventDetector {
     var configuration: AudioDetectorConfiguration
 

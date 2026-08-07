@@ -21,8 +21,10 @@ final class AudioCaptureService: ObservableObject {
     @Published private(set) var normalizedLevel: Double = 0
     @Published private(set) var isWritingClip = false
     @Published private(set) var recordingErrorMessage: String?
+    @Published private(set) var lastClassifiedSound: SleepSoundClassification?
 
     var onClap: (() -> Void)?
+    var onSoundClassified: ((SleepSoundClassification) -> Void)?
     var onClipSaved: ((URL) -> Void)?
 
     private var engine = AVAudioEngine()
@@ -31,6 +33,7 @@ final class AudioCaptureService: ObservableObject {
     private var detector = AudioEventDetector(
         configuration: AudioDetectorConfiguration(soundThresholdDB: AppSettings.recommended.soundThresholdDB)
     )
+    private var soundClassifier = SleepSoundClassifier()
     private lazy var clipRecorder = ClipSegmentRecorder(
         directory: recordingsDirectory,
         onRecordingChanged: { [weak self] isRecording in
@@ -80,6 +83,7 @@ final class AudioCaptureService: ObservableObject {
                 clipRecorder.clearPreRoll()
             } else if recordingSettingChanged {
                 detector.reset()
+                soundClassifier.reset()
                 clipRecorder.clearPreRoll()
             }
         }
@@ -128,6 +132,7 @@ final class AudioCaptureService: ObservableObject {
         engine.stop()
         processingQueue.sync {
             detector.reset()
+            soundClassifier.reset()
             clipRecorder.finishCurrentClip()
             clipRecorder.clearPreRoll()
         }
@@ -217,6 +222,22 @@ final class AudioCaptureService: ObservableObject {
             if detection.clapDetected {
                 DispatchQueue.main.async { self.onClap?() }
             }
+            let features = copiedBuffer.sleepSoundFeatures(
+                rmsDB: levels.rmsDB,
+                peakDB: levels.peakDB
+            )
+            if let classification = soundClassifier.analyze(
+                features: features,
+                detection: detection
+            ) {
+                if recordingEnabled, classification.kind != .snore {
+                    clipRecorder.discardCurrentClip()
+                }
+                DispatchQueue.main.async {
+                    self.lastClassifiedSound = classification
+                    self.onSoundClassified?(classification)
+                }
+            }
 
             if recordingEnabled {
                 clipRecorder.process(buffer: copiedBuffer, detection: detection, now: now)
@@ -271,6 +292,7 @@ final class AudioCaptureService: ObservableObject {
                 clipRecorder.finishCurrentClip()
                 clipRecorder.clearPreRoll()
                 detector.reset()
+                soundClassifier.reset()
             }
             normalizedLevel = 0
             state = .stopped
@@ -311,6 +333,7 @@ final class AudioCaptureService: ObservableObject {
             clipRecorder.finishCurrentClip()
             clipRecorder.clearPreRoll()
             detector.reset()
+            soundClassifier.reset()
         }
 
         if recreateEngine {
@@ -372,6 +395,46 @@ private extension AVAudioPCMBuffer {
         return AudioLevels(
             rmsDB: 20 * log10(max(rms, floor)),
             peakDB: 20 * log10(max(peak, floor))
+        )
+    }
+
+    func sleepSoundFeatures(rmsDB: Float, peakDB: Float) -> SleepSoundFeatures {
+        guard let samples = floatChannelData?[0], frameLength > 1 else {
+            return SleepSoundFeatures(
+                rmsDB: rmsDB,
+                peakDB: peakDB,
+                zeroCrossingRate: 0,
+                lowFrequencyRatio: 0,
+                duration: 0
+            )
+        }
+
+        let count = Int(frameLength)
+        let sampleRate = format.sampleRate
+        let smoothing = exp(-2 * Double.pi * 400 / sampleRate)
+        var lowPassSample = 0.0
+        var lowEnergy = 0.0
+        var totalEnergy = 0.0
+        var zeroCrossings = 0
+        var previousSample = Double(samples[0])
+
+        for index in 0..<count {
+            let sample = Double(samples[index])
+            lowPassSample = (1 - smoothing) * sample + smoothing * lowPassSample
+            lowEnergy += lowPassSample * lowPassSample
+            totalEnergy += sample * sample
+            if index > 0, (sample >= 0) != (previousSample >= 0) {
+                zeroCrossings += 1
+            }
+            previousSample = sample
+        }
+
+        return SleepSoundFeatures(
+            rmsDB: rmsDB,
+            peakDB: peakDB,
+            zeroCrossingRate: Double(zeroCrossings) / Double(count - 1),
+            lowFrequencyRatio: totalEnergy > 0 ? min(1, lowEnergy / totalEnergy) : 0,
+            duration: Double(frameLength) / sampleRate
         )
     }
 }
@@ -472,6 +535,21 @@ final class ClipSegmentRecorder {
 
         if let savedURL {
             onSaved(savedURL)
+        }
+    }
+
+    func discardCurrentClip() {
+        guard file != nil else { return }
+        file = nil
+        let discardedURL = currentURL
+        currentURL = nil
+        startedAt = nil
+        silenceDeadline = nil
+        clearPreRoll()
+        onRecordingChanged(false)
+
+        if let discardedURL {
+            try? FileManager.default.removeItem(at: discardedURL)
         }
     }
 

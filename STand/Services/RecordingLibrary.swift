@@ -8,6 +8,30 @@ struct RecordingClip: Identifiable, Hashable {
     let duration: TimeInterval
 
     var id: URL { url }
+
+    var isMerged: Bool {
+        url.deletingPathExtension().lastPathComponent.hasSuffix("-merged")
+    }
+}
+
+enum RecordingMergeError: LocalizedError {
+    case notEnoughRecordings
+    case missingAudioTrack
+    case cannotCreateExporter
+    case exportFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .notEnoughRecordings:
+            "합치려면 녹음이 두 개 이상 필요합니다."
+        case .missingAudioTrack:
+            "오디오가 없는 녹음이 포함되어 있습니다."
+        case .cannotCreateExporter:
+            "합친 녹음 파일을 만들 수 없습니다."
+        case .exportFailed(let message):
+            "녹음을 합치지 못했습니다. \(message)"
+        }
+    }
 }
 
 @MainActor
@@ -33,6 +57,10 @@ final class RecordingLibrary: ObservableObject {
 
     var totalDuration: TimeInterval {
         clips.reduce(0) { $0 + $1.duration }
+    }
+
+    var mergeableClipCount: Int {
+        clips.lazy.filter { !$0.isMerged }.count
     }
 
     func reload() {
@@ -71,6 +99,31 @@ final class RecordingLibrary: ObservableObject {
         reload()
     }
 
+    func mergeAll() async throws -> RecordingClip {
+        let sourceClips = clips
+            .filter { !$0.isMerged }
+            .sorted { $0.createdAt < $1.createdAt }
+        guard sourceClips.count >= 2 else {
+            throw RecordingMergeError.notEnoughRecordings
+        }
+        let previousMergedClips = clips.filter(\.isMerged)
+
+        let outputURL = directory.appendingPathComponent(Self.mergedFileName())
+        try await RecordingMerger.merge(
+            sourceURLs: sourceClips.map(\.url),
+            outputURL: outputURL
+        )
+        for clip in previousMergedClips where clip.url != outputURL {
+            try? FileManager.default.removeItem(at: clip.url)
+        }
+        reload()
+
+        guard let mergedClip = clips.first(where: { $0.url == outputURL }) else {
+            throw RecordingMergeError.cannotCreateExporter
+        }
+        return mergedClip
+    }
+
     private func makeClip(_ url: URL) -> RecordingClip? {
         guard let file = try? AVAudioFile(forReading: url) else { return nil }
         let duration = Double(file.length) / file.processingFormat.sampleRate
@@ -92,17 +145,85 @@ final class RecordingLibrary: ObservableObject {
         formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
         return formatter.date(from: timestamp)
     }
+
+    private static func mergedFileName(date: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        let nonce = UUID().uuidString.prefix(8).lowercased()
+        return "sleep-sound-\(formatter.string(from: date))-\(nonce)-merged.m4a"
+    }
+}
+
+private enum RecordingMerger {
+    static func merge(sourceURLs: [URL], outputURL: URL) async throws {
+        let composition = AVMutableComposition()
+        guard let compositionTrack = composition.addMutableTrack(
+            withMediaType: .audio,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw RecordingMergeError.cannotCreateExporter
+        }
+
+        var insertionTime = CMTime.zero
+        for sourceURL in sourceURLs {
+            let asset = AVURLAsset(url: sourceURL)
+            let duration = try await asset.load(.duration)
+            guard let sourceTrack = try await asset.loadTracks(withMediaType: .audio).first else {
+                throw RecordingMergeError.missingAudioTrack
+            }
+            try compositionTrack.insertTimeRange(
+                CMTimeRange(start: .zero, duration: duration),
+                of: sourceTrack,
+                at: insertionTime
+            )
+            insertionTime = CMTimeAdd(insertionTime, duration)
+        }
+
+        guard let exporter = AVAssetExportSession(
+            asset: composition,
+            presetName: AVAssetExportPresetAppleM4A
+        ) else {
+            throw RecordingMergeError.cannotCreateExporter
+        }
+
+        try? FileManager.default.removeItem(at: outputURL)
+        exporter.outputURL = outputURL
+        exporter.outputFileType = .m4a
+        exporter.shouldOptimizeForNetworkUse = true
+
+        await withCheckedContinuation { continuation in
+            exporter.exportAsynchronously {
+                continuation.resume()
+            }
+        }
+
+        guard exporter.status == .completed else {
+            try? FileManager.default.removeItem(at: outputURL)
+            throw RecordingMergeError.exportFailed(
+                exporter.error?.localizedDescription ?? "알 수 없는 오류"
+            )
+        }
+    }
 }
 
 @MainActor
 final class RecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published private(set) var playingURL: URL?
+    @Published private(set) var currentTime: TimeInterval = 0
+    @Published private(set) var duration: TimeInterval = 0
+    @Published private(set) var isPlaying = false
 
     private var player: AVAudioPlayer?
+    private var progressTimer: Timer?
 
     func toggle(_ clip: RecordingClip) {
         if playingURL == clip.url {
-            stop()
+            if player?.isPlaying == true {
+                pause()
+            } else {
+                resume()
+            }
             return
         }
 
@@ -116,16 +237,61 @@ final class RecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             player.play()
             self.player = player
             playingURL = clip.url
+            duration = player.duration
+            currentTime = 0
+            isPlaying = true
+            startProgressTimer()
         } catch {
             stop()
         }
+    }
+
+    func seek(to time: TimeInterval) {
+        guard let player else { return }
+        let clampedTime = min(max(0, time), player.duration)
+        player.currentTime = clampedTime
+        currentTime = clampedTime
+    }
+
+    func pause() {
+        player?.pause()
+        isPlaying = false
+        progressTimer?.invalidate()
+        progressTimer = nil
+    }
+
+    func resume() {
+        guard let player else { return }
+        player.play()
+        isPlaying = true
+        startProgressTimer()
     }
 
     func stop() {
         player?.stop()
         player = nil
         playingURL = nil
+        currentTime = 0
+        duration = 0
+        isPlaying = false
+        progressTimer?.invalidate()
+        progressTimer = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func startProgressTimer() {
+        progressTimer?.invalidate()
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let player = self.player else { return }
+                self.currentTime = player.currentTime
+                self.duration = player.duration
+                self.isPlaying = player.isPlaying
+            }
+        }
+        if let progressTimer {
+            RunLoop.main.add(progressTimer, forMode: .common)
+        }
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {

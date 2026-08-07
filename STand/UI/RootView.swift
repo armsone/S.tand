@@ -13,8 +13,8 @@ struct RootView: View {
     @ObservedObject private var audio: AudioCaptureService
     @ObservedObject private var library: RecordingLibrary
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("didCompleteWelcome") private var didCompleteWelcome = false
     @State private var presentedSheet: PresentedSheet?
+    @State private var didInitialize = false
 
     init(model: StandViewModel) {
         _model = ObservedObject(wrappedValue: model)
@@ -23,26 +23,36 @@ struct RootView: View {
     }
 
     var body: some View {
-        ZStack {
-            LampBackground(intensity: model.lampIntensity)
+        GeometryReader { proxy in
+            let isPortrait = proxy.size.height > proxy.size.width
 
-            VStack(spacing: 0) {
-                topBar
-                Spacer(minLength: 12)
-                centerContent
-                Spacer(minLength: 12)
-                bottomControls
+            ZStack {
+                LampBackground(intensity: model.lampIntensity)
+
+                if model.isDisplayDark, didInitialize {
+                    silhouetteInfo(isPortrait: isPortrait)
+                        .transition(.opacity)
+                }
+
+                VStack(spacing: 0) {
+                    topBar(isPortrait: isPortrait)
+                    Spacer(minLength: 12)
+                    centerContent(isPortrait: isPortrait)
+                    Spacer(minLength: 12)
+                    bottomControls(isPortrait: isPortrait)
+                }
+                .padding(.horizontal, isPortrait ? 20 : 32)
+                .padding(.vertical, isPortrait ? 18 : 20)
+                .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
+
+                statusBanners
+                    .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
             }
-            .padding(.horizontal, 32)
-            .padding(.vertical, 20)
-
-            statusBanners
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            if model.controlsVisible {
+            if model.isNightSessionActive {
                 model.activateLamp()
-            } else {
                 model.revealControls()
             }
         }
@@ -58,6 +68,11 @@ struct RootView: View {
                 SettingsView(store: model.settings)
             }
         }
+        .onAppear {
+            model.appDidBecomeActive()
+            model.startNightSession()
+            didInitialize = true
+        }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:
@@ -70,30 +85,32 @@ struct RootView: View {
         }
     }
 
-    private var topBar: some View {
+    private func topBar(isPortrait: Bool) -> some View {
         HStack(spacing: 16) {
             Text("S.tand")
                 .font(.system(.headline, design: .rounded, weight: .semibold))
                 .tracking(0.8)
 
             if model.isNightSessionActive {
-                AudioStatusPill(audio: audio)
+                AudioStatusPill(audio: audio, compact: isPortrait)
             }
 
             Spacer()
 
-            if model.isNightSessionActive {
+            if model.isNightSessionActive, !isPortrait {
                 Label(
                     audio.isWritingClip ? "수면 소리 저장 중" : "기기에서 소리 분석 중",
                     systemImage: audio.isWritingClip ? "waveform.badge.mic" : "ear"
                 )
                 .font(.caption.weight(.medium))
                 .foregroundStyle(audio.isWritingClip ? Color.red.opacity(0.9) : Color.white.opacity(0.55))
-            } else {
+            } else if !model.isNightSessionActive {
                 Text("버전 \(AppVersion.display)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.white.opacity(0.42))
             }
+
+            BatteryStatusPill(status: model.batteryStatus)
         }
         .foregroundStyle(.white.opacity(0.82))
         .opacity(model.controlsVisible || !model.isNightSessionActive ? 1 : 0.18)
@@ -101,14 +118,14 @@ struct RootView: View {
     }
 
     @ViewBuilder
-    private var centerContent: some View {
-        if !didCompleteWelcome {
-            WelcomePanel {
-                didCompleteWelcome = true
-                model.startNightSession()
-            }
-        } else if model.isNightSessionActive {
-            NightClock(phase: model.lampPhase, intensity: model.lampIntensity)
+    private func centerContent(isPortrait: Bool) -> some View {
+        if model.isNightSessionActive {
+            NightClock(
+                phase: model.lampPhase,
+                intensity: model.lampIntensity,
+                isPortrait: isPortrait,
+                isDimmed: false
+            )
         } else {
             VStack(spacing: 16) {
                 Image(systemName: "moon.stars.fill")
@@ -134,49 +151,143 @@ struct RootView: View {
                 .tint(.orange)
                 .accessibilityHint("자동 잠금을 막고 소리 감지를 시작합니다")
             }
+            .padding(.horizontal, isPortrait ? 8 : 0)
         }
     }
 
-    private var bottomControls: some View {
+    private func silhouetteInfo(isPortrait: Bool) -> some View {
+        VStack(spacing: 14) {
+            NightClock(
+                phase: .off,
+                intensity: 0,
+                isPortrait: isPortrait,
+                isDimmed: true
+            )
+
+            Label(
+                silhouetteBatteryText,
+                systemImage: model.batteryStatus.isCharging
+                    ? "battery.100percent.bolt"
+                    : "battery.50percent"
+            )
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.white.opacity(0.025))
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var silhouetteBatteryText: String {
+        guard let level = model.batteryStatus.level else { return "배터리 --%" }
+        return "배터리 \(Int((level * 100).rounded()))%"
+    }
+
+    @ViewBuilder
+    private func bottomControls(isPortrait: Bool) -> some View {
+        if isPortrait {
+            portraitBottomControls
+        } else {
+            landscapeBottomControls
+        }
+    }
+
+    private var landscapeBottomControls: some View {
         HStack(spacing: 12) {
             if model.isNightSessionActive {
                 if model.controlsVisible {
-                    ControlButton(title: "불빛 켜기", systemImage: "lightbulb.fill") {
-                        model.activateLamp()
-                    }
-                    ControlButton(title: "지금 끄기", systemImage: "moon.fill") {
-                        model.turnOffLamp(animated: true)
-                    }
-                    ControlButton(title: "세션 종료", systemImage: "stop.circle.fill", role: .destructive) {
-                        model.stopNightSession()
-                    }
+                    nightControlButtons(compact: false)
                 } else {
-                    Text("화면을 탭해 제어")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.24))
-                        .padding(.vertical, 12)
+                    tapToControlText
                 }
             }
 
             Spacer(minLength: 16)
 
             if model.controlsVisible || !model.isNightSessionActive {
-                ControlButton(
-                    title: library.clips.isEmpty ? "수면 소리" : "수면 소리 \(library.clips.count)",
-                    systemImage: "waveform"
-                ) {
-                    presentedSheet = .recordings
+                secondaryControlButtons
+            }
+        }
+        .animation(.easeOut(duration: 0.3), value: model.controlsVisible)
+    }
+
+    private var portraitBottomControls: some View {
+        VStack(spacing: 10) {
+            if model.isNightSessionActive {
+                if model.controlsVisible {
+                    HStack(spacing: 8) {
+                        nightControlButtons(compact: true)
+                    }
+                } else {
+                    tapToControlText
                 }
-                ControlButton(title: "설정", systemImage: "slider.horizontal.3") {
-                    presentedSheet = .settings
+            }
+
+            if model.controlsVisible || !model.isNightSessionActive {
+                HStack(spacing: 10) {
+                    Spacer(minLength: 0)
+                    secondaryControlButtons
+                    Spacer(minLength: 0)
                 }
             }
         }
         .animation(.easeOut(duration: 0.3), value: model.controlsVisible)
     }
 
+    @ViewBuilder
+    private func nightControlButtons(compact: Bool) -> some View {
+        ControlButton(
+            title: compact ? "켜기" : "불빛 켜기",
+            systemImage: "lightbulb.fill"
+        ) {
+            model.activateLamp()
+        }
+        ControlButton(
+            title: compact ? "끄기" : "지금 끄기",
+            systemImage: "moon.fill"
+        ) {
+            model.turnOffLamp(animated: true)
+        }
+        ControlButton(
+            title: compact ? "종료" : "세션 종료",
+            systemImage: "stop.circle.fill",
+            role: .destructive
+        ) {
+            model.stopNightSession()
+        }
+    }
+
+    @ViewBuilder
+    private var secondaryControlButtons: some View {
+        ControlButton(
+            title: model.orientationControlTitle,
+            systemImage: model.orientationControlImage
+        ) {
+            model.toggleOrientationLock()
+        }
+        ControlButton(
+            title: library.clips.isEmpty ? "수면 소리" : "수면 소리 \(library.clips.count)",
+            systemImage: "waveform"
+        ) {
+            presentedSheet = .recordings
+        }
+        ControlButton(title: "설정", systemImage: "slider.horizontal.3") {
+            presentedSheet = .settings
+        }
+    }
+
+    private var tapToControlText: some View {
+        Text("화면을 탭해 제어")
+            .font(.caption)
+            .foregroundStyle(.white.opacity(0.24))
+            .padding(.vertical, 12)
+    }
+
     private var statusBanners: some View {
         VStack {
+            if model.batteryProtectionActive {
+                batteryProtectionBanner
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
             if audio.microphoneAccess == .denied, model.isNightSessionActive {
                 microphoneDeniedBanner
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -192,6 +303,19 @@ struct RootView: View {
             Spacer()
         }
         .padding(.top, 12)
+    }
+
+    private var batteryProtectionBanner: some View {
+        Label(
+            model.batteryStatus.isCharging
+                ? "충전이 연결되었습니다. 취침 시작을 눌러 다시 시작하세요."
+                : "배터리가 20% 이하라 보호를 위해 감지와 불빛을 중지했습니다.",
+            systemImage: model.batteryStatus.isCharging ? "battery.100percent.bolt" : "battery.25percent"
+        )
+        .font(.subheadline.weight(.semibold))
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: Capsule())
     }
 
     private var microphoneDeniedBanner: some View {
@@ -235,26 +359,32 @@ private struct LampBackground: View {
 private struct NightClock: View {
     let phase: LampPhase
     let intensity: Double
+    let isPortrait: Bool
+    let isDimmed: Bool
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             VStack(spacing: 5) {
-                Text(context.date, format: .dateTime.hour().minute())
-                    .font(.system(size: 92, weight: .thin, design: .rounded))
-                    .monospacedDigit()
-                    .minimumScaleFactor(0.55)
-                    .lineLimit(1)
+                FlipClockFace(
+                    date: context.date,
+                    isPortrait: isPortrait,
+                    isDimmed: isDimmed
+                )
 
                 Text(context.date, format: .dateTime.month().day().weekday(.wide))
                     .font(.system(.subheadline, design: .rounded, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.48))
+                    .foregroundStyle(.white.opacity(isDimmed ? 0.035 : 0.48))
 
-                Text(statusText)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.36))
-                    .padding(.top, 6)
+                if !isDimmed {
+                    Text(statusText)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.36))
+                        .padding(.top, 6)
+                }
             }
-            .foregroundStyle(.white.opacity(max(0.12, min(0.88, 0.22 + intensity))))
+            .foregroundStyle(
+                .white.opacity(isDimmed ? 0.035 : max(0.12, min(0.88, 0.22 + intensity)))
+            )
             .accessibilityElement(children: .combine)
         }
     }
@@ -268,54 +398,70 @@ private struct NightClock: View {
     }
 }
 
-private struct WelcomePanel: View {
-    let start: () -> Void
+private struct FlipClockFace: View {
+    let date: Date
+    let isPortrait: Bool
+    let isDimmed: Bool
 
     var body: some View {
-        HStack(spacing: 28) {
-            VStack(alignment: .leading, spacing: 11) {
-                Text("밤에는 은은한 불빛,")
-                Text("잠든 동안에는 필요한 소리만.")
-                    .foregroundStyle(.orange)
-            }
-            .font(.system(.title2, design: .rounded, weight: .semibold))
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        HStack(spacing: isPortrait ? 8 : 12) {
+            FlipClockCard(
+                value: String(format: "%02d", components.hour ?? 0),
+                isPortrait: isPortrait,
+                isDimmed: isDimmed
+            )
+            Text(":")
+                .font(.system(size: isPortrait ? 48 : 62, weight: .ultraLight, design: .rounded))
+                .opacity(isDimmed ? 0.5 : 0.8)
+            FlipClockCard(
+                value: String(format: "%02d", components.minute ?? 0),
+                isPortrait: isPortrait,
+                isDimmed: isDimmed
+            )
+        }
+        .contentTransition(.numericText())
+        .animation(.easeInOut(duration: 0.35), value: components.minute)
+    }
+}
 
-            Divider()
-                .overlay(.white.opacity(0.12))
-                .frame(height: 112)
+private struct FlipClockCard: View {
+    let value: String
+    let isPortrait: Bool
+    let isDimmed: Bool
 
-            VStack(alignment: .leading, spacing: 9) {
-                Label("박수형 소리를 감지해 앱 불빛을 켭니다.", systemImage: "hands.clap.fill")
-                Label("지속되는 수면 소리 구간만 이 iPhone에 저장합니다.", systemImage: "waveform.badge.mic")
-                Label("잠금 버튼을 누르거나 앱을 종료하면 감지가 멈춥니다.", systemImage: "lock.fill")
-            }
-            .font(.subheadline)
-            .foregroundStyle(.white.opacity(0.64))
-
-            Button(action: start) {
-                VStack(spacing: 5) {
-                    Image(systemName: "bed.double.fill")
-                        .font(.title2)
-                    Text("추천 설정으로 시작")
-                        .font(.subheadline.weight(.semibold))
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: isPortrait ? 18 : 22, style: .continuous)
+                .fill(.white.opacity(isDimmed ? 0.012 : 0.075))
+                .overlay {
+                    RoundedRectangle(cornerRadius: isPortrait ? 18 : 22, style: .continuous)
+                        .stroke(.white.opacity(isDimmed ? 0.018 : 0.08), lineWidth: 1)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 14)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.orange)
+
+            Rectangle()
+                .fill(.black.opacity(isDimmed ? 0.35 : 0.42))
+                .frame(height: 1)
+
+            Text(value)
+                .font(.system(
+                    size: isPortrait ? 64 : 82,
+                    weight: .thin,
+                    design: .rounded
+                ))
+                .monospacedDigit()
+                .minimumScaleFactor(0.7)
         }
-        .padding(24)
-        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(.white.opacity(0.08), lineWidth: 1)
-        }
+        .frame(
+            width: isPortrait ? 126 : 164,
+            height: isPortrait ? 92 : 116
+        )
     }
 }
 
 private struct AudioStatusPill: View {
     @ObservedObject var audio: AudioCaptureService
+    let compact: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -323,16 +469,18 @@ private struct AudioStatusPill: View {
                 .fill(statusColor)
                 .frame(width: 7, height: 7)
 
-            GeometryReader { proxy in
-                Capsule()
-                    .fill(Color.white.opacity(0.12))
-                    .overlay(alignment: .leading) {
-                        Capsule()
-                            .fill(statusColor.opacity(0.9))
-                            .frame(width: max(3, proxy.size.width * audio.normalizedLevel))
-                    }
+            if !compact {
+                GeometryReader { proxy in
+                    Capsule()
+                        .fill(Color.white.opacity(0.12))
+                        .overlay(alignment: .leading) {
+                            Capsule()
+                                .fill(statusColor.opacity(0.9))
+                                .frame(width: max(3, proxy.size.width * audio.normalizedLevel))
+                        }
+                }
+                .frame(width: 44, height: 5)
             }
-            .frame(width: 44, height: 5)
 
             Text(statusText)
                 .font(.caption2.weight(.semibold))
@@ -340,6 +488,7 @@ private struct AudioStatusPill: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background(.white.opacity(0.07), in: Capsule())
+        .fixedSize(horizontal: true, vertical: false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(statusText)
     }
@@ -351,13 +500,48 @@ private struct AudioStatusPill: View {
     }
 
     private var statusText: String {
-        if audio.isWritingClip { return "저장 중" }
+        if audio.isWritingClip { return compact ? "저장" : "저장 중" }
         switch audio.state {
-        case .monitoring: return "감지 중"
-        case .starting: return "준비 중"
+        case .monitoring: return compact ? "감지" : "감지 중"
+        case .starting: return compact ? "준비" : "준비 중"
         case .failed: return "확인 필요"
         case .stopped: return "정지됨"
         }
+    }
+}
+
+private struct BatteryStatusPill: View {
+    let status: DeviceBatteryStatus
+
+    var body: some View {
+        Label(levelText, systemImage: systemImage)
+            .font(.caption2.monospacedDigit().weight(.semibold))
+            .foregroundStyle(status.shouldProtectBattery ? Color.orange : Color.white.opacity(0.72))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(.white.opacity(0.07), in: Capsule())
+            .fixedSize(horizontal: true, vertical: false)
+            .accessibilityLabel(accessibilityText)
+    }
+
+    private var levelText: String {
+        guard let level = status.level else { return "--%" }
+        return "\(Int((level * 100).rounded()))%"
+    }
+
+    private var systemImage: String {
+        if status.isCharging { return "battery.100percent.bolt" }
+        guard let level = status.level else { return "battery.0percent" }
+        return switch level {
+        case ...0.2: "battery.25percent"
+        case ...0.5: "battery.50percent"
+        case ...0.75: "battery.75percent"
+        default: "battery.100percent"
+        }
+    }
+
+    private var accessibilityText: String {
+        status.isCharging ? "배터리 \(levelText), 충전 중" : "배터리 \(levelText)"
     }
 }
 

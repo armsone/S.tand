@@ -7,6 +7,25 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("화면 방향") {
+                    Picker(
+                        "회전 방식",
+                        selection: Binding(
+                            get: { store.value.orientationPreference },
+                            set: { store.value.orientationPreference = $0 }
+                        )
+                    ) {
+                        ForEach(OrientationPreference.allCases) { preference in
+                            Label(preference.title, systemImage: preference.systemImage)
+                                .tag(preference)
+                        }
+                    }
+
+                    Text("기기 설정 따르기는 iPhone의 회전 상태를 따릅니다. 고정을 선택하면 앱을 다시 열어도 선택한 방향을 유지합니다.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("불빛") {
                     SettingSlider(
                         title: "최대 밝기",
@@ -28,6 +47,23 @@ struct SettingsView: View {
                         range: 5...120,
                         step: 5
                     )
+
+                    Toggle("화면 점등 시 플래시 사용", isOn: $store.value.torchEnabled)
+
+                    if store.value.torchEnabled {
+                        SettingSlider(
+                            title: "플래시 최대 밝기",
+                            valueText: "\(Int(store.value.torchIntensity * 100))%",
+                            value: $store.value.torchIntensity,
+                            range: 0.05...1
+                        )
+                    }
+
+                    Toggle("뒤척임 소리에 점등", isOn: $store.value.wakeOnSleepSound)
+
+                    Text("기기에서 소리 길이·저주파 비율·순간 피크를 분석해 뒤척임으로 추정할 때 점등합니다. 오분류될 수 있으며 플래시 사용도 켜져 있으면 함께 켜집니다.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("수면 소리") {
@@ -53,6 +89,7 @@ struct SettingsView: View {
                     Label("오디오는 이 iPhone에서 처리하고 로컬에만 저장합니다.", systemImage: "iphone.and.arrow.forward.inward")
                     Label("함께 있는 사람에게 녹음 사실을 먼저 알려 주세요.", systemImage: "person.2.fill")
                     Label("충전 중인 기기를 침구 아래에 두지 마세요.", systemImage: "thermometer.medium")
+                    Label("플래시는 열이 날 수 있으므로 기기를 가리지 마세요.", systemImage: "flashlight.on.fill")
                     Text("S.tand의 녹음은 수면 상태를 진단하는 의료 기능이 아닙니다.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)

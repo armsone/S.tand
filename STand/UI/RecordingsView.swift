@@ -6,6 +6,9 @@ struct RecordingsView: View {
     @StateObject private var player = RecordingPlayer()
     @Environment(\.dismiss) private var dismiss
     @State private var confirmsDeleteAll = false
+    @State private var confirmsMergeAll = false
+    @State private var isMerging = false
+    @State private var mergeErrorMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -27,20 +30,51 @@ struct RecordingsView: View {
                             .foregroundStyle(.secondary)
                         }
 
+                        if library.mergeableClipCount >= 2 {
+                            Section {
+                                Button {
+                                    confirmsMergeAll = true
+                                } label: {
+                                    HStack {
+                                        Label("전체 녹음을 하나로 합치기", systemImage: "waveform.path.badge.plus")
+                                        Spacer()
+                                        if isMerging {
+                                            ProgressView()
+                                        }
+                                    }
+                                }
+                                .disabled(playbackDisabled || isMerging)
+                            } footer: {
+                                Text("시간순으로 이어 붙인 새 녹음을 만듭니다. 기존 녹음은 그대로 보관됩니다.")
+                            }
+                        }
+
                         Section {
                             ForEach(library.clips) { clip in
                                 RecordingRow(
                                     clip: clip,
-                                    isPlaying: player.playingURL == clip.url,
+                                    isActive: player.playingURL == clip.url,
+                                    isPlaying: player.playingURL == clip.url && player.isPlaying,
                                     playbackDisabled: playbackDisabled,
                                     play: { player.toggle(clip) },
-                                    delete: { library.delete(clip) }
+                                    delete: {
+                                        if player.playingURL == clip.url {
+                                            player.stop()
+                                        }
+                                        library.delete(clip)
+                                    }
                                 )
                             }
                         } header: {
                             Text("\(library.clips.count)개 · 총 \(library.totalDuration.durationText)")
                         }
                     }
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let playingURL = player.playingURL,
+                   let clip = library.clips.first(where: { $0.url == playingURL }) {
+                    PlaybackProgressBar(clip: clip, player: player)
                 }
             }
             .navigationTitle("수면 소리")
@@ -69,14 +103,51 @@ struct RecordingsView: View {
             } message: {
                 Text("삭제한 녹음은 복구할 수 없습니다.")
             }
+            .confirmationDialog(
+                "전체 녹음을 하나로 합칠까요?",
+                isPresented: $confirmsMergeAll,
+                titleVisibility: .visible
+            ) {
+                Button("합친 녹음 만들기") {
+                    mergeAllRecordings()
+                }
+                Button("취소", role: .cancel) {}
+            } message: {
+                Text("녹음 시각 순서로 이어 붙입니다. 원본 파일은 삭제하지 않습니다.")
+            }
+            .alert(
+                "녹음을 합치지 못했습니다",
+                isPresented: Binding(
+                    get: { mergeErrorMessage != nil },
+                    set: { if !$0 { mergeErrorMessage = nil } }
+                )
+            ) {
+                Button("확인", role: .cancel) {}
+            } message: {
+                Text(mergeErrorMessage ?? "알 수 없는 오류가 발생했습니다.")
+            }
             .onAppear { library.reload() }
             .onDisappear { player.stop() }
+        }
+    }
+
+    private func mergeAllRecordings() {
+        isMerging = true
+        player.stop()
+        Task {
+            defer { isMerging = false }
+            do {
+                _ = try await library.mergeAll()
+            } catch {
+                mergeErrorMessage = error.localizedDescription
+            }
         }
     }
 }
 
 private struct RecordingRow: View {
     let clip: RecordingClip
+    let isActive: Bool
     let isPlaying: Bool
     let playbackDisabled: Bool
     let play: () -> Void
@@ -85,16 +156,16 @@ private struct RecordingRow: View {
     var body: some View {
         HStack(spacing: 14) {
             Button(action: play) {
-                Image(systemName: isPlaying ? "stop.fill" : "play.fill")
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .frame(width: 40, height: 40)
                     .background(Color.orange.opacity(0.14), in: Circle())
             }
             .buttonStyle(.plain)
             .disabled(playbackDisabled)
-            .accessibilityLabel(isPlaying ? "재생 중지" : "녹음 재생")
+            .accessibilityLabel(isPlaying ? "재생 일시 정지" : isActive ? "재생 계속" : "녹음 재생")
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(clip.createdAt, format: .dateTime.month().day().hour().minute().second())
+                Text(clip.isMerged ? "합친 녹음" : clip.createdAt.formatted(.dateTime.month().day().hour().minute().second()))
                     .font(.body.weight(.medium))
                 Text(clip.duration.durationText)
                     .font(.caption.monospacedDigit())
@@ -116,6 +187,56 @@ private struct RecordingRow: View {
             .buttonStyle(.plain)
             .accessibilityLabel("녹음 삭제")
         }
+    }
+}
+
+private struct PlaybackProgressBar: View {
+    let clip: RecordingClip
+    @ObservedObject var player: RecordingPlayer
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 10) {
+                Button {
+                    player.toggle(clip)
+                } label: {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(player.isPlaying ? "재생 일시 정지" : "재생 계속")
+
+                Slider(
+                    value: Binding(
+                        get: { player.currentTime },
+                        set: { player.seek(to: $0) }
+                    ),
+                    in: 0...max(player.duration, 0.01)
+                )
+                .tint(.orange)
+
+                Button {
+                    player.stop()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("재생 닫기")
+            }
+
+            HStack {
+                Text(player.currentTime.durationText)
+                Spacer()
+                Text(player.duration.durationText)
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
     }
 }
 
