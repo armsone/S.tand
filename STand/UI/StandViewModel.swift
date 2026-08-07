@@ -81,7 +81,9 @@ final class StandViewModel: ObservableObject {
     private var screenBrightnessSubscription: AnyCancellable?
     private var batterySubscriptions: Set<AnyCancellable> = []
     private let torch = TorchController()
+    private let motionMonitor = WakeMotionMonitor()
     private var activeLampMaximumIntensity = 1.0
+    private var monitoringPausedForPlayback = false
 
     init() {
         let settings = SettingsStore()
@@ -92,12 +94,14 @@ final class StandViewModel: ObservableObject {
         audio = AudioCaptureService(recordingsDirectory: library.directory)
 
         audio.onClap = { [weak self] in
-            self?.activateLamp()
+            guard let self, self.settings.value.multiStimulusWakeEnabled else { return }
+            self.activateLamp()
         }
         audio.onSoundClassified = { [weak self] classification in
             guard let self,
-                  classification.kind == .movement,
-                  self.settings.value.wakeOnSleepSound
+                  classification.kind != .snore,
+                  classification.confidence >= 0.42,
+                  self.settings.value.multiStimulusWakeEnabled
             else { return }
             self.activateLamp()
         }
@@ -106,6 +110,10 @@ final class StandViewModel: ObservableObject {
             self.library.add(url)
         }
         audio.configure(settings: settings.value)
+        motionMonitor.onMovement = { [weak self] in
+            guard let self, self.settings.value.multiStimulusWakeEnabled else { return }
+            self.activateLamp()
+        }
         orientationPreference = settings.value.orientationPreference
         OrientationController.shared.setPreference(settings.value.orientationPreference)
 
@@ -123,7 +131,15 @@ final class StandViewModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] notification in
                 guard let screen = notification.object as? UIScreen else { return }
-                self?.displayBrightness = Double(screen.brightness)
+                guard let self else { return }
+                let newBrightness = Double(screen.brightness)
+                let increase = newBrightness - displayBrightness
+                displayBrightness = newBrightness
+                if increase >= 0.12,
+                   isNightSessionActive,
+                   settings.value.multiStimulusWakeEnabled {
+                    activateLamp()
+                }
             }
 
         startBatteryMonitoring()
@@ -140,9 +156,11 @@ final class StandViewModel: ObservableObject {
         }
         batteryProtectionActive = false
         isNightSessionActive = true
+        monitoringPausedForPlayback = false
         UIApplication.shared.isIdleTimerDisabled = true
         audio.configure(settings: settings.value)
         audio.requestAccessAndStart()
+        motionMonitor.start()
         weather.refreshIfNeeded()
         controlsTask?.cancel()
         controlsVisible = false
@@ -153,6 +171,7 @@ final class StandViewModel: ObservableObject {
         guard isNightSessionActive else { return }
         isNightSessionActive = false
         audio.stop()
+        motionMonitor.stop()
         turnOffLamp(animated: true)
         controlsTask?.cancel()
         controlsVisible = true
@@ -167,7 +186,10 @@ final class StandViewModel: ObservableObject {
         UIApplication.shared.isIdleTimerDisabled = true
         OrientationController.shared.reapply()
         guard isNightSessionActive else { return }
-        audio.startIfAuthorized()
+        if !monitoringPausedForPlayback {
+            audio.startIfAuthorized()
+        }
+        motionMonitor.start()
         weather.refreshIfNeeded()
         controlsTask?.cancel()
         controlsVisible = false
@@ -179,6 +201,7 @@ final class StandViewModel: ObservableObject {
         torch.turnOff()
         guard isNightSessionActive else { return }
         audio.stop()
+        motionMonitor.stop()
     }
 
     func activateLamp() {
@@ -277,6 +300,19 @@ final class StandViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    func pauseMonitoringForPlayback() {
+        guard isNightSessionActive else { return }
+        monitoringPausedForPlayback = true
+        audio.stop()
+    }
+
+    func resumeMonitoringAfterPlayback() {
+        guard monitoringPausedForPlayback else { return }
+        monitoringPausedForPlayback = false
+        guard isNightSessionActive else { return }
+        audio.startIfAuthorized()
     }
 
     private var shouldPauseAutomaticDimming: Bool {
@@ -382,6 +418,7 @@ final class StandViewModel: ObservableObject {
         guard isNightSessionActive else { return }
         isNightSessionActive = false
         audio.stop()
+        motionMonitor.stop()
         turnOffLamp(animated: true)
         controlsTask?.cancel()
         controlsVisible = true

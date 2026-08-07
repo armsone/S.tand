@@ -31,6 +31,9 @@
 		B0000000000000000000001A /* BlackHanSans-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001A /* BlackHanSans-OFL.txt */; };
 		B0000000000000000000001B /* DoHyeon-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001B /* DoHyeon-OFL.txt */; };
 		B0000000000000000000001C /* WeatherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* WeatherService.swift */; };
+		B0000000000000000000001D /* WakeMotionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001D /* WakeMotionMonitor.swift */; };
+		B0000000000000000000001E /* STandWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001E /* STandWidget.swift */; };
+		B0000000000000000000001F /* STandWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F00000000000000000000203 /* STandWidget.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		B00000000000000000000101 /* AudioAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000101 /* AudioAnalysisTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -42,7 +45,28 @@
 			remoteGlobalIDString = A10000000000000000000001;
 			remoteInfo = STand;
 		};
+		A60000000000000000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000003;
+			remoteInfo = STandWidget;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A90000000000000000000001 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B0000000000000000000001F /* STandWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		F00000000000000000000001 /* STandApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STandApp.swift; sourceTree = "<group>"; };
@@ -71,9 +95,13 @@
 		F0000000000000000000001A /* BlackHanSans-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = BlackHanSans-OFL.txt; sourceTree = "<group>"; };
 		F0000000000000000000001B /* DoHyeon-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = DoHyeon-OFL.txt; sourceTree = "<group>"; };
 		F0000000000000000000001C /* WeatherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherService.swift; sourceTree = "<group>"; };
+		F0000000000000000000001D /* WakeMotionMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeMotionMonitor.swift; sourceTree = "<group>"; };
+		F0000000000000000000001E /* STandWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STandWidget.swift; sourceTree = "<group>"; };
+		F0000000000000000000001F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F00000000000000000000101 /* AudioAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAnalysisTests.swift; sourceTree = "<group>"; };
 		F00000000000000000000201 /* STand.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = STand.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000202 /* STandTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = STandTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F00000000000000000000203 /* STandWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = STandWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -91,6 +119,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A30000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -98,6 +133,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000002 /* STand */,
+				A2000000000000000000000E /* STandWidget */,
 				A20000000000000000000009 /* STandTests */,
 				A2000000000000000000000A /* Configuration */,
 				A2000000000000000000000B /* Products */,
@@ -147,6 +183,7 @@
 			children = (
 				F00000000000000000000005 /* RecordingLibrary.swift */,
 				F0000000000000000000001C /* WeatherService.swift */,
+				F0000000000000000000001D /* WakeMotionMonitor.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -208,6 +245,15 @@
 			path = STandTests;
 			sourceTree = "<group>";
 		};
+		A2000000000000000000000E /* STandWidget */ = {
+			isa = PBXGroup;
+			children = (
+				F0000000000000000000001E /* STandWidget.swift */,
+				F0000000000000000000001F /* Info.plist */,
+			);
+			path = STandWidget;
+			sourceTree = "<group>";
+		};
 		A2000000000000000000000A /* Configuration */ = {
 			isa = PBXGroup;
 			children = (
@@ -221,6 +267,7 @@
 			children = (
 				F00000000000000000000201 /* STand.app */,
 				F00000000000000000000202 /* STandTests.xctest */,
+				F00000000000000000000203 /* STandWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -235,10 +282,12 @@
 				A40000000000000000000001 /* Sources */,
 				A30000000000000000000001 /* Frameworks */,
 				A50000000000000000000001 /* Resources */,
+				A90000000000000000000001 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A60000000000000000000004 /* PBXTargetDependency */,
 			);
 			name = STand;
 			packageProductDependencies = (
@@ -267,6 +316,25 @@
 			productReference = F00000000000000000000202 /* STandTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		A10000000000000000000003 /* STandWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A80000000000000000000004 /* Build configuration list for PBXNativeTarget "STandWidget" */;
+			buildPhases = (
+				A40000000000000000000003 /* Sources */,
+				A30000000000000000000003 /* Frameworks */,
+				A50000000000000000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = STandWidget;
+			packageProductDependencies = (
+			);
+			productName = STandWidget;
+			productReference = F00000000000000000000203 /* STandWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -283,6 +351,9 @@
 					A10000000000000000000002 = {
 						CreatedOnToolsVersion = 26.6;
 						TestTargetID = A10000000000000000000001;
+					};
+					A10000000000000000000003 = {
+						CreatedOnToolsVersion = 26.6;
 					};
 				};
 			};
@@ -303,6 +374,7 @@
 			targets = (
 				A10000000000000000000001 /* STand */,
 				A10000000000000000000002 /* STandTests */,
+				A10000000000000000000003 /* STandWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -336,6 +408,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A50000000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -353,6 +432,7 @@
 				B00000000000000000000008 /* SettingsView.swift in Sources */,
 				B00000000000000000000009 /* RecordingsView.swift in Sources */,
 				B0000000000000000000001C /* WeatherService.swift in Sources */,
+				B0000000000000000000001D /* WakeMotionMonitor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -364,6 +444,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A40000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0000000000000000000001E /* STandWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -371,6 +459,11 @@
 			isa = PBXTargetDependency;
 			target = A10000000000000000000001 /* STand */;
 			targetProxy = A60000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		A60000000000000000000004 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000003 /* STandWidget */;
+			targetProxy = A60000000000000000000003 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -574,6 +667,56 @@
 			};
 			name = Release;
 		};
+		A70000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = F0000000000000000000000B /* Versions.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = T7B4EPLHPK;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = STandWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.armsone.stand.widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		A70000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = F0000000000000000000000B /* Versions.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = T7B4EPLHPK;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = STandWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.armsone.stand.widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -600,6 +743,15 @@
 			buildConfigurations = (
 				A70000000000000000000005 /* Debug */,
 				A70000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A80000000000000000000004 /* Build configuration list for PBXNativeTarget "STandWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A70000000000000000000007 /* Debug */,
+				A70000000000000000000008 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

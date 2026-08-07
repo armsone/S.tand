@@ -47,6 +47,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(settings.clockScale, 1)
         XCTAssertEqual(settings.clockFont, .systemRounded)
         XCTAssertTrue(settings.preventAutoDimmingWhenScreenBright)
+        XCTAssertTrue(settings.multiStimulusWakeEnabled)
     }
 
     func testOrientationPreferenceRoundTripsThroughSettingsEncoding() throws {
@@ -133,6 +134,33 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(HoldDurationAdjustment.value(startingAt: 60, translation: 300), 300)
         XCTAssertEqual(HoldDurationAdjustment.value(startingAt: 60, translation: -300), 10)
         XCTAssertEqual(HoldDurationAdjustment.value(startingAt: 60, translation: 30), 90)
+    }
+
+    func testWakeMotionPolicyDetectsBedMovementButIgnoresMinorSensorNoise() {
+        XCTAssertTrue(
+            WakeMotionPolicy.detectsMovement(
+                accelerationMagnitude: 0.18,
+                rotationMagnitude: 0.1
+            )
+        )
+        XCTAssertTrue(
+            WakeMotionPolicy.detectsMovement(
+                accelerationMagnitude: 0.02,
+                rotationMagnitude: 1.6
+            )
+        )
+        XCTAssertFalse(
+            WakeMotionPolicy.detectsMovement(
+                accelerationMagnitude: 0.03,
+                rotationMagnitude: 0.2
+            )
+        )
+    }
+
+    func testScreenTapBrightensWhileFadingAndDimsWhileHolding() {
+        XCTAssertEqual(ScreenTapPolicy.action(for: .fading), .brighten)
+        XCTAssertEqual(ScreenTapPolicy.action(for: .off), .brighten)
+        XCTAssertEqual(ScreenTapPolicy.action(for: .holding), .dim)
     }
 
     func testLampEnvelopeHoldsThenFadesSmoothly() {

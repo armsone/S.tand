@@ -95,6 +95,7 @@ struct AppSettings: Codable, Equatable {
     var torchEnabled = false
     var torchIntensity = 0.25
     var wakeOnSleepSound = false
+    var multiStimulusWakeEnabled = true
 
     static let recommended = AppSettings()
 
@@ -111,7 +112,8 @@ struct AppSettings: Codable, Equatable {
         orientationPreference: OrientationPreference = .automatic,
         torchEnabled: Bool = false,
         torchIntensity: Double = 0.25,
-        wakeOnSleepSound: Bool = false
+        wakeOnSleepSound: Bool = false,
+        multiStimulusWakeEnabled: Bool = true
     ) {
         self.lampIntensity = lampIntensity
         self.silhouetteIntensity = silhouetteIntensity
@@ -126,6 +128,7 @@ struct AppSettings: Codable, Equatable {
         self.torchEnabled = torchEnabled
         self.torchIntensity = torchIntensity
         self.wakeOnSleepSound = wakeOnSleepSound
+        self.multiStimulusWakeEnabled = multiStimulusWakeEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -142,6 +145,7 @@ struct AppSettings: Codable, Equatable {
         case torchEnabled
         case torchIntensity
         case wakeOnSleepSound
+        case multiStimulusWakeEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -177,6 +181,10 @@ struct AppSettings: Codable, Equatable {
         torchEnabled = try container.decodeIfPresent(Bool.self, forKey: .torchEnabled) ?? false
         torchIntensity = try container.decodeIfPresent(Double.self, forKey: .torchIntensity) ?? 0.25
         wakeOnSleepSound = try container.decodeIfPresent(Bool.self, forKey: .wakeOnSleepSound) ?? false
+        multiStimulusWakeEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .multiStimulusWakeEnabled
+        ) ?? true
     }
 }
 
@@ -219,7 +227,7 @@ enum AppVersion {
     }
 
     static var build: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.6.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.7.0"
     }
 
     static var display: String { "\(marketing) (\(build))" }

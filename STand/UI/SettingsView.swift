@@ -39,6 +39,17 @@ struct SettingsView: View {
                     }
 
                     HStack {
+                        Spacer()
+                        Text("12:34")
+                            .font(store.value.clockFont.font(size: 38))
+                            .monospacedDigit()
+                            .contentTransition(.opacity)
+                            .padding(.vertical, 8)
+                        Spacer()
+                    }
+                    .accessibilityLabel("선택한 시계 글꼴 미리보기 12시 34분")
+
+                    HStack {
                         Text("시계 크기")
                         Slider(value: $store.value.clockScale, in: 0.7...1.35, step: 0.05)
                         Text("\(Int((store.value.clockScale * 100).rounded()))%")
@@ -89,7 +100,10 @@ struct SettingsView: View {
                         )
                     }
 
-                    Toggle("뒤척임 소리에 점등", isOn: $store.value.wakeOnSleepSound)
+                    Toggle(
+                        "소리·움직임에 다시 점등",
+                        isOn: $store.value.multiStimulusWakeEnabled
+                    )
 
                     Toggle(
                         "밝은 환경에서 자동 감광 보류",
@@ -100,7 +114,7 @@ struct SettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
-                    Text("기기에서 소리 길이·저주파 비율·순간 피크를 분석해 뒤척임으로 추정할 때 점등합니다. 오분류될 수 있으며 플래시 사용도 켜져 있으면 함께 켜집니다.")
+                    Text("박수, 손뼉·찰싹 소리, 핑거스냅, 옷·침구 마찰음, 뒤척임과 iPhone 움직임을 기기에서 감지해 다시 점등합니다. 형광등처럼 주변이 갑자기 밝아져 시스템 화면 밝기가 오를 때도 점등합니다. 오분류될 수 있으며 플래시 사용도 켜져 있으면 함께 켜집니다.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

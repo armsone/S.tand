@@ -9,6 +9,17 @@ struct HoldDurationAdjustment {
     }
 }
 
+enum ScreenTapLampAction: Equatable {
+    case brighten
+    case dim
+}
+
+struct ScreenTapPolicy {
+    static func action(for phase: LampPhase) -> ScreenTapLampAction {
+        phase == .holding ? .dim : .brighten
+    }
+}
+
 private enum PresentedSheet: String, Identifiable {
     case recordings
     case settings
@@ -111,12 +122,14 @@ struct RootView: View {
         .gesture(screenAdjustmentGesture.exclusively(before: tapToWakeGesture))
         .simultaneousGesture(clockMagnificationGesture)
         .persistentSystemOverlays(.hidden)
-        .sheet(item: $presentedSheet) { sheet in
+        .sheet(item: $presentedSheet, onDismiss: {
+            model.resumeMonitoringAfterPlayback()
+        }) { sheet in
             switch sheet {
             case .recordings:
                 RecordingsView(
                     library: library,
-                    playbackDisabled: model.isNightSessionActive
+                    playbackDisabled: false
                 )
             case .settings:
                 SettingsView(store: model.settings)
@@ -254,7 +267,7 @@ struct RootView: View {
                     isDimmed: isDimmed,
                     dimmedIntensity: settings.value.silhouetteIntensity
                 )
-                .offset(y: -145 - max(0, settings.value.clockScale - 1) * 54)
+                .offset(y: -178 - max(0, settings.value.clockScale - 1) * 62)
             }
         }
     }
@@ -330,7 +343,7 @@ struct RootView: View {
         TapGesture()
             .onEnded {
                 if model.isNightSessionActive {
-                    if model.lampPhase == .off {
+                    if ScreenTapPolicy.action(for: model.lampPhase) == .brighten {
                         model.activateLamp()
                         model.revealControls()
                     } else {
@@ -517,6 +530,7 @@ struct RootView: View {
             status: library.clips.isEmpty ? "저장된 녹음 없음" : "\(library.clips.count)개 저장됨",
             hint: "저장된 수면 소리 녹음 목록을 엽니다"
         ) {
+            model.pauseMonitoringForPlayback()
             presentedSheet = .recordings
         }
         ControlButton(
@@ -530,8 +544,8 @@ struct RootView: View {
 
     private var tapToControlText: some View {
         Label(
-            model.lampPhase == .off ? "탭하면 조명 켜짐" : "탭하면 자연스럽게 어두워짐",
-            systemImage: model.lampPhase == .off ? "lightbulb.fill" : "moon.fill"
+            model.lampPhase == .holding ? "탭하면 자연스럽게 어두워짐" : "탭하면 조명 켜짐",
+            systemImage: model.lampPhase == .holding ? "moon.fill" : "lightbulb.fill"
         )
             .font(.caption)
             .foregroundStyle(.white.opacity(0.24))
@@ -710,24 +724,24 @@ private struct WeatherBadge: View {
     var compact = false
 
     var body: some View {
-        HStack(spacing: compact ? 6 : 9) {
+        HStack(spacing: compact ? 6 : 14) {
             Image(systemName: systemImage)
                 .symbolRenderingMode(.hierarchical)
-                .font(.system(size: compact ? 13 : 18, weight: .medium))
+                .font(.system(size: compact ? 13 : 34, weight: .medium))
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(primaryText)
-                    .font(compact ? .caption2.weight(.semibold) : .subheadline.weight(.semibold))
+                    .font(compact ? .caption2.weight(.semibold) : .title3.weight(.semibold))
                 if !compact, let secondaryText {
                     Text(secondaryText)
-                        .font(.caption2)
+                        .font(.caption)
                         .opacity(0.72)
                 }
             }
         }
         .foregroundStyle(.white.opacity(isDimmed ? dimmedIntensity : 0.62))
-        .padding(.horizontal, compact ? 9 : 13)
-        .padding(.vertical, compact ? 6 : 9)
+        .padding(.horizontal, compact ? 9 : 24)
+        .padding(.vertical, compact ? 6 : 16)
         .background(.white.opacity(isDimmed ? dimmedIntensity * 0.18 : 0.06), in: Capsule())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
@@ -830,28 +844,37 @@ private struct FlipClockFace: View {
     let clockFont: ClockFontChoice
 
     var body: some View {
-        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
-        HStack(spacing: isPortrait ? 8 : 12) {
-            FlipClockCard(
-                value: String(format: "%02d", components.hour ?? 0),
-                isPortrait: isPortrait,
-                isDimmed: isDimmed,
-                clockFont: clockFont
-            )
-            Text(":")
-                .font(clockFont.font(size: isPortrait ? 48 : 62))
-                .opacity(isDimmed ? 0.5 : 0.8)
-            FlipClockCard(
-                value: String(format: "%02d", components.minute ?? 0),
-                isPortrait: isPortrait,
-                isDimmed: isDimmed,
-                clockFont: clockFont
-            )
+        let components = Calendar.current.dateComponents([.hour, .minute, .second], from: date)
+        ZStack(alignment: .bottomTrailing) {
+            HStack(spacing: isPortrait ? 8 : 12) {
+                FlipClockCard(
+                    value: String(format: "%02d", components.hour ?? 0),
+                    isPortrait: isPortrait,
+                    isDimmed: isDimmed,
+                    clockFont: clockFont
+                )
+                Text(":")
+                    .font(clockFont.font(size: isPortrait ? 48 : 62))
+                    .opacity(isDimmed ? 0.42 : 0.72)
+                FlipClockCard(
+                    value: String(format: "%02d", components.minute ?? 0),
+                    isPortrait: isPortrait,
+                    isDimmed: isDimmed,
+                    clockFont: clockFont
+                )
+            }
+
+            Text(String(format: "%02d", components.second ?? 0))
+                .font(clockFont.font(size: isPortrait ? 13 : 16))
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(isDimmed ? 0.16 : 0.24))
+                .contentTransition(.numericText())
+                .offset(x: isPortrait ? 4 : 6, y: isPortrait ? 3 : 4)
         }
         .scaleEffect(clockScale)
         .frame(height: (isPortrait ? 92 : 116) * clockScale)
-        .contentTransition(.numericText())
-        .animation(.easeInOut(duration: 0.35), value: components.minute)
+        .animation(.snappy(duration: 0.42), value: components.minute)
+        .animation(.easeInOut(duration: 0.18), value: components.second)
     }
 }
 
@@ -864,7 +887,16 @@ private struct FlipClockCard: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: isPortrait ? 18 : 22, style: .continuous)
-                .fill(.white.opacity(isDimmed ? 0.012 : 0.075))
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(isDimmed ? 0.014 : 0.095),
+                            .white.opacity(isDimmed ? 0.008 : 0.052)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
                 .overlay {
                     RoundedRectangle(cornerRadius: isPortrait ? 18 : 22, style: .continuous)
                         .stroke(.white.opacity(isDimmed ? 0.018 : 0.08), lineWidth: 1)
@@ -878,6 +910,8 @@ private struct FlipClockCard: View {
                 .font(clockFont.font(size: isPortrait ? 64 : 82))
                 .monospacedDigit()
                 .minimumScaleFactor(0.7)
+                .contentTransition(.numericText())
+                .animation(.snappy(duration: 0.42), value: value)
         }
         .frame(
             width: isPortrait ? 126 : 164,

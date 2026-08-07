@@ -115,8 +115,22 @@ struct RecordingsView: View {
                         if isSelecting {
                             Button("선택 취소") { cancelSelection() }
                         } else {
-                            Button("전체 삭제", role: .destructive) {
-                                confirmsDeleteAll = true
+                            Menu {
+                                Button {
+                                    player.stop()
+                                    isSelecting = true
+                                } label: {
+                                    Label("합칠 녹음 선택", systemImage: "checkmark.circle")
+                                }
+                                .disabled(library.mergeableClips.count < 2)
+
+                                Divider()
+
+                                Button("전체 삭제", systemImage: "trash", role: .destructive) {
+                                    confirmsDeleteAll = true
+                                }
+                            } label: {
+                                Label("목록 작업", systemImage: "ellipsis.circle")
                             }
                         }
                     }
@@ -238,51 +252,68 @@ private struct RecordingRow: View {
     let delete: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
+        Group {
             if selectionEnabled {
                 Button(action: toggleSelection) {
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .foregroundStyle(isSelected ? Color.orange : Color.secondary)
-                        .frame(width: 28, height: 40)
+                    HStack(spacing: 14) {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.title3)
+                            .foregroundStyle(isSelected ? Color.orange : Color.secondary)
+                            .frame(width: 28, height: 40)
+
+                        clipDescription
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(clip.isMerged)
                 .opacity(clip.isMerged ? 0.2 : 1)
                 .accessibilityLabel(isSelected ? "병합 선택 해제" : "병합할 녹음 선택")
-            }
+            } else {
+                HStack(spacing: 12) {
+                    Button(action: play) {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .frame(width: 40, height: 40)
+                            .background(Color.orange.opacity(0.14), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(playbackDisabled)
+                    .accessibilityLabel(isPlaying ? "재생 일시 정지" : isActive ? "재생 계속" : "녹음 재생")
 
-            Button(action: play) {
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                    .frame(width: 40, height: 40)
-                    .background(Color.orange.opacity(0.14), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .disabled(playbackDisabled)
-            .accessibilityLabel(isPlaying ? "재생 일시 정지" : isActive ? "재생 계속" : "녹음 재생")
+                    Button(action: play) {
+                        clipDescription
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(playbackDisabled)
+                    .accessibilityLabel("\(clip.mergedTitle ?? "수면 소리") 재생")
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(clip.mergedTitle ?? clip.createdAt.formatted(.dateTime.month().day().hour().minute().second()))
-                    .font(.body.weight(.medium))
-                Text(clip.duration.durationText)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
+                    ShareLink(item: clip.url) {
+                        Image(systemName: "square.and.arrow.up")
+                            .frame(width: 36, height: 40)
+                    }
+                    .accessibilityLabel("녹음 공유")
 
-            Spacer()
-
-            ShareLink(item: clip.url) {
-                Image(systemName: "square.and.arrow.up")
-                    .frame(width: 40, height: 40)
+                    Button(role: .destructive, action: delete) {
+                        Image(systemName: "trash")
+                            .frame(width: 36, height: 40)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("녹음 삭제")
+                }
             }
-            .accessibilityLabel("녹음 공유")
+        }
+    }
 
-            Button(role: .destructive, action: delete) {
-                Image(systemName: "trash")
-                    .frame(width: 40, height: 40)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("녹음 삭제")
+    private var clipDescription: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(clip.mergedTitle ?? clip.createdAt.formatted(.dateTime.month().day().hour().minute().second()))
+                .font(.body.weight(.medium))
+            Text(clip.duration.durationText)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
         }
     }
 }
