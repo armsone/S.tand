@@ -287,6 +287,7 @@ struct RootView: View {
     private func clockAndWeather(isPortrait: Bool, isDimmed: Bool) -> some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             let burnInOffset = BurnInProtection.offset(at: context.date)
+            let sharedVerticalOffset = CGFloat(isPortrait ? -36 : 0) + burnInOffset.height
 
             ZStack {
                 NightClock(
@@ -301,26 +302,24 @@ struct RootView: View {
                     automaticDimmingPaused: model.automaticDimmingPaused,
                     manualDimmingHoldActive: model.manualDimmingHoldActive
                 )
+                .offset(x: burnInOffset.width, y: sharedVerticalOffset)
+                .animation(.easeInOut(duration: 4), value: burnInOffset)
 
                 WeatherBadge(
                     service: weather,
                     isPortrait: isPortrait,
                     isDimmed: isDimmed,
                     dimmedIntensity: settings.value.silhouetteIntensity,
-                    iconTrailing: !isPortrait,
                     clockScale: settings.value.clockScale
                 )
                 .offset(
+                    x: burnInOffset.width,
                     y: isPortrait
-                        ? -178 - max(0, settings.value.clockScale - 1) * 62
-                        : -124 - max(0, settings.value.clockScale - 1) * 40
+                        ? -178 - max(0, settings.value.clockScale - 1) * 62 + sharedVerticalOffset
+                        : -124 - max(0, settings.value.clockScale - 1) * 40 + sharedVerticalOffset
                 )
+                .animation(.easeInOut(duration: 4), value: burnInOffset)
             }
-            .offset(
-                x: burnInOffset.width,
-                y: (isPortrait ? -36 : 0) + burnInOffset.height
-            )
-            .animation(.easeInOut(duration: 4), value: burnInOffset)
         }
     }
 
@@ -770,24 +769,39 @@ private struct WeatherBadge: View {
     let isPortrait: Bool
     let isDimmed: Bool
     let dimmedIntensity: Double
-    let iconTrailing: Bool
     var clockScale = 1.0
 
     var body: some View {
-        HStack(spacing: 16) {
-            if iconTrailing {
-                weatherInformation
-                Spacer(minLength: 8)
-                weatherIcon
+        Group {
+            if isPortrait {
+                HStack(spacing: 16) {
+                    weatherIcon
+                    weatherInformation
+                }
+                .padding(.horizontal, 24)
+                .frame(width: 282, height: 92)
+                .background(
+                    FlipPanelSurface(isDimmed: isDimmed, cornerRadius: 18, splitGap: 4)
+                )
             } else {
-                weatherIcon
-                weatherInformation
+                HStack(spacing: 12) {
+                    weatherIcon
+                        .frame(width: 88, height: 72)
+                        .background(
+                            FlipPanelSurface(isDimmed: isDimmed, cornerRadius: 18, splitGap: 3)
+                        )
+
+                    weatherInformation
+                        .padding(.leading, 20)
+                        .frame(width: 270, height: 72, alignment: .leading)
+                        .background(
+                            FlipPanelSurface(isDimmed: isDimmed, cornerRadius: 18, splitGap: 3)
+                        )
+                }
+                .frame(width: 370, height: 72)
             }
         }
         .foregroundStyle(.white.opacity(isDimmed ? dimmedIntensity : 0.62))
-        .padding(.horizontal, 24)
-        .frame(width: isPortrait ? 282 : 370, height: isPortrait ? 92 : 72)
-        .background(FlipPanelSurface(isDimmed: isDimmed, cornerRadius: 18))
         .scaleEffect(clockScale)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
@@ -990,6 +1004,7 @@ private struct FlipClockCard: View {
 private struct FlipPanelSurface: View {
     let isDimmed: Bool
     let cornerRadius: CGFloat
+    var splitGap: CGFloat = 4
 
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -1004,7 +1019,7 @@ private struct FlipPanelSurface: View {
                 )
             )
             .mask {
-                VStack(spacing: 6) {
+                VStack(spacing: splitGap) {
                     Rectangle()
                     Rectangle()
                 }
@@ -1138,7 +1153,7 @@ private struct ControlButton: View {
             .padding(.horizontal, 6)
             .frame(width: 102, height: 72)
             .background {
-                FlipPanelSurface(isDimmed: false, cornerRadius: 15)
+                FlipPanelSurface(isDimmed: false, cornerRadius: 15, splitGap: 3)
             }
         }
         .buttonStyle(.plain)

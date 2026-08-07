@@ -242,7 +242,7 @@ private struct ClockFontFlipPreview: View {
                     )
                 )
                 .mask {
-                    VStack(spacing: 6) {
+                    VStack(spacing: 2.5) {
                         Rectangle()
                         Rectangle()
                     }
