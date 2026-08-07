@@ -20,6 +20,24 @@ struct ScreenTapPolicy {
     }
 }
 
+struct BurnInProtection {
+    private static let path: [CGSize] = [
+        .init(width: 0, height: 0),
+        .init(width: 3, height: -2),
+        .init(width: 5, height: 1),
+        .init(width: 2, height: 3),
+        .init(width: -2, height: 3),
+        .init(width: -5, height: 1),
+        .init(width: -3, height: -2),
+        .init(width: 0, height: -3)
+    ]
+
+    static func offset(at date: Date) -> CGSize {
+        let step = Int(date.timeIntervalSinceReferenceDate / 60)
+        return path[((step % path.count) + path.count) % path.count]
+    }
+}
+
 private enum PresentedSheet: String, Identifiable {
     case recordings
     case settings
@@ -89,14 +107,17 @@ struct RootView: View {
 
                 VStack(spacing: 0) {
                     topBar(isPortrait: isPortrait)
-                    Spacer(minLength: 12)
-                    centerContent(isPortrait: isPortrait)
-                    Spacer(minLength: 12)
+                    Spacer(minLength: 0)
                     bottomControls(isPortrait: isPortrait)
                 }
                 .padding(.horizontal, isPortrait ? 20 : 32)
                 .padding(.vertical, isPortrait ? 18 : 20)
                 .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
+
+                centerContent(isPortrait: isPortrait)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, isPortrait ? 20 : 32)
+                    .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
 
                 statusBanners
                     .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
@@ -119,7 +140,7 @@ struct RootView: View {
             }
         }
         .contentShape(Rectangle())
-        .gesture(screenAdjustmentGesture.exclusively(before: tapToWakeGesture))
+        .gesture(screenAdjustmentGesture.exclusively(before: screenPressGesture))
         .simultaneousGesture(clockMagnificationGesture)
         .persistentSystemOverlays(.hidden)
         .sheet(item: $presentedSheet, onDismiss: {
@@ -136,6 +157,7 @@ struct RootView: View {
             }
         }
         .onAppear {
+            resetTransientInterface()
             model.appDidBecomeActive()
             model.startNightSession()
             didInitialize = true
@@ -143,13 +165,35 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:
+                resetTransientInterface()
                 model.appDidBecomeActive()
+                didInitialize = true
             case .inactive, .background:
+                resetTransientInterface()
+                didInitialize = false
                 model.appWillResignActive()
             @unknown default:
                 break
             }
         }
+    }
+
+    private func resetTransientInterface() {
+        brightnessFeedbackTask?.cancel()
+        clockScaleFeedbackTask?.cancel()
+        holdDurationFeedbackTask?.cancel()
+
+        brightnessFeedbackTask = nil
+        clockScaleFeedbackTask = nil
+        holdDurationFeedbackTask = nil
+
+        brightnessDragState = nil
+        brightnessFeedback = nil
+        screenAdjustmentAxis = nil
+        holdDurationGestureStart = nil
+        holdDurationFeedback = nil
+        clockScaleGestureStart = nil
+        clockScaleFeedback = nil
     }
 
     private func topBar(isPortrait: Bool) -> some View {
@@ -175,15 +219,6 @@ struct RootView: View {
                 Text("버전 \(AppVersion.display)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.white.opacity(0.42))
-            }
-
-            if !isPortrait {
-                WeatherBadge(
-                    service: weather,
-                    isDimmed: false,
-                    dimmedIntensity: settings.value.silhouetteIntensity,
-                    compact: true
-                )
             }
 
             BatteryStatusPill(status: model.batteryStatus)
@@ -227,7 +262,7 @@ struct RootView: View {
     }
 
     private func silhouetteInfo(isPortrait: Bool) -> some View {
-        VStack(spacing: 14) {
+        ZStack {
             clockAndWeather(isPortrait: isPortrait, isDimmed: true)
 
             Label(
@@ -238,6 +273,7 @@ struct RootView: View {
             )
             .font(.caption.monospacedDigit())
             .foregroundStyle(.white.opacity(settings.value.silhouetteIntensity * 0.72))
+            .offset(y: (isPortrait ? 92 : 116) * settings.value.clockScale / 2 + 52)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -249,27 +285,42 @@ struct RootView: View {
     }
 
     private func clockAndWeather(isPortrait: Bool, isDimmed: Bool) -> some View {
-        ZStack {
-            NightClock(
-                phase: isDimmed ? .off : model.lampPhase,
-                intensity: isDimmed ? 0 : model.lampIntensity,
-                isPortrait: isPortrait,
-                isDimmed: isDimmed,
-                dimmedIntensity: settings.value.silhouetteIntensity,
-                clockScale: settings.value.clockScale,
-                clockFont: settings.value.clockFont,
-                automaticDimmingPaused: model.automaticDimmingPaused
-            )
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            let burnInOffset = BurnInProtection.offset(at: context.date)
 
-            if isPortrait {
-                WeatherBadge(
-                    service: weather,
+            ZStack {
+                NightClock(
+                    phase: isDimmed ? .off : model.lampPhase,
+                    intensity: isDimmed ? 0 : model.lampIntensity,
+                    isPortrait: isPortrait,
                     isDimmed: isDimmed,
                     dimmedIntensity: settings.value.silhouetteIntensity,
+                    clockScale: settings.value.clockScale,
+                    clockFont: settings.value.clockFont,
+                    automaticDimmingEnabled: settings.value.automaticDimmingEnabled,
+                    automaticDimmingPaused: model.automaticDimmingPaused,
+                    manualDimmingHoldActive: model.manualDimmingHoldActive
+                )
+
+                WeatherBadge(
+                    service: weather,
+                    isPortrait: isPortrait,
+                    isDimmed: isDimmed,
+                    dimmedIntensity: settings.value.silhouetteIntensity,
+                    iconTrailing: !isPortrait,
                     clockScale: settings.value.clockScale
                 )
-                .offset(y: -178 - max(0, settings.value.clockScale - 1) * 62)
+                .offset(
+                    y: isPortrait
+                        ? -178 - max(0, settings.value.clockScale - 1) * 62
+                        : -124 - max(0, settings.value.clockScale - 1) * 40
+                )
             }
+            .offset(
+                x: burnInOffset.width,
+                y: (isPortrait ? -36 : 0) + burnInOffset.height
+            )
+            .animation(.easeInOut(duration: 4), value: burnInOffset)
         }
     }
 
@@ -340,9 +391,24 @@ struct RootView: View {
             }
     }
 
-    private var tapToWakeGesture: some Gesture {
-        TapGesture()
-            .onEnded {
+    private var screenPressGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.8, maximumDistance: 12)
+            .exclusively(before: TapGesture())
+            .onEnded { result in
+                switch result {
+                case .first(true):
+                    model.toggleManualDimmingHold()
+                    model.revealControls()
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                case .second:
+                    handleScreenTap()
+                default:
+                    break
+                }
+            }
+    }
+
+    private func handleScreenTap() {
                 if model.isNightSessionActive {
                     if ScreenTapPolicy.action(for: model.lampPhase) == .brighten {
                         model.activateLamp()
@@ -351,7 +417,6 @@ struct RootView: View {
                         model.dimLampNow()
                     }
                 }
-            }
     }
 
     private func updateHoldDuration(with horizontalTranslation: CGFloat) {
@@ -559,10 +624,6 @@ struct RootView: View {
                 batteryProtectionBanner
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-            if audio.microphoneAccess == .denied, model.isNightSessionActive {
-                microphoneDeniedBanner
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
             if let message = audio.recordingErrorMessage, model.isNightSessionActive {
                 Label(message, systemImage: "externaldrive.badge.exclamationmark")
                     .font(.subheadline.weight(.medium))
@@ -589,20 +650,6 @@ struct RootView: View {
         .background(.ultraThinMaterial, in: Capsule())
     }
 
-    private var microphoneDeniedBanner: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "mic.slash.fill")
-            Text("마이크 권한이 없어 수동 스탠드만 동작합니다.")
-                .font(.subheadline.weight(.medium))
-            if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
-                Link("설정 열기", destination: settingsURL)
-                    .font(.subheadline.weight(.semibold))
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .background(.ultraThinMaterial, in: Capsule())
-    }
 }
 
 private struct LampBackground: View {
@@ -720,41 +767,48 @@ private struct HoldDurationFeedbackView: View {
 
 private struct WeatherBadge: View {
     @ObservedObject var service: WeatherService
+    let isPortrait: Bool
     let isDimmed: Bool
     let dimmedIntensity: Double
-    var compact = false
+    let iconTrailing: Bool
     var clockScale = 1.0
 
     var body: some View {
-        HStack(spacing: compact ? 6 : 16) {
-            Image(systemName: systemImage)
-                .symbolRenderingMode(.hierarchical)
-                .font(.system(size: compact ? 13 : 34, weight: .medium))
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(primaryText)
-                    .font(compact ? .caption2.weight(.semibold) : .title3.weight(.semibold))
-                if !compact, let secondaryText {
-                    Text(secondaryText)
-                        .font(.caption)
-                        .opacity(0.72)
-                }
+        HStack(spacing: 16) {
+            if iconTrailing {
+                weatherInformation
+                Spacer(minLength: 8)
+                weatherIcon
+            } else {
+                weatherIcon
+                weatherInformation
             }
         }
         .foregroundStyle(.white.opacity(isDimmed ? dimmedIntensity : 0.62))
-        .padding(.horizontal, compact ? 9 : 24)
-        .frame(width: compact ? nil : 282, height: compact ? nil : 92)
-        .background {
-            if compact {
-                Capsule()
-                    .fill(.white.opacity(isDimmed ? dimmedIntensity * 0.18 : 0.06))
-            } else {
-                FlipPanelSurface(isDimmed: isDimmed, cornerRadius: 18)
-            }
-        }
-        .scaleEffect(compact ? 1 : clockScale)
+        .padding(.horizontal, 24)
+        .frame(width: isPortrait ? 282 : 370, height: isPortrait ? 92 : 72)
+        .background(FlipPanelSurface(isDimmed: isDimmed, cornerRadius: 18))
+        .scaleEffect(clockScale)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
+    }
+
+    private var weatherIcon: some View {
+        Image(systemName: systemImage)
+            .symbolRenderingMode(.hierarchical)
+            .font(.system(size: isPortrait ? 34 : 30, weight: .medium))
+    }
+
+    private var weatherInformation: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(primaryText)
+                .font(.title3.weight(.semibold))
+            if let secondaryText {
+                Text(secondaryText)
+                    .font(.caption)
+                    .opacity(0.72)
+            }
+        }
     }
 
     private var systemImage: String {
@@ -803,11 +857,13 @@ private struct NightClock: View {
     let dimmedIntensity: Double
     let clockScale: Double
     let clockFont: ClockFontChoice
+    let automaticDimmingEnabled: Bool
     let automaticDimmingPaused: Bool
+    let manualDimmingHoldActive: Bool
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            VStack(spacing: 5) {
+            ZStack {
                 FlipClockFace(
                     date: context.date,
                     isPortrait: isPortrait,
@@ -816,6 +872,7 @@ private struct NightClock: View {
                     clockFont: clockFont
                 )
 
+                VStack(spacing: 5) {
                 Text(context.date, format: .dateTime.month().day().weekday(.wide))
                     .font(.system(.subheadline, design: .rounded, weight: .medium))
                     .foregroundStyle(.white.opacity(isDimmed ? dimmedIntensity : 0.48))
@@ -826,6 +883,11 @@ private struct NightClock: View {
                         .foregroundStyle(.white.opacity(0.36))
                         .padding(.top, 6)
                 }
+                }
+                .offset(
+                    y: (isPortrait ? 92 : 116) * clockScale / 2
+                        + (isDimmed ? 12 : 24)
+                )
             }
             .foregroundStyle(
                 .white.opacity(isDimmed ? dimmedIntensity : max(0.12, min(0.88, 0.22 + intensity)))
@@ -835,6 +897,12 @@ private struct NightClock: View {
     }
 
     private var statusText: String {
+        if manualDimmingHoldActive {
+            return "현재 상태 · 롱 터치 밝기 고정 중"
+        }
+        if !automaticDimmingEnabled {
+            return "현재 상태 · 자동 디밍 꺼짐 · 화면 밝기 유지 중"
+        }
         if automaticDimmingPaused {
             return "현재 상태 · 밝은 환경으로 판단해 자동 감광 보류 중"
         }
@@ -855,8 +923,7 @@ private struct FlipClockFace: View {
 
     var body: some View {
         let components = Calendar.current.dateComponents([.hour, .minute, .second], from: date)
-        ZStack(alignment: .trailing) {
-            HStack(spacing: isPortrait ? 8 : 12) {
+        HStack(spacing: isPortrait ? 8 : 12) {
                 FlipClockCard(
                     value: String(format: "%02d", components.hour ?? 0),
                     isPortrait: isPortrait,
@@ -866,21 +933,24 @@ private struct FlipClockFace: View {
                 Text(":")
                     .font(clockFont.font(size: isPortrait ? 48 : 62))
                     .opacity(isDimmed ? 0.42 : 0.72)
-                FlipClockCard(
-                    value: String(format: "%02d", components.minute ?? 0),
-                    isPortrait: isPortrait,
-                    isDimmed: isDimmed,
-                    clockFont: clockFont
-                )
-            }
+                    .offset(y: clockFont.clockVerticalOffset(size: isPortrait ? 48 : 62))
+                ZStack(alignment: .bottomTrailing) {
+                    FlipClockCard(
+                        value: String(format: "%02d", components.minute ?? 0),
+                        isPortrait: isPortrait,
+                        isDimmed: isDimmed,
+                        clockFont: clockFont
+                    )
 
-            Text(String(format: "%02d", components.second ?? 0))
-                .font(clockFont.font(size: isPortrait ? 13 : 16))
-                .monospacedDigit()
-                .foregroundStyle(.white.opacity(isDimmed ? 0.04 : 0.10))
-                .contentTransition(.numericText())
-                .frame(width: isPortrait ? 24 : 30)
-                .offset(x: isPortrait ? 12 : 15)
+                    Text(String(format: "%02d", components.second ?? 0))
+                        .font(clockFont.font(size: isPortrait ? 13 : 16))
+                        .monospacedDigit()
+                        .foregroundStyle(.white.opacity(isDimmed ? 0.04 : 0.10))
+                        .contentTransition(.numericText())
+                        .frame(width: isPortrait ? 24 : 30)
+                        .padding(.trailing, isPortrait ? 20 : 26)
+                        .padding(.bottom, isPortrait ? 7 : 9)
+                }
         }
         .scaleEffect(clockScale)
         .frame(height: (isPortrait ? 92 : 116) * clockScale)
@@ -908,6 +978,7 @@ private struct FlipClockCard: View {
                 .minimumScaleFactor(0.7)
                 .contentTransition(.numericText())
                 .animation(.snappy(duration: 0.42), value: value)
+                .offset(y: clockFont.clockVerticalOffset(size: isPortrait ? 64 : 82))
         }
         .frame(
             width: isPortrait ? 126 : 164,
@@ -932,14 +1003,15 @@ private struct FlipPanelSurface: View {
                     endPoint: .bottom
                 )
             )
+            .mask {
+                VStack(spacing: 6) {
+                    Rectangle()
+                    Rectangle()
+                }
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(.white.opacity(isDimmed ? 0.018 : 0.08), lineWidth: 1)
-            }
-            .overlay {
-                Rectangle()
-                    .fill(.black.opacity(isDimmed ? 0.35 : 0.42))
-                    .frame(height: 1)
             }
     }
 }
@@ -954,7 +1026,7 @@ private struct AudioStatusPill: View {
                 .fill(statusColor)
                 .frame(width: 7, height: 7)
 
-            if !compact {
+            Group {
                 GeometryReader { proxy in
                     Capsule()
                         .fill(Color.white.opacity(0.12))
@@ -964,7 +1036,7 @@ private struct AudioStatusPill: View {
                                 .frame(width: max(3, proxy.size.width * audio.normalizedLevel))
                         }
                 }
-                .frame(width: 44, height: 5)
+                .frame(width: compact ? 32 : 44, height: 5)
             }
 
             Text(statusText)
@@ -975,7 +1047,7 @@ private struct AudioStatusPill: View {
         .background(.white.opacity(0.07), in: Capsule())
         .fixedSize(horizontal: true, vertical: false)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(statusText)
+        .accessibilityLabel("\(statusText), 감지 레벨 \(Int((audio.normalizedLevel * 100).rounded()))퍼센트")
     }
 
     private var statusColor: Color {
@@ -985,11 +1057,14 @@ private struct AudioStatusPill: View {
     }
 
     private var statusText: String {
+        if audio.microphoneAccess == .denied {
+            return compact ? "감지 안 됨" : "소리 감지 안 됨"
+        }
         if audio.isWritingClip { return compact ? "저장" : "저장 중" }
         switch audio.state {
         case .monitoring: return compact ? "감지" : "감지 중"
         case .starting: return compact ? "준비" : "준비 중"
-        case .failed: return "확인 필요"
+        case .failed: return compact ? "감지 안 됨" : "소리 감지 안 됨"
         case .stopped: return "정지됨"
         }
     }

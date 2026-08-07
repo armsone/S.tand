@@ -55,6 +55,19 @@ enum ClockFontChoice: String, Codable, CaseIterable, Identifiable {
         }
         return .custom(postScriptName, size: size)
     }
+
+    func clockVerticalOffset(size: CGFloat) -> CGFloat {
+        let adjustmentAt64Points: CGFloat = switch self {
+        case .systemRounded: 0
+        case .pretendard: 1
+        case .kakaoBigSans: 2
+        case .nanumGothic: 2
+        case .tenada: 5
+        case .blackHanSans: 7
+        case .doHyeon: 4
+        }
+        return adjustmentAt64Points * size / 64
+    }
 }
 
 enum OrientationPreference: String, Codable, CaseIterable, Identifiable {
@@ -88,6 +101,7 @@ struct AppSettings: Codable, Equatable {
     var clockFont = ClockFontChoice.systemRounded
     var holdDuration = 60.0
     var fadeDuration = 30.0
+    var automaticDimmingEnabled = true
     var preventAutoDimmingWhenScreenBright = true
     var soundThresholdDB: Float = -36
     var recordingEnabled = true
@@ -106,6 +120,7 @@ struct AppSettings: Codable, Equatable {
         clockFont: ClockFontChoice = .systemRounded,
         holdDuration: Double = 60,
         fadeDuration: Double = 30,
+        automaticDimmingEnabled: Bool = true,
         preventAutoDimmingWhenScreenBright: Bool = true,
         soundThresholdDB: Float = -36,
         recordingEnabled: Bool = true,
@@ -121,6 +136,7 @@ struct AppSettings: Codable, Equatable {
         self.clockFont = clockFont
         self.holdDuration = holdDuration
         self.fadeDuration = fadeDuration
+        self.automaticDimmingEnabled = automaticDimmingEnabled
         self.preventAutoDimmingWhenScreenBright = preventAutoDimmingWhenScreenBright
         self.soundThresholdDB = soundThresholdDB
         self.recordingEnabled = recordingEnabled
@@ -138,6 +154,7 @@ struct AppSettings: Codable, Equatable {
         case clockFont
         case holdDuration
         case fadeDuration
+        case automaticDimmingEnabled
         case preventAutoDimmingWhenScreenBright
         case soundThresholdDB
         case recordingEnabled
@@ -168,6 +185,10 @@ struct AppSettings: Codable, Equatable {
             try container.decodeIfPresent(Double.self, forKey: .holdDuration) ?? 60
         ))
         fadeDuration = try container.decodeIfPresent(Double.self, forKey: .fadeDuration) ?? 30
+        automaticDimmingEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .automaticDimmingEnabled
+        ) ?? true
         preventAutoDimmingWhenScreenBright = try container.decodeIfPresent(
             Bool.self,
             forKey: .preventAutoDimmingWhenScreenBright
@@ -227,7 +248,7 @@ enum AppVersion {
     }
 
     static var build: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.8.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.9.0"
     }
 
     static var display: String { "\(marketing) (\(build))" }

@@ -98,7 +98,7 @@ final class AudioCaptureService: ObservableObject {
             startEngine()
         case .denied:
             microphoneAccess = .denied
-            state = .stopped
+            state = .failed("마이크 권한이 없어 소리 감지를 사용할 수 없습니다.")
         case .undetermined:
             AVAudioApplication.requestRecordPermission { [weak self] granted in
                 DispatchQueue.main.async {
@@ -107,19 +107,22 @@ final class AudioCaptureService: ObservableObject {
                     if granted {
                         self.startEngine()
                     } else {
-                        self.state = .stopped
+                        self.state = .failed("마이크 권한이 없어 소리 감지를 사용할 수 없습니다.")
                     }
                 }
             }
         @unknown default:
             microphoneAccess = .unknown
-            state = .stopped
+            state = .failed("마이크 상태를 확인할 수 없어 소리 감지를 사용할 수 없습니다.")
         }
     }
 
     func startIfAuthorized() {
         refreshPermissionState()
-        guard microphoneAccess == .granted else { return }
+        guard microphoneAccess == .granted else {
+            state = .failed("마이크 권한이 없어 소리 감지를 사용할 수 없습니다.")
+            return
+        }
         startEngine()
     }
 
@@ -175,6 +178,10 @@ final class AudioCaptureService: ObservableObject {
             try audioSession.setCategory(.record, mode: .measurement)
             try audioSession.setPreferredIOBufferDuration(0.02)
             try audioSession.setActive(true)
+
+            guard audioSession.isInputAvailable else {
+                throw AudioCaptureError.unavailableInput
+            }
 
             let input = engine.inputNode
             let format = input.outputFormat(forBus: 0)

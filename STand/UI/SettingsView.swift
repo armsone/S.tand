@@ -61,6 +61,8 @@ struct SettingsView: View {
                 }
 
                 Section("불빛") {
+                    Toggle("자동 디밍 사용", isOn: $store.value.automaticDimmingEnabled)
+
                     SettingSlider(
                         title: "최대 밝기",
                         valueText: "\(Int(store.value.lampIntensity * 100))%",
@@ -74,6 +76,7 @@ struct SettingsView: View {
                         range: 10...300,
                         step: 5
                     )
+                    .disabled(!store.value.automaticDimmingEnabled)
                     SettingSlider(
                         title: "감광 시간",
                         valueText: "\(Int(store.value.fadeDuration))초",
@@ -81,6 +84,7 @@ struct SettingsView: View {
                         range: 5...120,
                         step: 5
                     )
+                    .disabled(!store.value.automaticDimmingEnabled)
 
                     Toggle("화면 점등 시 플래시 사용", isOn: $store.value.torchEnabled)
 
@@ -103,7 +107,7 @@ struct SettingsView: View {
                         isOn: $store.value.preventAutoDimmingWhenScreenBright
                     )
 
-                    Text("첫 화면에서 좌우로 밀면 어두워지기까지의 시간을 10초~5분으로 바로 조절합니다. iOS가 공개하는 화면 밝기 값이 높은 동안에는 밝은 환경으로 판단해 자동 감광을 보류합니다. 화면 탭과 ‘지금 어둡게’는 이 보호와 관계없이 동작합니다.")
+                    Text("자동 디밍을 끄면 첫 화면 밝기를 계속 유지합니다. 켠 상태에서는 좌우로 밀어 어두워지기까지의 시간을 10초~5분으로 조절합니다. 화면 탭과 ‘지금 어둡게’는 자동 디밍 설정과 관계없이 동작합니다.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
@@ -219,6 +223,7 @@ private struct ClockFontFlipPreview: View {
             Text(":")
                 .font(choice.font(size: 28))
                 .foregroundStyle(.white.opacity(0.7))
+                .offset(y: choice.clockVerticalOffset(size: 28))
             previewCard("34")
         }
         .frame(maxWidth: .infinity)
@@ -236,17 +241,21 @@ private struct ClockFontFlipPreview: View {
                         endPoint: .bottom
                     )
                 )
+                .mask {
+                    VStack(spacing: 6) {
+                        Rectangle()
+                        Rectangle()
+                    }
+                }
                 .overlay {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .stroke(.white.opacity(0.11), lineWidth: 1)
                 }
-            Rectangle()
-                .fill(.black.opacity(0.45))
-                .frame(height: 1)
             Text(value)
                 .font(choice.font(size: 38))
                 .minimumScaleFactor(0.7)
                 .foregroundStyle(.white.opacity(0.88))
+                .offset(y: choice.clockVerticalOffset(size: 38))
         }
         .frame(width: 78, height: 58)
     }

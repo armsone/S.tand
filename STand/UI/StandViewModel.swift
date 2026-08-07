@@ -64,6 +64,7 @@ final class StandViewModel: ObservableObject {
     @Published private(set) var batteryProtectionActive = false
     @Published private(set) var displayBrightness = Double(UIScreen.main.brightness)
     @Published private(set) var automaticDimmingPaused = false
+    @Published private(set) var manualDimmingHoldActive = false
     @Published var controlsVisible = true
 
     var isDisplayDark: Bool {
@@ -178,6 +179,7 @@ final class StandViewModel: ObservableObject {
     }
 
     func appDidBecomeActive() {
+        manualDimmingHoldActive = false
         batteryStatus = .current()
         if batteryStatus.shouldProtectBattery {
             pauseForLowBattery()
@@ -197,6 +199,8 @@ final class StandViewModel: ObservableObject {
     }
 
     func appWillResignActive() {
+        manualDimmingHoldActive = false
+        automaticDimmingPaused = false
         UIApplication.shared.isIdleTimerDisabled = false
         torch.turnOff()
         guard isNightSessionActive else { return }
@@ -221,6 +225,11 @@ final class StandViewModel: ObservableObject {
         }
         syncTorch()
 
+        if manualDimmingHoldActive {
+            automaticDimmingPaused = true
+            return
+        }
+
         lampTask = Task { [weak self] in
             var fadeStartedAt: TimeInterval?
             while !Task.isCancelled {
@@ -231,6 +240,15 @@ final class StandViewModel: ObservableObject {
                 if currentTime <= now + holdDuration {
                     lampPhase = .holding
                     lampIntensity = maximumIntensity
+                    continue
+                }
+
+                if !settings.value.automaticDimmingEnabled {
+                    fadeStartedAt = nil
+                    automaticDimmingPaused = false
+                    lampPhase = .holding
+                    lampIntensity = maximumIntensity
+                    syncTorch()
                     continue
                 }
 
@@ -263,6 +281,7 @@ final class StandViewModel: ObservableObject {
 
     func turnOffLamp(animated: Bool) {
         lampTask?.cancel()
+        manualDimmingHoldActive = false
         automaticDimmingPaused = false
         lampPhase = .off
         torch.turnOff()
@@ -276,6 +295,7 @@ final class StandViewModel: ObservableObject {
     func dimLampNow() {
         guard isNightSessionActive, lampPhase != .off else { return }
         lampTask?.cancel()
+        manualDimmingHoldActive = false
         automaticDimmingPaused = false
         let startedAt = ProcessInfo.processInfo.systemUptime
         let startingIntensity = lampIntensity
@@ -320,6 +340,26 @@ final class StandViewModel: ObservableObject {
             screenBrightness: displayBrightness,
             enabled: settings.value.preventAutoDimmingWhenScreenBright
         )
+    }
+
+    func toggleManualDimmingHold() {
+        guard isNightSessionActive else { return }
+        if manualDimmingHoldActive {
+            manualDimmingHoldActive = false
+            automaticDimmingPaused = false
+            activateLamp()
+            return
+        }
+
+        lampTask?.cancel()
+        manualDimmingHoldActive = true
+        automaticDimmingPaused = true
+        activeLampMaximumIntensity = settings.value.lampIntensity
+        lampPhase = .holding
+        withAnimation(.easeOut(duration: 0.3)) {
+            lampIntensity = settings.value.lampIntensity
+        }
+        syncTorch()
     }
 
     func beginManualLampAdjustment() {

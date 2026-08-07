@@ -2,8 +2,9 @@ import Foundation
 
 struct AudioDetectorConfiguration: Equatable {
     var soundThresholdDB: Float
-    var clapPeakThresholdDB: Float = -5
-    var clapRiseDB: Float = 13
+    var clapPeakThresholdDB: Float = -18
+    var clapRiseDB: Float = 6
+    var clapPeakRiseDB: Float = 8
     var clapRefractoryInterval: TimeInterval = 1.5
     var soundAttackDuration: TimeInterval = 0.12
 }
@@ -119,6 +120,7 @@ struct AudioEventDetector {
     var configuration: AudioDetectorConfiguration
 
     private(set) var previousRMSDB: Float = -90
+    private(set) var previousPeakDB: Float = -90
     private var loudDuration: TimeInterval = 0
     private var lastClapTime: TimeInterval = -.infinity
     private var soundIsActive = false
@@ -145,6 +147,7 @@ struct AudioEventDetector {
         }
 
         let roseQuickly = rmsDB - previousRMSDB >= configuration.clapRiseDB
+            || peakDB - previousPeakDB >= configuration.clapPeakRiseDB
         let isSharpTransient = peakDB >= configuration.clapPeakThresholdDB
         let isOutsideRefractoryWindow = now - lastClapTime >= configuration.clapRefractoryInterval
         let clapDetected = roseQuickly && isSharpTransient && isOutsideRefractoryWindow
@@ -153,6 +156,7 @@ struct AudioEventDetector {
             lastClapTime = now
         }
         previousRMSDB = rmsDB
+        previousPeakDB = peakDB
 
         return AudioDetection(
             clapDetected: clapDetected,
@@ -163,6 +167,7 @@ struct AudioEventDetector {
 
     mutating func reset() {
         previousRMSDB = -90
+        previousPeakDB = -90
         loudDuration = 0
         lastClapTime = -.infinity
         soundIsActive = false

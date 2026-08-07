@@ -4,6 +4,16 @@ import XCTest
 @testable import STand
 
 final class AudioAnalysisTests: XCTestCase {
+    func testBurnInProtectionMovesWithinAQuietFivePointRange() {
+        let start = Date(timeIntervalSinceReferenceDate: 0)
+        let offsets = (0..<8).map {
+            BurnInProtection.offset(at: start.addingTimeInterval(Double($0) * 60))
+        }
+
+        XCTAssertGreaterThan(Set(offsets.map { "\($0.width),\($0.height)" }).count, 1)
+        XCTAssertTrue(offsets.allSatisfy { abs($0.width) <= 5 && abs($0.height) <= 3 })
+    }
+
     func testBundledClockFontsAreRegistered() {
         for choice in ClockFontChoice.allCases {
             guard let postScriptName = choice.postScriptName else { continue }
@@ -56,6 +66,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(settings.clockScale, 1)
         XCTAssertEqual(settings.clockFont, .systemRounded)
         XCTAssertTrue(settings.preventAutoDimmingWhenScreenBright)
+        XCTAssertTrue(settings.automaticDimmingEnabled)
         XCTAssertTrue(settings.multiStimulusWakeEnabled)
     }
 
@@ -73,6 +84,7 @@ final class AudioAnalysisTests: XCTestCase {
             silhouetteIntensity: 0.08,
             clockScale: 1.25,
             clockFont: .doHyeon,
+            automaticDimmingEnabled: false,
             torchEnabled: true,
             torchIntensity: 0.4,
             wakeOnSleepSound: true
@@ -88,6 +100,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(decoded.clockScale, 1.25)
         XCTAssertEqual(decoded.clockFont, .doHyeon)
         XCTAssertTrue(decoded.preventAutoDimmingWhenScreenBright)
+        XCTAssertFalse(decoded.automaticDimmingEnabled)
     }
 
     func testWeatherResponseDecodesAndMapsKoreanCondition() throws {
@@ -202,6 +215,21 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertTrue(clap.clapDetected)
         XCTAssertFalse(repeatedClap.clapDetected)
         XCTAssertTrue(laterClap.clapDetected)
+    }
+
+    func testQuietFingerSnapUsesPeakRiseToWakeScreen() {
+        var snapDetector = AudioEventDetector(
+            configuration: AudioDetectorConfiguration(soundThresholdDB: -36)
+        )
+        _ = snapDetector.analyze(rmsDB: -58, peakDB: -42, bufferDuration: 0.02, now: 1)
+        let fingerSnap = snapDetector.analyze(
+            rmsDB: -53,
+            peakDB: -17,
+            bufferDuration: 0.02,
+            now: 1.02
+        )
+        XCTAssertTrue(fingerSnap.clapDetected)
+        XCTAssertFalse(fingerSnap.isAboveSoundThreshold)
     }
 
     func testSustainedSoundStartsOnlyAfterAttackDuration() {
