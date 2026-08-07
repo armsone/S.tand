@@ -18,6 +18,19 @@
 		B00000000000000000000009 /* RecordingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000009 /* RecordingsView.swift */; };
 		B0000000000000000000000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000A /* Assets.xcassets */; };
 		B0000000000000000000000D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000000D /* PrivacyInfo.xcprivacy */; };
+		B00000000000000000000010 /* Pretendard-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000010 /* Pretendard-Regular.otf */; };
+		B00000000000000000000011 /* KakaoBigSans-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000011 /* KakaoBigSans-Regular.ttf */; };
+		B00000000000000000000012 /* NanumGothic-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000012 /* NanumGothic-Regular.ttf */; };
+		B00000000000000000000013 /* Tenada.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000013 /* Tenada.ttf */; };
+		B00000000000000000000014 /* BlackHanSans-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000014 /* BlackHanSans-Regular.ttf */; };
+		B00000000000000000000015 /* DoHyeon-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000015 /* DoHyeon-Regular.ttf */; };
+		B00000000000000000000016 /* Pretendard-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000016 /* Pretendard-LICENSE.txt */; };
+		B00000000000000000000017 /* KakaoBigSans-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000017 /* KakaoBigSans-OFL.txt */; };
+		B00000000000000000000018 /* NanumGothic-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000018 /* NanumGothic-OFL.txt */; };
+		B00000000000000000000019 /* Tenada-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000019 /* Tenada-LICENSE.txt */; };
+		B0000000000000000000001A /* BlackHanSans-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001A /* BlackHanSans-OFL.txt */; };
+		B0000000000000000000001B /* DoHyeon-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001B /* DoHyeon-OFL.txt */; };
+		B0000000000000000000001C /* WeatherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* WeatherService.swift */; };
 		B00000000000000000000101 /* AudioAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000101 /* AudioAnalysisTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -45,6 +58,19 @@
 		F0000000000000000000000B /* Versions.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Versions.xcconfig; sourceTree = "<group>"; };
 		F0000000000000000000000C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F0000000000000000000000D /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		F00000000000000000000010 /* Pretendard-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Pretendard-Regular.otf; sourceTree = "<group>"; };
+		F00000000000000000000011 /* KakaoBigSans-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = KakaoBigSans-Regular.ttf; sourceTree = "<group>"; };
+		F00000000000000000000012 /* NanumGothic-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = NanumGothic-Regular.ttf; sourceTree = "<group>"; };
+		F00000000000000000000013 /* Tenada.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Tenada.ttf; sourceTree = "<group>"; };
+		F00000000000000000000014 /* BlackHanSans-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = BlackHanSans-Regular.ttf; sourceTree = "<group>"; };
+		F00000000000000000000015 /* DoHyeon-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = DoHyeon-Regular.ttf; sourceTree = "<group>"; };
+		F00000000000000000000016 /* Pretendard-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = Pretendard-LICENSE.txt; sourceTree = "<group>"; };
+		F00000000000000000000017 /* KakaoBigSans-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = KakaoBigSans-OFL.txt; sourceTree = "<group>"; };
+		F00000000000000000000018 /* NanumGothic-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = NanumGothic-OFL.txt; sourceTree = "<group>"; };
+		F00000000000000000000019 /* Tenada-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = Tenada-LICENSE.txt; sourceTree = "<group>"; };
+		F0000000000000000000001A /* BlackHanSans-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = BlackHanSans-OFL.txt; sourceTree = "<group>"; };
+		F0000000000000000000001B /* DoHyeon-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = DoHyeon-OFL.txt; sourceTree = "<group>"; };
+		F0000000000000000000001C /* WeatherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherService.swift; sourceTree = "<group>"; };
 		F00000000000000000000101 /* AudioAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAnalysisTests.swift; sourceTree = "<group>"; };
 		F00000000000000000000201 /* STand.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = STand.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000202 /* STandTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = STandTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -120,6 +146,7 @@
 			isa = PBXGroup;
 			children = (
 				F00000000000000000000005 /* RecordingLibrary.swift */,
+				F0000000000000000000001C /* WeatherService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -139,10 +166,38 @@
 			isa = PBXGroup;
 			children = (
 				F0000000000000000000000A /* Assets.xcassets */,
+				A2000000000000000000000C /* Fonts */,
+				A2000000000000000000000D /* FontLicenses */,
 				F0000000000000000000000C /* Info.plist */,
 				F0000000000000000000000D /* PrivacyInfo.xcprivacy */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		A2000000000000000000000C /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000010 /* Pretendard-Regular.otf */,
+				F00000000000000000000011 /* KakaoBigSans-Regular.ttf */,
+				F00000000000000000000012 /* NanumGothic-Regular.ttf */,
+				F00000000000000000000013 /* Tenada.ttf */,
+				F00000000000000000000014 /* BlackHanSans-Regular.ttf */,
+				F00000000000000000000015 /* DoHyeon-Regular.ttf */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
+		A2000000000000000000000D /* FontLicenses */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000016 /* Pretendard-LICENSE.txt */,
+				F00000000000000000000017 /* KakaoBigSans-OFL.txt */,
+				F00000000000000000000018 /* NanumGothic-OFL.txt */,
+				F00000000000000000000019 /* Tenada-LICENSE.txt */,
+				F0000000000000000000001A /* BlackHanSans-OFL.txt */,
+				F0000000000000000000001B /* DoHyeon-OFL.txt */,
+			);
+			path = FontLicenses;
 			sourceTree = "<group>";
 		};
 		A20000000000000000000009 /* STandTests */ = {
@@ -259,6 +314,18 @@
 			files = (
 				B0000000000000000000000A /* Assets.xcassets in Resources */,
 				B0000000000000000000000D /* PrivacyInfo.xcprivacy in Resources */,
+				B00000000000000000000010 /* Pretendard-Regular.otf in Resources */,
+				B00000000000000000000011 /* KakaoBigSans-Regular.ttf in Resources */,
+				B00000000000000000000012 /* NanumGothic-Regular.ttf in Resources */,
+				B00000000000000000000013 /* Tenada.ttf in Resources */,
+				B00000000000000000000014 /* BlackHanSans-Regular.ttf in Resources */,
+				B00000000000000000000015 /* DoHyeon-Regular.ttf in Resources */,
+				B00000000000000000000016 /* Pretendard-LICENSE.txt in Resources */,
+				B00000000000000000000017 /* KakaoBigSans-OFL.txt in Resources */,
+				B00000000000000000000018 /* NanumGothic-OFL.txt in Resources */,
+				B00000000000000000000019 /* Tenada-LICENSE.txt in Resources */,
+				B0000000000000000000001A /* BlackHanSans-OFL.txt in Resources */,
+				B0000000000000000000001B /* DoHyeon-OFL.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -285,6 +352,7 @@
 				B00000000000000000000007 /* RootView.swift in Sources */,
 				B00000000000000000000008 /* SettingsView.swift in Sources */,
 				B00000000000000000000009 /* RecordingsView.swift in Sources */,
+				B0000000000000000000001C /* WeatherService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

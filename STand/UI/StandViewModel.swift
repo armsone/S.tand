@@ -43,6 +43,14 @@ struct DeviceBatteryStatus: Equatable {
     }
 }
 
+struct AmbientDimmingPolicy {
+    static let brightScreenThreshold = 0.65
+
+    static func shouldPause(screenBrightness: Double, enabled: Bool) -> Bool {
+        enabled && screenBrightness >= brightScreenThreshold
+    }
+}
+
 @MainActor
 final class StandViewModel: ObservableObject {
     @Published private(set) var isNightSessionActive = false
@@ -54,6 +62,8 @@ final class StandViewModel: ObservableObject {
         powerState: .unknown
     )
     @Published private(set) var batteryProtectionActive = false
+    @Published private(set) var displayBrightness = Double(UIScreen.main.brightness)
+    @Published private(set) var automaticDimmingPaused = false
     @Published var controlsVisible = true
 
     var isDisplayDark: Bool {
@@ -63,10 +73,12 @@ final class StandViewModel: ObservableObject {
     let settings: SettingsStore
     let library: RecordingLibrary
     let audio: AudioCaptureService
+    let weather: WeatherService
 
     private var lampTask: Task<Void, Never>?
     private var controlsTask: Task<Void, Never>?
     private var settingsSubscription: AnyCancellable?
+    private var screenBrightnessSubscription: AnyCancellable?
     private var batterySubscriptions: Set<AnyCancellable> = []
     private let torch = TorchController()
     private var activeLampMaximumIntensity = 1.0
@@ -76,6 +88,7 @@ final class StandViewModel: ObservableObject {
         let library = RecordingLibrary()
         self.settings = settings
         self.library = library
+        weather = WeatherService()
         audio = AudioCaptureService(recordingsDirectory: library.directory)
 
         audio.onClap = { [weak self] in
@@ -105,6 +118,14 @@ final class StandViewModel: ObservableObject {
                 self?.syncTorch()
             }
 
+        screenBrightnessSubscription = NotificationCenter.default
+            .publisher(for: UIScreen.brightnessDidChangeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] notification in
+                guard let screen = notification.object as? UIScreen else { return }
+                self?.displayBrightness = Double(screen.brightness)
+            }
+
         startBatteryMonitoring()
     }
 
@@ -122,9 +143,10 @@ final class StandViewModel: ObservableObject {
         UIApplication.shared.isIdleTimerDisabled = true
         audio.configure(settings: settings.value)
         audio.requestAccessAndStart()
-        turnOffLamp(animated: false)
+        weather.refreshIfNeeded()
         controlsTask?.cancel()
         controlsVisible = false
+        activateLamp()
     }
 
     func stopNightSession() {
@@ -146,9 +168,10 @@ final class StandViewModel: ObservableObject {
         OrientationController.shared.reapply()
         guard isNightSessionActive else { return }
         audio.startIfAuthorized()
-        turnOffLamp(animated: false)
+        weather.refreshIfNeeded()
         controlsTask?.cancel()
         controlsVisible = false
+        activateLamp()
     }
 
     func appWillResignActive() {
@@ -163,32 +186,49 @@ final class StandViewModel: ObservableObject {
         lampTask?.cancel()
 
         let now = ProcessInfo.processInfo.systemUptime
-        let envelope = LampEnvelope(
-            activatedAt: now,
-            holdDuration: settings.value.holdDuration,
-            fadeDuration: settings.value.fadeDuration,
-            maximumIntensity: settings.value.lampIntensity
-        )
-        activeLampMaximumIntensity = envelope.maximumIntensity
+        let holdDuration = settings.value.holdDuration
+        let fadeDuration = max(0.1, settings.value.fadeDuration)
+        let maximumIntensity = settings.value.lampIntensity
+        activeLampMaximumIntensity = maximumIntensity
+        automaticDimmingPaused = false
 
         lampPhase = .holding
         withAnimation(.easeOut(duration: 0.3)) {
-            lampIntensity = envelope.maximumIntensity
+            lampIntensity = maximumIntensity
         }
         syncTorch()
 
         lampTask = Task { [weak self] in
+            var fadeStartedAt: TimeInterval?
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(50))
                 guard let self, !Task.isCancelled else { return }
 
                 let currentTime = ProcessInfo.processInfo.systemUptime
-                let value = envelope.intensity(at: currentTime)
-                lampPhase = currentTime <= envelope.activatedAt + envelope.holdDuration ? .holding : .fading
-                lampIntensity = value
+                if currentTime <= now + holdDuration {
+                    lampPhase = .holding
+                    lampIntensity = maximumIntensity
+                    continue
+                }
+
+                if shouldPauseAutomaticDimming {
+                    fadeStartedAt = nil
+                    automaticDimmingPaused = true
+                    lampPhase = .holding
+                    lampIntensity = maximumIntensity
+                    syncTorch()
+                    continue
+                }
+
+                automaticDimmingPaused = false
+                let start = fadeStartedAt ?? currentTime
+                fadeStartedAt = start
+                let progress = min(1, max(0, (currentTime - start) / fadeDuration))
+                lampPhase = .fading
+                lampIntensity = maximumIntensity * (1 - progress)
                 syncTorch()
 
-                if envelope.isFinished(at: currentTime) {
+                if progress >= 1 {
                     lampIntensity = 0
                     lampPhase = .off
                     torch.turnOff()
@@ -200,6 +240,7 @@ final class StandViewModel: ObservableObject {
 
     func turnOffLamp(animated: Bool) {
         lampTask?.cancel()
+        automaticDimmingPaused = false
         lampPhase = .off
         torch.turnOff()
         if animated {
@@ -207,6 +248,42 @@ final class StandViewModel: ObservableObject {
         } else {
             lampIntensity = 0
         }
+    }
+
+    func dimLampNow() {
+        guard isNightSessionActive, lampPhase != .off else { return }
+        lampTask?.cancel()
+        automaticDimmingPaused = false
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        let startingIntensity = lampIntensity
+        let duration = 1.5
+        lampPhase = .fading
+
+        lampTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(50))
+                guard let self, !Task.isCancelled else { return }
+                let progress = min(
+                    1,
+                    (ProcessInfo.processInfo.systemUptime - startedAt) / duration
+                )
+                lampIntensity = startingIntensity * (1 - progress)
+                syncTorch()
+                if progress >= 1 {
+                    lampIntensity = 0
+                    lampPhase = .off
+                    torch.turnOff()
+                    return
+                }
+            }
+        }
+    }
+
+    private var shouldPauseAutomaticDimming: Bool {
+        AmbientDimmingPolicy.shouldPause(
+            screenBrightness: displayBrightness,
+            enabled: settings.value.preventAutoDimmingWhenScreenBright
+        )
     }
 
     func beginManualLampAdjustment() {

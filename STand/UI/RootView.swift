@@ -1,6 +1,14 @@
 import SwiftUI
 import UIKit
 
+struct HoldDurationAdjustment {
+    static func value(startingAt startingValue: Double, translation: CGFloat) -> Double {
+        let rawValue = startingValue + Double(translation / 300) * 290
+        let steppedValue = (rawValue / 5).rounded() * 5
+        return min(300, max(10, steppedValue))
+    }
+}
+
 private enum PresentedSheet: String, Identifiable {
     case recordings
     case settings
@@ -23,23 +31,37 @@ private struct BrightnessFeedback: Equatable {
     let value: Double
 }
 
+private enum ScreenAdjustmentAxis {
+    case vertical
+    case horizontal
+}
+
 struct RootView: View {
     @ObservedObject private var model: StandViewModel
     @ObservedObject private var audio: AudioCaptureService
     @ObservedObject private var library: RecordingLibrary
     @ObservedObject private var settings: SettingsStore
+    @ObservedObject private var weather: WeatherService
     @Environment(\.scenePhase) private var scenePhase
     @State private var presentedSheet: PresentedSheet?
     @State private var didInitialize = false
     @State private var brightnessDragState: BrightnessDragState?
     @State private var brightnessFeedback: BrightnessFeedback?
     @State private var brightnessFeedbackTask: Task<Void, Never>?
+    @State private var screenAdjustmentAxis: ScreenAdjustmentAxis?
+    @State private var holdDurationGestureStart: Double?
+    @State private var holdDurationFeedback: Double?
+    @State private var holdDurationFeedbackTask: Task<Void, Never>?
+    @State private var clockScaleGestureStart: Double?
+    @State private var clockScaleFeedback: Double?
+    @State private var clockScaleFeedbackTask: Task<Void, Never>?
 
     init(model: StandViewModel) {
         _model = ObservedObject(wrappedValue: model)
         _audio = ObservedObject(wrappedValue: model.audio)
         _library = ObservedObject(wrappedValue: model.library)
         _settings = ObservedObject(wrappedValue: model.settings)
+        _weather = ObservedObject(wrappedValue: model.weather)
     }
 
     var body: some View {
@@ -72,10 +94,22 @@ struct RootView: View {
                     BrightnessFeedbackView(feedback: brightnessFeedback)
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
+
+                if let clockScaleFeedback {
+                    ClockScaleFeedbackView(scale: clockScaleFeedback)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
+
+
+                if let holdDurationFeedback {
+                    HoldDurationFeedbackView(duration: holdDurationFeedback)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
             }
         }
         .contentShape(Rectangle())
-        .gesture(verticalBrightnessGesture.exclusively(before: tapToWakeGesture))
+        .gesture(screenAdjustmentGesture.exclusively(before: tapToWakeGesture))
+        .simultaneousGesture(clockMagnificationGesture)
         .persistentSystemOverlays(.hidden)
         .sheet(item: $presentedSheet) { sheet in
             switch sheet {
@@ -130,6 +164,15 @@ struct RootView: View {
                     .foregroundStyle(.white.opacity(0.42))
             }
 
+            if !isPortrait {
+                WeatherBadge(
+                    service: weather,
+                    isDimmed: false,
+                    dimmedIntensity: settings.value.silhouetteIntensity,
+                    compact: true
+                )
+            }
+
             BatteryStatusPill(status: model.batteryStatus)
         }
         .foregroundStyle(.white.opacity(0.82))
@@ -140,12 +183,7 @@ struct RootView: View {
     @ViewBuilder
     private func centerContent(isPortrait: Bool) -> some View {
         if model.isNightSessionActive {
-            NightClock(
-                phase: model.lampPhase,
-                intensity: model.lampIntensity,
-                isPortrait: isPortrait,
-                isDimmed: false
-            )
+            clockAndWeather(isPortrait: isPortrait, isDimmed: false)
         } else {
             VStack(spacing: 16) {
                 Image(systemName: "moon.stars.fill")
@@ -177,13 +215,7 @@ struct RootView: View {
 
     private func silhouetteInfo(isPortrait: Bool) -> some View {
         VStack(spacing: 14) {
-            NightClock(
-                phase: .off,
-                intensity: 0,
-                isPortrait: isPortrait,
-                isDimmed: true
-            )
-            .opacity(settings.value.silhouetteIntensity / 0.035)
+            clockAndWeather(isPortrait: isPortrait, isDimmed: true)
 
             Label(
                 silhouetteBatteryText,
@@ -203,10 +235,43 @@ struct RootView: View {
         return "배터리 \(Int((level * 100).rounded()))%"
     }
 
-    private var verticalBrightnessGesture: some Gesture {
+    private func clockAndWeather(isPortrait: Bool, isDimmed: Bool) -> some View {
+        ZStack {
+            NightClock(
+                phase: isDimmed ? .off : model.lampPhase,
+                intensity: isDimmed ? 0 : model.lampIntensity,
+                isPortrait: isPortrait,
+                isDimmed: isDimmed,
+                dimmedIntensity: settings.value.silhouetteIntensity,
+                clockScale: settings.value.clockScale,
+                clockFont: settings.value.clockFont,
+                automaticDimmingPaused: model.automaticDimmingPaused
+            )
+
+            if isPortrait {
+                WeatherBadge(
+                    service: weather,
+                    isDimmed: isDimmed,
+                    dimmedIntensity: settings.value.silhouetteIntensity
+                )
+                .offset(y: -145 - max(0, settings.value.clockScale - 1) * 54)
+            }
+        }
+    }
+
+    private var screenAdjustmentGesture: some Gesture {
         DragGesture(minimumDistance: 10)
             .onChanged { value in
-                guard abs(value.translation.height) > abs(value.translation.width) else { return }
+                if screenAdjustmentAxis == nil {
+                    screenAdjustmentAxis = abs(value.translation.height) > abs(value.translation.width)
+                        ? .vertical
+                        : .horizontal
+                }
+
+                guard screenAdjustmentAxis == .vertical else {
+                    updateHoldDuration(with: value.translation.width)
+                    return
+                }
 
                 let state: BrightnessDragState
                 if let brightnessDragState {
@@ -230,7 +295,7 @@ struct RootView: View {
                     adjustedValue = min(1, max(0.15, state.startingValue + change))
                     model.updateManualLampBrightness(adjustedValue)
                 case .silhouette:
-                    adjustedValue = min(0.12, max(0.005, state.startingValue + change * 0.12))
+                    adjustedValue = min(0.2, max(0.005, state.startingValue + change * 0.2))
                     settings.value.silhouetteIntensity = adjustedValue
                 }
 
@@ -243,11 +308,21 @@ struct RootView: View {
                 }
             }
             .onEnded { _ in
-                if brightnessDragState?.target == .lamp {
-                    model.endManualLampAdjustment()
+                switch screenAdjustmentAxis {
+                case .vertical:
+                    if brightnessDragState?.target == .lamp {
+                        model.endManualLampAdjustment()
+                    }
+                    brightnessDragState = nil
+                    scheduleBrightnessFeedbackHide()
+                case .horizontal:
+                    holdDurationGestureStart = nil
+                    model.activateLamp()
+                    scheduleHoldDurationFeedbackHide()
+                case nil:
+                    break
                 }
-                brightnessDragState = nil
-                scheduleBrightnessFeedbackHide()
+                screenAdjustmentAxis = nil
             }
     }
 
@@ -255,9 +330,57 @@ struct RootView: View {
         TapGesture()
             .onEnded {
                 if model.isNightSessionActive {
-                    model.activateLamp()
-                    model.revealControls()
+                    if model.lampPhase == .off {
+                        model.activateLamp()
+                        model.revealControls()
+                    } else {
+                        model.dimLampNow()
+                    }
                 }
+            }
+    }
+
+    private func updateHoldDuration(with horizontalTranslation: CGFloat) {
+        let startingValue: Double
+        if let holdDurationGestureStart {
+            startingValue = holdDurationGestureStart
+        } else {
+            startingValue = settings.value.holdDuration
+            holdDurationGestureStart = startingValue
+        }
+
+        let duration = HoldDurationAdjustment.value(
+            startingAt: startingValue,
+            translation: horizontalTranslation
+        )
+        settings.value.holdDuration = duration
+        holdDurationFeedbackTask?.cancel()
+        withAnimation(.easeOut(duration: 0.12)) {
+            holdDurationFeedback = duration
+        }
+    }
+
+    private var clockMagnificationGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { magnification in
+                let startingScale: Double
+                if let clockScaleGestureStart {
+                    startingScale = clockScaleGestureStart
+                } else {
+                    startingScale = settings.value.clockScale
+                    clockScaleGestureStart = startingScale
+                }
+
+                let scale = min(1.35, max(0.7, startingScale * Double(magnification)))
+                settings.value.clockScale = scale
+                clockScaleFeedbackTask?.cancel()
+                withAnimation(.easeOut(duration: 0.12)) {
+                    clockScaleFeedback = scale
+                }
+            }
+            .onEnded { _ in
+                clockScaleGestureStart = nil
+                scheduleClockScaleFeedbackHide()
             }
     }
 
@@ -269,6 +392,32 @@ struct RootView: View {
             await MainActor.run {
                 withAnimation(.easeOut(duration: 0.25)) {
                     brightnessFeedback = nil
+                }
+            }
+        }
+    }
+
+    private func scheduleClockScaleFeedbackHide() {
+        clockScaleFeedbackTask?.cancel()
+        clockScaleFeedbackTask = Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    clockScaleFeedback = nil
+                }
+            }
+        }
+    }
+
+    private func scheduleHoldDurationFeedbackHide() {
+        holdDurationFeedbackTask?.cancel()
+        holdDurationFeedbackTask = Task {
+            try? await Task.sleep(for: .seconds(1.2))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    holdDurationFeedback = nil
                 }
             }
         }
@@ -334,11 +483,11 @@ struct RootView: View {
             model.activateLamp()
         }
         ControlButton(
-            title: "화면 어둡게",
+            title: "지금 어둡게",
             systemImage: "moon.fill",
-            hint: "화면 조명과 플래시를 지금 끕니다"
+            hint: "주변 밝기 보호와 관계없이 화면 조명과 플래시를 자연스럽게 어둡힙니다"
         ) {
-            model.turnOffLamp(animated: true)
+            model.dimLampNow()
         }
         ControlButton(
             title: compact ? "감지 종료" : "취침 감지 종료",
@@ -380,7 +529,10 @@ struct RootView: View {
     }
 
     private var tapToControlText: some View {
-        Text("화면을 탭해 제어")
+        Label(
+            model.lampPhase == .off ? "탭하면 조명 켜짐" : "탭하면 자연스럽게 어두워짐",
+            systemImage: model.lampPhase == .off ? "lightbulb.fill" : "moon.fill"
+        )
             .font(.caption)
             .foregroundStyle(.white.opacity(0.24))
             .padding(.vertical, 12)
@@ -489,7 +641,7 @@ private struct BrightnessFeedbackView: View {
     private var normalizedValue: Double {
         switch feedback.target {
         case .lamp: (feedback.value - 0.15) / 0.85
-        case .silhouette: (feedback.value - 0.005) / 0.115
+        case .silhouette: (feedback.value - 0.005) / 0.195
         }
     }
 
@@ -498,11 +650,136 @@ private struct BrightnessFeedbackView: View {
     }
 }
 
+private struct ClockScaleFeedbackView: View {
+    let scale: Double
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                .font(.title2)
+            Text("시계 크기")
+                .font(.caption.weight(.semibold))
+            Text("\(Int((scale * 100).rounded()))%")
+                .font(.caption2.monospacedDigit())
+        }
+        .foregroundStyle(.white.opacity(0.72))
+        .padding(.horizontal, 22)
+        .padding(.vertical, 16)
+        .background(.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct HoldDurationFeedbackView: View {
+    let duration: Double
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "timer")
+                .font(.title2)
+            Text("어두워지기까지")
+                .font(.caption.weight(.semibold))
+            ProgressView(value: (duration - 10) / 290)
+                .tint(.white.opacity(0.82))
+                .frame(width: 140)
+            Text(durationText)
+                .font(.caption2.monospacedDigit())
+        }
+        .foregroundStyle(.white.opacity(0.78))
+        .padding(.horizontal, 22)
+        .padding(.vertical, 16)
+        .background(.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var durationText: String {
+        let seconds = Int(duration.rounded())
+        if seconds < 60 { return "\(seconds)초" }
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        return remainder == 0 ? "\(minutes)분" : "\(minutes)분 \(remainder)초"
+    }
+}
+
+private struct WeatherBadge: View {
+    @ObservedObject var service: WeatherService
+    let isDimmed: Bool
+    let dimmedIntensity: Double
+    var compact = false
+
+    var body: some View {
+        HStack(spacing: compact ? 6 : 9) {
+            Image(systemName: systemImage)
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: compact ? 13 : 18, weight: .medium))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(primaryText)
+                    .font(compact ? .caption2.weight(.semibold) : .subheadline.weight(.semibold))
+                if !compact, let secondaryText {
+                    Text(secondaryText)
+                        .font(.caption2)
+                        .opacity(0.72)
+                }
+            }
+        }
+        .foregroundStyle(.white.opacity(isDimmed ? dimmedIntensity : 0.62))
+        .padding(.horizontal, compact ? 9 : 13)
+        .padding(.vertical, compact ? 6 : 9)
+        .background(.white.opacity(isDimmed ? dimmedIntensity * 0.18 : 0.06), in: Capsule())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var systemImage: String {
+        if let weather = service.weather { return weather.systemImage }
+        return switch service.availability {
+        case .locationDenied: "location.slash.fill"
+        case .failed: "exclamationmark.icloud.fill"
+        default: "location.fill"
+        }
+    }
+
+    private var primaryText: String {
+        if let weather = service.weather {
+            return "\(Int(weather.temperature.rounded()))°  \(weather.summary)"
+        }
+        return switch service.availability {
+        case .idle, .requestingLocation: "현재 위치 확인 중"
+        case .loading: "날씨 불러오는 중"
+        case .locationDenied: "위치 권한 필요"
+        case .failed: "날씨 확인 필요"
+        case .available: "날씨 정보"
+        }
+    }
+
+    private var secondaryText: String? {
+        guard let weather = service.weather else {
+            return service.availability == .locationDenied ? "설정에서 위치 접근을 허용해 주세요" : nil
+        }
+        var parts = ["체감 \(Int(weather.apparentTemperature.rounded()))°"]
+        if weather.precipitation > 0 {
+            parts.append("강수 \(weather.precipitation.formatted(.number.precision(.fractionLength(1))))mm")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var accessibilityText: String {
+        [primaryText, secondaryText].compactMap { $0 }.joined(separator: ", ")
+    }
+}
+
 private struct NightClock: View {
     let phase: LampPhase
     let intensity: Double
     let isPortrait: Bool
     let isDimmed: Bool
+    let dimmedIntensity: Double
+    let clockScale: Double
+    let clockFont: ClockFontChoice
+    let automaticDimmingPaused: Bool
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -510,12 +787,14 @@ private struct NightClock: View {
                 FlipClockFace(
                     date: context.date,
                     isPortrait: isPortrait,
-                    isDimmed: isDimmed
+                    isDimmed: isDimmed,
+                    clockScale: clockScale,
+                    clockFont: clockFont
                 )
 
                 Text(context.date, format: .dateTime.month().day().weekday(.wide))
                     .font(.system(.subheadline, design: .rounded, weight: .medium))
-                    .foregroundStyle(.white.opacity(isDimmed ? 0.035 : 0.48))
+                    .foregroundStyle(.white.opacity(isDimmed ? dimmedIntensity : 0.48))
 
                 if !isDimmed {
                     Text(statusText)
@@ -525,16 +804,19 @@ private struct NightClock: View {
                 }
             }
             .foregroundStyle(
-                .white.opacity(isDimmed ? 0.035 : max(0.12, min(0.88, 0.22 + intensity)))
+                .white.opacity(isDimmed ? dimmedIntensity : max(0.12, min(0.88, 0.22 + intensity)))
             )
             .accessibilityElement(children: .combine)
         }
     }
 
     private var statusText: String {
-        switch phase {
+        if automaticDimmingPaused {
+            return "현재 상태 · 밝은 환경으로 판단해 자동 감광 보류 중"
+        }
+        return switch phase {
         case .off: "대기 상태 · 박수 또는 화면 탭을 기다리는 중"
-        case .holding: "현재 상태 · 화면 조명 켜짐"
+        case .holding: "현재 상태 · 조명 켜짐 · 탭하면 자연스럽게 어두워짐"
         case .fading: "현재 상태 · 화면 조명이 서서히 어두워지는 중"
         }
     }
@@ -544,6 +826,8 @@ private struct FlipClockFace: View {
     let date: Date
     let isPortrait: Bool
     let isDimmed: Bool
+    let clockScale: Double
+    let clockFont: ClockFontChoice
 
     var body: some View {
         let components = Calendar.current.dateComponents([.hour, .minute], from: date)
@@ -551,17 +835,21 @@ private struct FlipClockFace: View {
             FlipClockCard(
                 value: String(format: "%02d", components.hour ?? 0),
                 isPortrait: isPortrait,
-                isDimmed: isDimmed
+                isDimmed: isDimmed,
+                clockFont: clockFont
             )
             Text(":")
-                .font(.system(size: isPortrait ? 48 : 62, weight: .ultraLight, design: .rounded))
+                .font(clockFont.font(size: isPortrait ? 48 : 62))
                 .opacity(isDimmed ? 0.5 : 0.8)
             FlipClockCard(
                 value: String(format: "%02d", components.minute ?? 0),
                 isPortrait: isPortrait,
-                isDimmed: isDimmed
+                isDimmed: isDimmed,
+                clockFont: clockFont
             )
         }
+        .scaleEffect(clockScale)
+        .frame(height: (isPortrait ? 92 : 116) * clockScale)
         .contentTransition(.numericText())
         .animation(.easeInOut(duration: 0.35), value: components.minute)
     }
@@ -571,6 +859,7 @@ private struct FlipClockCard: View {
     let value: String
     let isPortrait: Bool
     let isDimmed: Bool
+    let clockFont: ClockFontChoice
 
     var body: some View {
         ZStack {
@@ -586,11 +875,7 @@ private struct FlipClockCard: View {
                 .frame(height: 1)
 
             Text(value)
-                .font(.system(
-                    size: isPortrait ? 64 : 82,
-                    weight: .thin,
-                    design: .rounded
-                ))
+                .font(clockFont.font(size: isPortrait ? 64 : 82))
                 .monospacedDigit()
                 .minimumScaleFactor(0.7)
         }

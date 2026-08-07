@@ -1,8 +1,31 @@
 import AVFoundation
+import UIKit
 import XCTest
 @testable import STand
 
 final class AudioAnalysisTests: XCTestCase {
+    func testBundledClockFontsAreRegistered() {
+        for choice in ClockFontChoice.allCases {
+            guard let postScriptName = choice.postScriptName else { continue }
+
+            XCTAssertNotNil(
+                UIFont(name: postScriptName, size: 24),
+                "\(choice.displayName) 폰트가 앱에 등록되지 않았습니다: \(postScriptName)"
+            )
+        }
+    }
+
+    func testBundledClockFontLicensesAreIncluded() {
+        for choice in ClockFontChoice.allCases {
+            guard let filename = choice.licenseFilename else { continue }
+
+            XCTAssertNotNil(
+                Bundle.main.url(forResource: filename, withExtension: "txt"),
+                "\(choice.displayName) 라이선스 파일이 앱에 포함되지 않았습니다: \(filename).txt"
+            )
+        }
+    }
+
     func testLegacySettingsDefaultToAutomaticOrientation() throws {
         let legacyJSON = """
         {
@@ -20,7 +43,10 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertFalse(settings.torchEnabled)
         XCTAssertEqual(settings.torchIntensity, 0.25)
         XCTAssertFalse(settings.wakeOnSleepSound)
-        XCTAssertEqual(settings.silhouetteIntensity, 0.035)
+        XCTAssertEqual(settings.silhouetteIntensity, 0.05)
+        XCTAssertEqual(settings.clockScale, 1)
+        XCTAssertEqual(settings.clockFont, .systemRounded)
+        XCTAssertTrue(settings.preventAutoDimmingWhenScreenBright)
     }
 
     func testOrientationPreferenceRoundTripsThroughSettingsEncoding() throws {
@@ -35,6 +61,8 @@ final class AudioAnalysisTests: XCTestCase {
     func testTorchAndSoundWakeSettingsRoundTrip() throws {
         let settings = AppSettings(
             silhouetteIntensity: 0.08,
+            clockScale: 1.25,
+            clockFont: .doHyeon,
             torchEnabled: true,
             torchIntensity: 0.4,
             wakeOnSleepSound: true
@@ -47,6 +75,31 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(decoded.torchIntensity, 0.4)
         XCTAssertTrue(decoded.wakeOnSleepSound)
         XCTAssertEqual(decoded.silhouetteIntensity, 0.08)
+        XCTAssertEqual(decoded.clockScale, 1.25)
+        XCTAssertEqual(decoded.clockFont, .doHyeon)
+        XCTAssertTrue(decoded.preventAutoDimmingWhenScreenBright)
+    }
+
+    func testWeatherResponseDecodesAndMapsKoreanCondition() throws {
+        let data = """
+        {
+          "current": {
+            "temperature_2m": 24.6,
+            "apparent_temperature": 26.1,
+            "precipitation": 0.4,
+            "weather_code": 61,
+            "is_day": 1
+          }
+        }
+        """.data(using: .utf8)!
+
+        let weather = try WeatherService.decodeWeather(from: data)
+
+        XCTAssertEqual(weather.temperature, 24.6)
+        XCTAssertEqual(weather.apparentTemperature, 26.1)
+        XCTAssertEqual(weather.precipitation, 0.4)
+        XCTAssertEqual(weather.summary, "비")
+        XCTAssertEqual(weather.systemImage, "cloud.rain.fill")
     }
 
     func testBatteryProtectionOnlyStopsWhenLowAndUnplugged() {
@@ -62,6 +115,24 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertFalse(
             DeviceBatteryStatus(level: nil, powerState: .unknown).shouldProtectBattery
         )
+    }
+
+    func testAmbientDimmingPolicyOnlyPausesForBrightScreenWhenEnabled() {
+        XCTAssertTrue(
+            AmbientDimmingPolicy.shouldPause(screenBrightness: 0.65, enabled: true)
+        )
+        XCTAssertFalse(
+            AmbientDimmingPolicy.shouldPause(screenBrightness: 0.64, enabled: true)
+        )
+        XCTAssertFalse(
+            AmbientDimmingPolicy.shouldPause(screenBrightness: 1, enabled: false)
+        )
+    }
+
+    func testHorizontalDragAdjustsHoldDurationBetweenTenSecondsAndFiveMinutes() {
+        XCTAssertEqual(HoldDurationAdjustment.value(startingAt: 60, translation: 300), 300)
+        XCTAssertEqual(HoldDurationAdjustment.value(startingAt: 60, translation: -300), 10)
+        XCTAssertEqual(HoldDurationAdjustment.value(startingAt: 60, translation: 30), 90)
     }
 
     func testLampEnvelopeHoldsThenFadesSmoothly() {
