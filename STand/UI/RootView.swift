@@ -72,6 +72,7 @@ struct RootView: View {
     @ObservedObject private var settings: SettingsStore
     @ObservedObject private var weather: WeatherService
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @State private var presentedSheet: PresentedSheet?
     @State private var didInitialize = false
     @State private var brightnessDragState: BrightnessDragState?
@@ -84,6 +85,10 @@ struct RootView: View {
     @State private var clockScaleGestureStart: Double?
     @State private var clockScaleFeedback: Double?
     @State private var clockScaleFeedbackTask: Task<Void, Never>?
+    @State private var isEditingScreen = false
+    @State private var editingLayout = StandScreenLayout.portrait
+    @State private var editingIsPortrait = true
+    @State private var currentIsPortrait = true
 
     init(model: StandViewModel) {
         _model = ObservedObject(wrappedValue: model)
@@ -100,44 +105,75 @@ struct RootView: View {
             ZStack {
                 LampBackground(intensity: model.lampIntensity)
 
-                if model.isDisplayDark, didInitialize {
-                    silhouetteInfo(isPortrait: isPortrait)
-                        .transition(.opacity)
-                }
+                if !isEditingScreen {
+                    if model.isDisplayDark, didInitialize {
+                        silhouetteInfo(isPortrait: isPortrait, canvasSize: proxy.size)
+                            .transition(.opacity)
+                    }
 
-                VStack(spacing: 0) {
-                    topBar(isPortrait: isPortrait)
-                    Spacer(minLength: 0)
-                    bottomControls(isPortrait: isPortrait)
-                }
-                .padding(.horizontal, isPortrait ? 20 : 32)
-                .padding(.vertical, isPortrait ? 18 : 20)
-                .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
-
-                centerContent(isPortrait: isPortrait)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    VStack(spacing: 0) {
+                        topBar(isPortrait: isPortrait)
+                        Spacer(minLength: 0)
+                        bottomControls(isPortrait: isPortrait)
+                    }
                     .padding(.horizontal, isPortrait ? 20 : 32)
+                    .padding(.top, isPortrait ? 18 : 20)
+                    .padding(.bottom, isPortrait ? 18 : 6)
                     .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
 
-                statusBanners
-                    .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
+                    centerContent(isPortrait: isPortrait, canvasSize: proxy.size)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.horizontal, isPortrait ? 20 : 32)
+                        .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
 
-                if let brightnessFeedback {
-                    BrightnessFeedbackView(feedback: brightnessFeedback)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    statusBanners
+                        .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
+
+                    if let brightnessFeedback {
+                        BrightnessFeedbackView(feedback: brightnessFeedback)
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    }
+
+                    if let clockScaleFeedback {
+                        ClockScaleFeedbackView(scale: clockScaleFeedback)
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    }
+
+                    if let holdDurationFeedback {
+                        HoldDurationFeedbackView(duration: holdDurationFeedback)
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    }
                 }
 
-                if let clockScaleFeedback {
-                    ClockScaleFeedbackView(scale: clockScaleFeedback)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                }
-
-
-                if let holdDurationFeedback {
-                    HoldDurationFeedbackView(duration: holdDurationFeedback)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                if isEditingScreen {
+                    ScreenEditorView(
+                        layout: $editingLayout,
+                        isPortrait: editingIsPortrait,
+                        weather: weather,
+                        clockFont: Binding(
+                            get: { settings.value.clockFont },
+                            set: { settings.value.clockFont = $0 }
+                        ),
+                        hourMode: Binding(
+                            get: { settings.value.clockHourMode },
+                            set: { settings.value.clockHourMode = $0 }
+                        ),
+                        threshold: Binding(
+                            get: { settings.value.brightnessModeThreshold },
+                            set: { settings.value.brightnessModeThreshold = $0 }
+                        ),
+                        currentBrightness: model.displayBrightness,
+                        onReset: {
+                            editingLayout = editingIsPortrait ? .portrait : .landscape
+                        },
+                        onSave: saveScreenLayout
+                    )
+                    .transition(.opacity)
+                    .zIndex(20)
                 }
             }
+            .onAppear { currentIsPortrait = isPortrait }
+            .onChange(of: isPortrait) { _, value in currentIsPortrait = value }
         }
         .contentShape(Rectangle())
         .gesture(screenAdjustmentGesture.exclusively(before: screenPressGesture))
@@ -229,9 +265,9 @@ struct RootView: View {
     }
 
     @ViewBuilder
-    private func centerContent(isPortrait: Bool) -> some View {
+    private func centerContent(isPortrait: Bool, canvasSize: CGSize) -> some View {
         if model.isNightSessionActive {
-            clockAndWeather(isPortrait: isPortrait, isDimmed: false)
+            clockAndWeather(isPortrait: isPortrait, isDimmed: false, canvasSize: canvasSize)
         } else {
             VStack(spacing: 16) {
                 Image(systemName: "moon.stars.fill")
@@ -261,9 +297,9 @@ struct RootView: View {
         }
     }
 
-    private func silhouetteInfo(isPortrait: Bool) -> some View {
+    private func silhouetteInfo(isPortrait: Bool, canvasSize: CGSize) -> some View {
         ZStack {
-            clockAndWeather(isPortrait: isPortrait, isDimmed: true)
+            clockAndWeather(isPortrait: isPortrait, isDimmed: true, canvasSize: canvasSize)
 
             Label(
                 silhouetteBatteryText,
@@ -284,48 +320,62 @@ struct RootView: View {
         return "배터리 \(Int((level * 100).rounded()))%"
     }
 
-    private func clockAndWeather(isPortrait: Bool, isDimmed: Bool) -> some View {
-        TimelineView(.periodic(from: .now, by: 60)) { context in
-            let burnInOffset = BurnInProtection.offset(at: context.date)
-            let sharedVerticalOffset = CGFloat(isPortrait ? -36 : 0) + burnInOffset.height
+    private func clockAndWeather(
+        isPortrait: Bool,
+        isDimmed: Bool,
+        canvasSize: CGSize
+    ) -> some View {
+        DashboardCanvas(
+            service: weather,
+            layout: isPortrait ? settings.value.portraitLayout : settings.value.landscapeLayout,
+            canvasSize: canvasSize,
+            isPortrait: isPortrait,
+            isDimmed: isDimmed,
+            dimmedIntensity: settings.value.silhouetteIntensity,
+            intensity: isDimmed ? 0 : model.lampIntensity,
+            clockScale: settings.value.clockScale,
+            clockFont: settings.value.clockFont,
+            hourMode: settings.value.clockHourMode,
+            statusText: dashboardStatusText,
+            currentBrightness: model.displayBrightness,
+            brightnessThreshold: Binding(
+                get: { settings.value.brightnessModeThreshold },
+                set: { settings.value.brightnessModeThreshold = $0 }
+            )
+        )
+    }
 
-            ZStack {
-                NightClock(
-                    phase: isDimmed ? .off : model.lampPhase,
-                    intensity: isDimmed ? 0 : model.lampIntensity,
-                    isPortrait: isPortrait,
-                    isDimmed: isDimmed,
-                    dimmedIntensity: settings.value.silhouetteIntensity,
-                    clockScale: settings.value.clockScale,
-                    clockFont: settings.value.clockFont,
-                    automaticDimmingEnabled: settings.value.automaticDimmingEnabled,
-                    automaticDimmingPaused: model.automaticDimmingPaused,
-                    manualDimmingHoldActive: model.manualDimmingHoldActive
-                )
-                .offset(x: burnInOffset.width, y: sharedVerticalOffset)
-                .animation(.easeInOut(duration: 4), value: burnInOffset)
-
-                WeatherBadge(
-                    service: weather,
-                    isPortrait: isPortrait,
-                    isDimmed: isDimmed,
-                    dimmedIntensity: settings.value.silhouetteIntensity,
-                    clockScale: settings.value.clockScale
-                )
-                .offset(
-                    x: burnInOffset.width,
-                    y: isPortrait
-                        ? -178 - max(0, settings.value.clockScale - 1) * 62 + sharedVerticalOffset
-                        : -124 - max(0, settings.value.clockScale - 1) * 40 + sharedVerticalOffset
-                )
-                .animation(.easeInOut(duration: 4), value: burnInOffset)
-            }
+    private var dashboardStatusText: String {
+        if model.displayBrightness < settings.value.brightnessModeThreshold {
+            return "현재 상태 · 슬리핑 모드"
         }
+        return switch model.lampPhase {
+        case .off: "현재 상태 · 스탠드 대기"
+        case .holding: "현재 상태 · 스탠드 모드"
+        case .fading: "현재 상태 · 스탠드 감광 중"
+        }
+    }
+
+    private func enterScreenEditing(isPortrait: Bool) {
+        editingIsPortrait = isPortrait
+        editingLayout = isPortrait ? settings.value.portraitLayout : settings.value.landscapeLayout
+        model.revealControls()
+        withAnimation(.easeOut(duration: 0.25)) { isEditingScreen = true }
+    }
+
+    private func saveScreenLayout() {
+        if editingIsPortrait {
+            settings.value.portraitLayout = editingLayout
+        } else {
+            settings.value.landscapeLayout = editingLayout
+        }
+        withAnimation(.easeOut(duration: 0.25)) { isEditingScreen = false }
     }
 
     private var screenAdjustmentGesture: some Gesture {
         DragGesture(minimumDistance: 10)
             .onChanged { value in
+                guard !isEditingScreen else { return }
                 if screenAdjustmentAxis == nil {
                     screenAdjustmentAxis = abs(value.translation.height) > abs(value.translation.width)
                         ? .vertical
@@ -372,6 +422,7 @@ struct RootView: View {
                 }
             }
             .onEnded { _ in
+                guard !isEditingScreen else { return }
                 switch screenAdjustmentAxis {
                 case .vertical:
                     if brightnessDragState?.target == .lamp {
@@ -396,8 +447,8 @@ struct RootView: View {
             .onEnded { result in
                 switch result {
                 case .first(true):
-                    model.toggleManualDimmingHold()
-                    model.revealControls()
+                    guard !isEditingScreen else { return }
+                    enterScreenEditing(isPortrait: currentIsPortrait)
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 case .second:
                     handleScreenTap()
@@ -408,6 +459,7 @@ struct RootView: View {
     }
 
     private func handleScreenTap() {
+                guard !isEditingScreen else { return }
                 if model.isNightSessionActive {
                     if ScreenTapPolicy.action(for: model.lampPhase) == .brighten {
                         model.activateLamp()
@@ -441,6 +493,7 @@ struct RootView: View {
     private var clockMagnificationGesture: some Gesture {
         MagnificationGesture()
             .onChanged { magnification in
+                guard !isEditingScreen else { return }
                 let startingScale: Double
                 if let clockScaleGestureStart {
                     startingScale = clockScaleGestureStart
@@ -457,6 +510,7 @@ struct RootView: View {
                 }
             }
             .onEnded { _ in
+                guard !isEditingScreen else { return }
                 clockScaleGestureStart = nil
                 scheduleClockScaleFeedbackHide()
             }
@@ -554,18 +608,20 @@ struct RootView: View {
     @ViewBuilder
     private func nightControlButtons(compact: Bool) -> some View {
         ControlButton(
-            title: compact ? "조명 켜기" : "화면 조명 켜기",
-            systemImage: "lightbulb.fill",
-            hint: "화면을 밝히고 설정에 따라 플래시도 켭니다"
+            title: "플래시 연동",
+            systemImage: settings.value.torchEnabled ? "flashlight.on.fill" : "flashlight.off.fill",
+            status: settings.value.torchEnabled ? "화면 점등과 함께 켜짐" : "사용 안 함",
+            hint: "화면이 켜질 때 후면 플래시를 함께 켤지 바꿉니다"
         ) {
-            model.activateLamp()
+            settings.value.torchEnabled.toggle()
+            if settings.value.torchEnabled { model.activateLamp() }
         }
         ControlButton(
-            title: "지금 어둡게",
-            systemImage: "moon.fill",
-            hint: "주변 밝기 보호와 관계없이 화면 조명과 플래시를 자연스럽게 어둡힙니다"
+            title: "AiShot 실행",
+            systemImage: "camera.aperture",
+            hint: "HanClip의 AiShot 촬영 화면을 엽니다"
         ) {
-            model.dimLampNow()
+            if let url = URL(string: "hanclip://aishot") { openURL(url) }
         }
         ControlButton(
             title: compact ? "감지 종료" : "취침 감지 종료",
@@ -863,6 +919,634 @@ private struct WeatherBadge: View {
     }
 }
 
+private enum WeatherPiece: Int, CaseIterable, Identifiable {
+    case icon
+    case temperature
+    case condition
+
+    var id: Int { rawValue }
+}
+
+private extension StandScreenLayout {
+    func weatherTransform(at index: Int) -> PanelTransform {
+        switch index {
+        case 0: weatherIcon
+        case 1: weatherTemperature
+        default: weatherCondition
+        }
+    }
+
+    mutating func setWeatherTransform(_ transform: PanelTransform, at index: Int) {
+        switch index {
+        case 0: weatherIcon = transform
+        case 1: weatherTemperature = transform
+        default: weatherCondition = transform
+        }
+    }
+}
+
+private struct DashboardCanvas: View {
+    @ObservedObject var service: WeatherService
+    let layout: StandScreenLayout
+    let canvasSize: CGSize
+    let isPortrait: Bool
+    let isDimmed: Bool
+    let dimmedIntensity: Double
+    let intensity: Double
+    let clockScale: Double
+    let clockFont: ClockFontChoice
+    let hourMode: ClockHourMode
+    let statusText: String
+    let currentBrightness: Double
+    @Binding var brightnessThreshold: Double
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let drift = BurnInProtection.offset(at: context.date)
+            ZStack {
+                FlipClockFace(
+                    date: context.date,
+                    isPortrait: isPortrait,
+                    isDimmed: isDimmed,
+                    clockScale: 1,
+                    clockFont: clockFont,
+                    hourMode: hourMode
+                )
+
+                Text(context.date, format: .dateTime.month().day().weekday(.wide))
+                    .font(.system(.subheadline, design: .rounded, weight: .medium))
+                    .panelTransform(layout.date, canvasSize: canvasSize)
+
+                Text(statusText)
+                    .font(.caption.weight(.medium))
+                    .panelTransform(layout.status, canvasSize: canvasSize)
+
+                BrightnessRuleBar(
+                    currentBrightness: currentBrightness,
+                    threshold: $brightnessThreshold,
+                    isDimmed: isDimmed
+                )
+                .panelTransform(layout.brightnessRule, canvasSize: canvasSize)
+                .allowsHitTesting(!isDimmed)
+
+                WeatherPanelCollection(
+                    service: service,
+                    layout: layout,
+                    isPortrait: isPortrait,
+                    isDimmed: isDimmed,
+                    globalScale: 1,
+                    canvasSize: canvasSize
+                )
+            }
+            .scaleEffect(clockScale, anchor: .center)
+            .foregroundStyle(
+                .white.opacity(isDimmed ? dimmedIntensity : max(0.12, min(0.88, 0.22 + intensity)))
+            )
+            .offset(drift)
+            .animation(.easeInOut(duration: 4), value: drift)
+        }
+    }
+}
+
+private extension View {
+    func panelTransform(
+        _ transform: PanelTransform,
+        canvasSize: CGSize,
+        globalScale: Double = 1
+    ) -> some View {
+        scaleEffect(transform.scale * globalScale)
+            .offset(
+                x: transform.x * canvasSize.width,
+                y: transform.y * canvasSize.height
+            )
+    }
+}
+
+private struct WeatherPanelCollection: View {
+    @ObservedObject var service: WeatherService
+    let layout: StandScreenLayout
+    let isPortrait: Bool
+    let isDimmed: Bool
+    let globalScale: Double
+    let canvasSize: CGSize
+
+    var body: some View {
+        let groupIDs = Array(Set(layout.weatherGroupIDs)).sorted()
+        ForEach(groupIDs, id: \.self) { groupID in
+            let pieces = WeatherPiece.allCases.filter {
+                layout.weatherGroupIDs[$0.rawValue] == groupID
+            }
+            if let first = pieces.first {
+                WeatherGroupPanel(
+                    service: service,
+                    pieces: pieces,
+                    isPortrait: isPortrait,
+                    isDimmed: isDimmed
+                )
+                .panelTransform(
+                    layout.weatherTransform(at: first.rawValue),
+                    canvasSize: canvasSize,
+                    globalScale: globalScale
+                )
+            }
+        }
+    }
+}
+
+private struct WeatherGroupPanel: View {
+    @ObservedObject var service: WeatherService
+    let pieces: [WeatherPiece]
+    let isPortrait: Bool
+    let isDimmed: Bool
+
+    var body: some View {
+        let totalWidth: CGFloat = isPortrait ? 282 : 370
+        let cell = totalWidth / 3
+        HStack(spacing: 0) {
+            ForEach(pieces) { piece in
+                WeatherPieceContent(service: service, piece: piece, isPortrait: isPortrait)
+                    .frame(width: cell, height: cell)
+            }
+        }
+        .frame(width: cell * CGFloat(pieces.count), height: cell)
+        .background(
+            FlipPanelSurface(
+                isDimmed: isDimmed,
+                cornerRadius: isPortrait ? 18 : 20,
+                splitGap: isPortrait ? 4 : 3
+            )
+        )
+    }
+}
+
+private struct WeatherPieceContent: View {
+    @ObservedObject var service: WeatherService
+    let piece: WeatherPiece
+    let isPortrait: Bool
+
+    var body: some View {
+        Group {
+            switch piece {
+            case .icon:
+                Image(systemName: service.weather?.systemImage ?? "location.fill")
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.system(size: isPortrait ? 34 : 40, weight: .medium))
+            case .temperature:
+                VStack(spacing: isPortrait ? 2 : 3) {
+                    Text(service.weather.map { "\(Int($0.temperature.rounded()))°" } ?? "--°")
+                        .font(.system(size: isPortrait ? 28 : 34, weight: .semibold, design: .rounded))
+                    Text(service.weather.map { "체감 \(Int($0.apparentTemperature.rounded()))°" } ?? "체감 --°")
+                        .font(.system(size: isPortrait ? 11 : 13, weight: .medium, design: .rounded))
+                        .opacity(0.72)
+                }
+            case .condition:
+                Text(service.weather?.summary ?? "날씨")
+                    .font(.system(size: isPortrait ? 17 : 20, weight: .semibold, design: .rounded))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+            }
+        }
+        .multilineTextAlignment(.center)
+    }
+}
+
+private struct BrightnessRuleBar: View {
+    let currentBrightness: Double
+    @Binding var threshold: Double
+    let isDimmed: Bool
+
+    var body: some View {
+        VStack(spacing: 1) {
+            HStack {
+                Text("슬리핑")
+                    .foregroundStyle(currentBrightness < threshold ? Color.orange : Color.white.opacity(0.42))
+                Spacer()
+                Text("현재 \(Int((currentBrightness * 100).rounded()))%")
+                    .monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.5))
+                Spacer()
+                Text("스탠드")
+                    .foregroundStyle(currentBrightness >= threshold ? Color.orange : Color.white.opacity(0.42))
+            }
+            .font(.system(size: 8, weight: .medium))
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.14)).frame(height: 2)
+                    Circle()
+                        .fill(Color.orange.opacity(0.9))
+                        .frame(width: 6, height: 6)
+                        .offset(x: max(0, proxy.size.width - 6) * currentBrightness)
+                }
+            }
+            .frame(height: 6)
+
+            Slider(value: $threshold, in: 0...1)
+                .tint(.white.opacity(0.48))
+                .controlSize(.mini)
+        }
+        .padding(.horizontal, 10)
+        .frame(width: 240, height: 38)
+        .background(.black.opacity(isDimmed ? 0.06 : 0.12), in: Capsule())
+        .opacity(isDimmed ? 0.5 : 0.8)
+        .accessibilityLabel("밝기 기준, 현재 \(Int(currentBrightness * 100))퍼센트, 기준 \(Int(threshold * 100))퍼센트")
+    }
+}
+
+private struct ScreenEditorView: View {
+    @Binding var layout: StandScreenLayout
+    let isPortrait: Bool
+    @ObservedObject var weather: WeatherService
+    @Binding var clockFont: ClockFontChoice
+    @Binding var hourMode: ClockHourMode
+    @Binding var threshold: Double
+    let currentBrightness: Double
+    let onReset: () -> Void
+    let onSave: () -> Void
+    @State private var showFontPalette = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            let protectedInsets = EdgeInsets(
+                top: proxy.safeAreaInsets.top + (isPortrait ? 76 : 66),
+                leading: isPortrait ? 14 : 24,
+                bottom: proxy.safeAreaInsets.bottom + (isPortrait ? 104 : 58),
+                trailing: isPortrait ? 14 : 24
+            )
+
+            ZStack {
+                Color.black.opacity(0.32).ignoresSafeArea()
+
+                Rectangle().fill(.white.opacity(0.16)).frame(width: 0.5)
+                Rectangle().fill(.white.opacity(0.16)).frame(height: 0.5)
+
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    FlipClockFace(
+                        date: context.date,
+                        isPortrait: isPortrait,
+                        isDimmed: false,
+                        clockScale: 1,
+                        clockFont: clockFont,
+                        hourMode: hourMode
+                    )
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(
+                        TapGesture(count: 2).onEnded {
+                            hourMode.toggle()
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        }
+                    )
+                    .onTapGesture { showFontPalette.toggle() }
+                }
+
+                editableWeatherPanels(
+                    canvasSize: proxy.size,
+                    protectedInsets: protectedInsets
+                )
+
+                EditablePanel(
+                    transform: $layout.date,
+                    canvasSize: proxy.size,
+                    protectedInsets: protectedInsets
+                ) {
+                    Text(Date.now, format: .dateTime.month().day().weekday(.wide))
+                        .font(.subheadline.weight(.medium))
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(.white.opacity(0.08), in: Capsule())
+                }
+
+                EditablePanel(
+                    transform: $layout.status,
+                    canvasSize: proxy.size,
+                    protectedInsets: protectedInsets
+                ) {
+                    Text("현재 상태 · 스탠드 모드")
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(.white.opacity(0.08), in: Capsule())
+                }
+
+                EditablePanel(
+                    transform: $layout.brightnessRule,
+                    canvasSize: proxy.size,
+                    protectedInsets: protectedInsets
+                ) {
+                    BrightnessRuleBar(
+                        currentBrightness: currentBrightness,
+                        threshold: $threshold,
+                        isDimmed: false
+                    )
+                }
+
+                if showFontPalette {
+                    VStack {
+                        Spacer()
+                        fontPalette
+                    }
+                    .padding(.horizontal, isPortrait ? 14 : 28)
+                    .padding(.bottom, isPortrait ? 22 : 14)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(5)
+                }
+
+                VStack {
+                    HStack {
+                        Button("초기화", action: onReset)
+                        Spacer()
+                        Text(isPortrait ? "세로 화면 편집" : "가로 화면 편집")
+                            .font(.headline)
+                        Spacer()
+                        Button("저장", action: onSave)
+                            .fontWeight(.semibold)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    Spacer()
+                }
+                .padding(isPortrait ? 18 : 14)
+                .zIndex(10)
+            }
+            .foregroundStyle(.white.opacity(0.86))
+        }
+    }
+
+    @ViewBuilder
+    private func editableWeatherPanels(
+        canvasSize: CGSize,
+        protectedInsets: EdgeInsets
+    ) -> some View {
+        let groupIDs = Array(Set(layout.weatherGroupIDs)).sorted()
+        ForEach(groupIDs, id: \.self) { groupID in
+            let pieces = WeatherPiece.allCases.filter {
+                layout.weatherGroupIDs[$0.rawValue] == groupID
+            }
+            EditablePanel(
+                transform: weatherBinding(for: groupID),
+                canvasSize: canvasSize,
+                protectedInsets: protectedInsets,
+                onEnded: { mergeWeatherGroup(groupID, canvasSize: canvasSize) }
+            ) {
+                WeatherGroupPanel(
+                    service: weather,
+                    pieces: pieces,
+                    isPortrait: isPortrait,
+                    isDimmed: false
+                )
+            }
+            .onTapGesture(count: 2) {
+                if pieces.count > 1 { splitWeatherGroup(groupID) }
+            }
+        }
+    }
+
+    private func weatherBinding(for groupID: Int) -> Binding<PanelTransform> {
+        Binding(
+            get: {
+                let index = layout.weatherGroupIDs.firstIndex(of: groupID) ?? 0
+                return layout.weatherTransform(at: index)
+            },
+            set: { newValue in
+                for index in layout.weatherGroupIDs.indices where layout.weatherGroupIDs[index] == groupID {
+                    layout.setWeatherTransform(newValue, at: index)
+                }
+            }
+        )
+    }
+
+    private func mergeWeatherGroup(_ groupID: Int, canvasSize: CGSize) {
+        let sourceIndices = layout.weatherGroupIDs.indices.filter { layout.weatherGroupIDs[$0] == groupID }
+        guard let sourceIndex = sourceIndices.first else { return }
+        let source = layout.weatherTransform(at: sourceIndex)
+        let candidates = Array(Set(layout.weatherGroupIDs)).filter { $0 != groupID }
+        let sourceBounds = weatherBounds(for: groupID, canvasSize: canvasSize)
+        guard let targetID = candidates.max(by: {
+            PanelEditingPolicy.overlapFraction(
+                sourceBounds,
+                weatherBounds(for: $0, canvasSize: canvasSize)
+            ) < PanelEditingPolicy.overlapFraction(
+                sourceBounds,
+                weatherBounds(for: $1, canvasSize: canvasSize)
+            )
+        }) else { return }
+        let target = weatherBinding(for: targetID).wrappedValue
+        let overlap = PanelEditingPolicy.overlapFraction(
+            sourceBounds,
+            weatherBounds(for: targetID, canvasSize: canvasSize)
+        )
+        guard overlap >= 0.10 else { return }
+
+        let targetIndices = layout.weatherGroupIDs.indices.filter { layout.weatherGroupIDs[$0] == targetID }
+        let leftIndex = (sourceIndices + targetIndices).min {
+            layout.weatherTransform(at: $0).x < layout.weatherTransform(at: $1).x
+        } ?? sourceIndex
+        var merged = layout.weatherTransform(at: leftIndex)
+        merged.x = (source.x + target.x) / 2
+        merged.y = (source.y + target.y) / 2
+        for index in sourceIndices + targetIndices {
+            layout.weatherGroupIDs[index] = targetID
+            layout.setWeatherTransform(merged, at: index)
+        }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    private func splitWeatherGroup(_ groupID: Int) {
+        let indices = layout.weatherGroupIDs.indices.filter { layout.weatherGroupIDs[$0] == groupID }
+        guard indices.count > 1, let first = indices.first else { return }
+        let center = layout.weatherTransform(at: first)
+        for (position, index) in indices.enumerated() {
+            layout.weatherGroupIDs[index] = index
+            var transform = center
+            transform.x += Double(position) * 0.16 - Double(indices.count - 1) * 0.08
+            layout.setWeatherTransform(transform, at: index)
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func weatherBounds(for groupID: Int, canvasSize: CGSize) -> CGRect {
+        let piecesCount = layout.weatherGroupIDs.filter { $0 == groupID }.count
+        let transform = weatherBinding(for: groupID).wrappedValue
+        let totalWidth: CGFloat = isPortrait ? 282 : 370
+        let cell = totalWidth / 3
+        let width = cell * CGFloat(piecesCount) * transform.scale
+        let height = cell * transform.scale
+        let center = CGPoint(
+            x: canvasSize.width / 2 + transform.x * canvasSize.width,
+            y: canvasSize.height / 2 + transform.y * canvasSize.height
+        )
+        return CGRect(
+            x: center.x - width / 2,
+            y: center.y - height / 2,
+            width: width,
+            height: height
+        )
+    }
+
+    private var fontPalette: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
+                spacing: 8
+            ) {
+                ForEach(ClockFontChoice.allCases) { choice in
+                    Button {
+                        clockFont = choice
+                    } label: {
+                        FontMiniClock(choice: choice, selected: choice == clockFont)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(10)
+        }
+        .frame(maxWidth: isPortrait ? 390 : 650, maxHeight: isPortrait ? 190 : 126)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+enum PanelEditingPolicy {
+    static func shouldSnapToVerticalCenter(centerOffset: CGFloat, panelWidth: CGFloat) -> Bool {
+        panelWidth > 0 && abs(centerOffset) <= panelWidth * 0.05
+    }
+
+    static func overlapFraction(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+        let intersection = lhs.intersection(rhs)
+        guard !intersection.isNull, !intersection.isEmpty else { return 0 }
+        let smallerArea = min(lhs.width * lhs.height, rhs.width * rhs.height)
+        guard smallerArea > 0 else { return 0 }
+        return intersection.width * intersection.height / smallerArea
+    }
+
+    static func clampedCenter(
+        _ proposed: CGPoint,
+        panelSize: CGSize,
+        canvasSize: CGSize,
+        insets: EdgeInsets
+    ) -> CGPoint {
+        let halfWidth = panelSize.width / 2
+        let halfHeight = panelSize.height / 2
+        let minimumX = insets.leading + halfWidth
+        let maximumX = max(minimumX, canvasSize.width - insets.trailing - halfWidth)
+        let minimumY = insets.top + halfHeight
+        let maximumY = max(minimumY, canvasSize.height - insets.bottom - halfHeight)
+        return CGPoint(
+            x: min(maximumX, max(minimumX, proposed.x)),
+            y: min(maximumY, max(minimumY, proposed.y))
+        )
+    }
+}
+
+private struct EditablePanelSizeKey: PreferenceKey {
+    static var defaultValue = CGSize.zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let next = nextValue()
+        if next != .zero { value = next }
+    }
+}
+
+private struct EditablePanel<Content: View>: View {
+    @Binding var transform: PanelTransform
+    let canvasSize: CGSize
+    let protectedInsets: EdgeInsets
+    var onEnded: () -> Void = {}
+    @ViewBuilder let content: () -> Content
+    @State private var dragStart: PanelTransform?
+    @State private var scaleStart: Double?
+    @State private var panelSize = CGSize.zero
+
+    var body: some View {
+        content()
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(key: EditablePanelSizeKey.self, value: proxy.size)
+                }
+            }
+            .onPreferenceChange(EditablePanelSizeKey.self) { panelSize = $0 }
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(.orange.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4]))
+            }
+            .panelTransform(transform, canvasSize: canvasSize)
+            .gesture(
+                DragGesture(minimumDistance: 2)
+                    .onChanged { value in
+                        let start = dragStart ?? transform
+                        dragStart = start
+                        transform.x = min(0.46, max(-0.46, start.x + value.translation.width / canvasSize.width))
+                        transform.y = min(0.44, max(-0.44, start.y + value.translation.height / canvasSize.height))
+                        constrainToEditableArea()
+                    }
+                    .onEnded { _ in
+                        let centerOffset = CGFloat(transform.x) * canvasSize.width
+                        let renderedWidth = panelSize.width * transform.scale
+                        if PanelEditingPolicy.shouldSnapToVerticalCenter(
+                            centerOffset: centerOffset,
+                            panelWidth: renderedWidth
+                        ) {
+                            transform.x = 0
+                            UISelectionFeedbackGenerator().selectionChanged()
+                        }
+                        if abs(transform.y) < 0.045 { transform.y = 0 }
+                        dragStart = nil
+                        onEnded()
+                    }
+            )
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .onChanged { value in
+                        let start = scaleStart ?? transform.scale
+                        scaleStart = start
+                        transform.scale = min(1.6, max(0.65, start * Double(value)))
+                        constrainToEditableArea()
+                    }
+                    .onEnded { _ in scaleStart = nil }
+            )
+    }
+
+
+    private func constrainToEditableArea() {
+        let scaledSize = CGSize(
+            width: panelSize.width * transform.scale,
+            height: panelSize.height * transform.scale
+        )
+        let proposedCenter = CGPoint(
+            x: canvasSize.width / 2 + transform.x * canvasSize.width,
+            y: canvasSize.height / 2 + transform.y * canvasSize.height
+        )
+        let center = PanelEditingPolicy.clampedCenter(
+            proposedCenter,
+            panelSize: scaledSize,
+            canvasSize: canvasSize,
+            insets: protectedInsets
+        )
+        transform.x = (center.x - canvasSize.width / 2) / canvasSize.width
+        transform.y = (center.y - canvasSize.height / 2) / canvasSize.height
+    }
+}
+
+private struct FontMiniClock: View {
+    let choice: ClockFontChoice
+    let selected: Bool
+
+    var body: some View {
+        HStack(spacing: 3) {
+            miniCard("12")
+            Text(":").font(choice.font(size: 16))
+            miniCard("34")
+        }
+        .padding(5)
+        .background(selected ? Color.orange.opacity(0.24) : Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func miniCard(_ value: String) -> some View {
+        Text(value)
+            .font(choice.font(size: 20))
+            .offset(y: choice.clockVerticalOffset(size: 20))
+            .frame(width: 38, height: 30)
+            .background(FlipPanelSurface(isDimmed: false, cornerRadius: 7, splitGap: 2))
+    }
+}
+
 private struct NightClock: View {
     let phase: LampPhase
     let intensity: Double
@@ -934,12 +1618,15 @@ private struct FlipClockFace: View {
     let isDimmed: Bool
     let clockScale: Double
     let clockFont: ClockFontChoice
+    var hourMode: ClockHourMode = .twentyFour
 
     var body: some View {
         let components = Calendar.current.dateComponents([.hour, .minute, .second], from: date)
+        let rawHour = components.hour ?? 0
+        let displayHour = hourMode == .twelve ? (rawHour % 12 == 0 ? 12 : rawHour % 12) : rawHour
         HStack(spacing: isPortrait ? 8 : 12) {
                 FlipClockCard(
-                    value: String(format: "%02d", components.hour ?? 0),
+                    value: String(format: "%02d", displayHour),
                     isPortrait: isPortrait,
                     isDimmed: isDimmed,
                     clockFont: clockFont

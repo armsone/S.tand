@@ -37,6 +37,12 @@
 		B00000000000000000000020 /* sample-snore-5s.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000020 /* sample-snore-5s.m4a */; };
 		B00000000000000000000021 /* sample-snore-10s.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000021 /* sample-snore-10s.m4a */; };
 		B00000000000000000000022 /* sample-snore-15s.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000022 /* sample-snore-15s.m4a */; };
+		B00000000000000000000023 /* Paperlogy-7Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000023 /* Paperlogy-7Bold.ttf */; };
+		B00000000000000000000024 /* NEXONLv1GothicRegular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000024 /* NEXONLv1GothicRegular.ttf */; };
+		B00000000000000000000025 /* Poppins-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000025 /* Poppins-Regular.ttf */; };
+		B00000000000000000000026 /* Paperlogy-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000026 /* Paperlogy-OFL.txt */; };
+		B00000000000000000000027 /* NEXONLv1Gothic-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000027 /* NEXONLv1Gothic-LICENSE.txt */; };
+		B00000000000000000000028 /* Poppins-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000028 /* Poppins-OFL.txt */; };
 		B00000000000000000000101 /* AudioAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000101 /* AudioAnalysisTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -104,6 +110,12 @@
 		F00000000000000000000020 /* sample-snore-5s.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = "sample-snore-5s.m4a"; sourceTree = "<group>"; };
 		F00000000000000000000021 /* sample-snore-10s.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = "sample-snore-10s.m4a"; sourceTree = "<group>"; };
 		F00000000000000000000022 /* sample-snore-15s.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = "sample-snore-15s.m4a"; sourceTree = "<group>"; };
+		F00000000000000000000023 /* Paperlogy-7Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Paperlogy-7Bold.ttf"; sourceTree = "<group>"; };
+		F00000000000000000000024 /* NEXONLv1GothicRegular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "NEXONLv1GothicRegular.ttf"; sourceTree = "<group>"; };
+		F00000000000000000000025 /* Poppins-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Poppins-Regular.ttf"; sourceTree = "<group>"; };
+		F00000000000000000000026 /* Paperlogy-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Paperlogy-OFL.txt"; sourceTree = "<group>"; };
+		F00000000000000000000027 /* NEXONLv1Gothic-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "NEXONLv1Gothic-LICENSE.txt"; sourceTree = "<group>"; };
+		F00000000000000000000028 /* Poppins-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Poppins-OFL.txt"; sourceTree = "<group>"; };
 		F00000000000000000000101 /* AudioAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAnalysisTests.swift; sourceTree = "<group>"; };
 		F00000000000000000000201 /* STand.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = STand.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000202 /* STandTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = STandTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -227,6 +239,9 @@
 				F00000000000000000000013 /* Tenada.ttf */,
 				F00000000000000000000014 /* BlackHanSans-Regular.ttf */,
 				F00000000000000000000015 /* DoHyeon-Regular.ttf */,
+				F00000000000000000000023 /* Paperlogy-7Bold.ttf */,
+				F00000000000000000000024 /* NEXONLv1GothicRegular.ttf */,
+				F00000000000000000000025 /* Poppins-Regular.ttf */,
 			);
 			path = Fonts;
 			sourceTree = "<group>";
@@ -240,6 +255,9 @@
 				F00000000000000000000019 /* Tenada-LICENSE.txt */,
 				F0000000000000000000001A /* BlackHanSans-OFL.txt */,
 				F0000000000000000000001B /* DoHyeon-OFL.txt */,
+				F00000000000000000000026 /* Paperlogy-OFL.txt */,
+				F00000000000000000000027 /* NEXONLv1Gothic-LICENSE.txt */,
+				F00000000000000000000028 /* Poppins-OFL.txt */,
 			);
 			path = FontLicenses;
 			sourceTree = "<group>";
@@ -418,6 +436,12 @@
 				B00000000000000000000020 /* sample-snore-5s.m4a in Resources */,
 				B00000000000000000000021 /* sample-snore-10s.m4a in Resources */,
 				B00000000000000000000022 /* sample-snore-15s.m4a in Resources */,
+				B00000000000000000000023 /* Paperlogy-7Bold.ttf in Resources */,
+				B00000000000000000000024 /* NEXONLv1GothicRegular.ttf in Resources */,
+				B00000000000000000000025 /* Poppins-Regular.ttf in Resources */,
+				B00000000000000000000026 /* Paperlogy-OFL.txt in Resources */,
+				B00000000000000000000027 /* NEXONLv1Gothic-LICENSE.txt in Resources */,
+				B00000000000000000000028 /* Poppins-OFL.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

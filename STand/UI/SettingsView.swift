@@ -43,19 +43,19 @@ struct SettingsView: View {
                     .accessibilityLabel("시계 글꼴, 현재 (store.value.clockFont.displayName)")
 
                     HStack {
-                        Text("시계 크기")
+                        Text("화면 구성 크기")
                         Slider(value: $store.value.clockScale, in: 0.7...1.35, step: 0.05)
                         Text("\(Int((store.value.clockScale * 100).rounded()))%")
                             .font(.caption.monospacedDigit())
                             .frame(width: 42, alignment: .trailing)
                     }
 
-                    Button("시계 크기 기본값") {
+                    Button("화면 구성 크기 기본값") {
                         store.value.clockScale = 1
                     }
                     .disabled(abs(store.value.clockScale - 1) < 0.001)
 
-                    Text("첫 화면에서 두 손가락을 벌리거나 오므려도 시계 크기를 바꿀 수 있습니다. 선택한 크기와 글꼴은 다음 실행에도 유지됩니다.")
+                    Text("첫 화면에서 두 손가락을 벌리거나 오므리면 시계·날짜·현재 상태·날씨 패널을 함께 확대하거나 축소합니다. 화면을 길게 누르면 편집 모드로 들어가 패널 배치와 글꼴을 바꿀 수 있습니다.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -102,12 +102,11 @@ struct SettingsView: View {
                         isOn: $store.value.multiStimulusWakeEnabled
                     )
 
-                    Toggle(
-                        "밝은 환경에서 자동 감광 보류",
-                        isOn: $store.value.preventAutoDimmingWhenScreenBright
-                    )
+                    Text("자동 디밍을 끄면 첫 화면 밝기를 계속 유지합니다. 켠 상태에서는 좌우로 밀어 어두워지기까지의 시간을 10초~5분으로 조절합니다. 화면을 탭하면 밝은 화면과 어두운 화면을 전환합니다.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
 
-                    Text("자동 디밍을 끄면 첫 화면 밝기를 계속 유지합니다. 켠 상태에서는 좌우로 밀어 어두워지기까지의 시간을 10초~5분으로 조절합니다. 화면 탭과 ‘지금 어둡게’는 자동 디밍 설정과 관계없이 동작합니다.")
+                    Text("첫 화면의 얇은 밝기 기준선에서 주황색 표시는 현재 화면 밝기이고, 슬라이더는 수면·스탠드 모드의 경계입니다. 현재 밝기가 경계보다 낮으면 수면 모드, 높으면 스탠드 모드입니다. 경계를 맨 왼쪽에 두면 계속 스탠드 모드로 유지됩니다.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
@@ -267,8 +266,9 @@ private struct ClockFontLicensesView: View {
     var body: some View {
         List {
             Section {
-                Text("S.tand는 시계 표시를 위해 HanClip에서 검증해 보관한 프리텐다드, 카카오 Big Sans, 나눔고딕, 태나다, 검은고딕, 도현의 원본 서체 파일을 수정하지 않고 포함합니다.")
-                Text("이 서체들은 SIL Open Font License 1.1에 따라 앱·소프트웨어 번들 및 임베딩이 허용됩니다. 서체 파일 자체를 단독 판매하지 않으며, 각 저작권 고지와 라이선스 전문을 앱 번들에 함께 보관합니다.")
+                Text("S.tand는 시계 표시를 위해 HanClip에서 검증해 보관한 프리텐다드, 카카오 Big Sans, 나눔고딕, 태나다, 검은고딕, 도현, 페이퍼로지 Bold, 넥슨 Lv.1 고딕, Poppins의 원본 서체 파일을 수정하지 않고 포함합니다.")
+                Text("프리텐다드, 카카오 Big Sans, 나눔고딕, 태나다, 검은고딕, 도현, 페이퍼로지와 Poppins는 SIL Open Font License 1.1에 따라 앱·소프트웨어 번들 및 임베딩이 허용됩니다. 서체 파일 자체를 단독 판매하지 않으며, 각 저작권 고지와 라이선스 전문을 앱 번들에 함께 보관합니다.")
+                Text("페이퍼로지는 제작자의 공식 저장소에서 배포한 1.001 Bold 원본이며, Poppins는 Google Fonts 공식 저장소의 Regular 원본입니다. 넥슨 Lv.1 고딕의 저작권은 NEXON Korea에 있으며 공식 이용 조건에 따라 원본 파일과 저작권 안내를 함께 번들합니다.")
             } header: {
                 Text("내장 폰트 저작권")
             }

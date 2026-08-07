@@ -51,6 +51,15 @@ struct AmbientDimmingPolicy {
     }
 }
 
+enum EnvironmentDisplayMode: Equatable {
+    case sleeping
+    case stand
+
+    static func resolve(brightness: Double, threshold: Double) -> Self {
+        brightness < threshold ? .sleeping : .stand
+    }
+}
+
 @MainActor
 final class StandViewModel: ObservableObject {
     @Published private(set) var isNightSessionActive = false
@@ -65,6 +74,7 @@ final class StandViewModel: ObservableObject {
     @Published private(set) var displayBrightness = Double(UIScreen.main.brightness)
     @Published private(set) var automaticDimmingPaused = false
     @Published private(set) var manualDimmingHoldActive = false
+    @Published private(set) var environmentDisplayMode: EnvironmentDisplayMode = .stand
     @Published var controlsVisible = true
 
     var isDisplayDark: Bool {
@@ -85,6 +95,7 @@ final class StandViewModel: ObservableObject {
     private let motionMonitor = WakeMotionMonitor()
     private var activeLampMaximumIntensity = 1.0
     private var monitoringPausedForPlayback = false
+    private var brightnessBeforeSession: CGFloat?
 
     init() {
         let settings = SettingsStore()
@@ -125,6 +136,7 @@ final class StandViewModel: ObservableObject {
                 self?.orientationPreference = value.orientationPreference
                 OrientationController.shared.setPreference(value.orientationPreference)
                 self?.syncTorch()
+                self?.refreshEnvironmentDisplayMode(performTransition: false)
             }
 
         screenBrightnessSubscription = NotificationCenter.default
@@ -134,13 +146,8 @@ final class StandViewModel: ObservableObject {
                 guard let screen = notification.object as? UIScreen else { return }
                 guard let self else { return }
                 let newBrightness = Double(screen.brightness)
-                let increase = newBrightness - displayBrightness
                 displayBrightness = newBrightness
-                if increase >= 0.12,
-                   isNightSessionActive,
-                   settings.value.multiStimulusWakeEnabled {
-                    activateLamp()
-                }
+                refreshEnvironmentDisplayMode(performTransition: true)
             }
 
         startBatteryMonitoring()
@@ -157,6 +164,8 @@ final class StandViewModel: ObservableObject {
         }
         batteryProtectionActive = false
         isNightSessionActive = true
+        rememberScreenBrightnessIfNeeded()
+        refreshEnvironmentDisplayMode(performTransition: false)
         monitoringPausedForPlayback = false
         UIApplication.shared.isIdleTimerDisabled = true
         audio.configure(settings: settings.value)
@@ -180,6 +189,9 @@ final class StandViewModel: ObservableObject {
 
     func appDidBecomeActive() {
         manualDimmingHoldActive = false
+        rememberScreenBrightnessIfNeeded()
+        displayBrightness = Double(UIScreen.main.brightness)
+        refreshEnvironmentDisplayMode(performTransition: false)
         batteryStatus = .current()
         if batteryStatus.shouldProtectBattery {
             pauseForLowBattery()
@@ -202,6 +214,7 @@ final class StandViewModel: ObservableObject {
         manualDimmingHoldActive = false
         automaticDimmingPaused = false
         UIApplication.shared.isIdleTimerDisabled = false
+        restoreScreenBrightness()
         torch.turnOff()
         guard isNightSessionActive else { return }
         audio.stop()
@@ -336,10 +349,35 @@ final class StandViewModel: ObservableObject {
     }
 
     private var shouldPauseAutomaticDimming: Bool {
-        AmbientDimmingPolicy.shouldPause(
-            screenBrightness: displayBrightness,
-            enabled: settings.value.preventAutoDimmingWhenScreenBright
+        environmentDisplayMode == .stand
+    }
+
+    private func refreshEnvironmentDisplayMode(performTransition: Bool) {
+        let newMode = EnvironmentDisplayMode.resolve(
+            brightness: displayBrightness,
+            threshold: settings.value.brightnessModeThreshold
         )
+        let changed = newMode != environmentDisplayMode
+        environmentDisplayMode = newMode
+        guard performTransition, changed, isNightSessionActive else { return }
+        switch newMode {
+        case .sleeping:
+            if lampPhase == .holding { activateLamp() }
+        case .stand:
+            activateLamp()
+        }
+    }
+
+    private func rememberScreenBrightnessIfNeeded() {
+        if brightnessBeforeSession == nil {
+            brightnessBeforeSession = UIScreen.main.brightness
+        }
+    }
+
+    private func restoreScreenBrightness() {
+        guard let brightnessBeforeSession else { return }
+        UIScreen.main.brightness = brightnessBeforeSession
+        self.brightnessBeforeSession = nil
     }
 
     func toggleManualDimmingHold() {

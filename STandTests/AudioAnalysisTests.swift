@@ -1,4 +1,5 @@
 import AVFoundation
+import SwiftUI
 import UIKit
 import XCTest
 @testable import STand
@@ -68,6 +69,10 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertTrue(settings.preventAutoDimmingWhenScreenBright)
         XCTAssertTrue(settings.automaticDimmingEnabled)
         XCTAssertTrue(settings.multiStimulusWakeEnabled)
+        XCTAssertEqual(settings.clockHourMode, .twelve)
+        XCTAssertEqual(settings.portraitLayout, .portrait)
+        XCTAssertEqual(settings.landscapeLayout, .landscape)
+        XCTAssertEqual(settings.brightnessModeThreshold, 0.35)
     }
 
     func testOrientationPreferenceRoundTripsThroughSettingsEncoding() throws {
@@ -101,6 +106,79 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(decoded.clockFont, .doHyeon)
         XCTAssertTrue(decoded.preventAutoDimmingWhenScreenBright)
         XCTAssertFalse(decoded.automaticDimmingEnabled)
+    }
+
+    func testScreenEditingSettingsRoundTrip() throws {
+        var portrait = StandScreenLayout.portrait
+        portrait.date = PanelTransform(x: 0.15, y: -0.12, scale: 1.2)
+        portrait.weatherGroupIDs = [4, 4, 9]
+
+        let settings = AppSettings(
+            clockFont: .paperlogyBold,
+            clockHourMode: .twentyFour,
+            portraitLayout: portrait,
+            landscapeLayout: .landscape,
+            brightnessModeThreshold: 0.18
+        )
+
+        let data = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: data)
+
+        XCTAssertEqual(decoded.clockFont, .paperlogyBold)
+        XCTAssertEqual(decoded.clockHourMode, .twentyFour)
+        XCTAssertEqual(decoded.portraitLayout, portrait)
+        XCTAssertEqual(decoded.landscapeLayout, .landscape)
+        XCTAssertEqual(decoded.brightnessModeThreshold, 0.18)
+    }
+
+    func testWeatherPanelsMergeAtTenPercentOverlap() {
+        let source = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let tenPercent = CGRect(x: 90, y: 0, width: 100, height: 100)
+        let lessThanTenPercent = CGRect(x: 91, y: 0, width: 100, height: 100)
+
+        XCTAssertEqual(PanelEditingPolicy.overlapFraction(source, tenPercent), 0.1)
+        XCTAssertLessThan(PanelEditingPolicy.overlapFraction(source, lessThanTenPercent), 0.1)
+    }
+
+    func testPanelSnapsWhenGuideEntersItsMiddleTenPercent() {
+        XCTAssertTrue(
+            PanelEditingPolicy.shouldSnapToVerticalCenter(centerOffset: 6, panelWidth: 120)
+        )
+        XCTAssertFalse(
+            PanelEditingPolicy.shouldSnapToVerticalCenter(centerOffset: 6.1, panelWidth: 120)
+        )
+    }
+
+    func testEditablePanelCenterStaysInsideProtectedControls() {
+        let center = PanelEditingPolicy.clampedCenter(
+            CGPoint(x: 160, y: 20),
+            panelSize: CGSize(width: 100, height: 80),
+            canvasSize: CGSize(width: 320, height: 700),
+            insets: EdgeInsets(top: 100, leading: 20, bottom: 120, trailing: 20)
+        )
+
+        XCTAssertEqual(center.x, 160)
+        XCTAssertEqual(center.y, 140)
+
+        let bottomRight = PanelEditingPolicy.clampedCenter(
+            CGPoint(x: 400, y: 800),
+            panelSize: CGSize(width: 100, height: 80),
+            canvasSize: CGSize(width: 320, height: 700),
+            insets: EdgeInsets(top: 100, leading: 20, bottom: 120, trailing: 20)
+        )
+        XCTAssertEqual(bottomRight.x, 250)
+        XCTAssertEqual(bottomRight.y, 540)
+    }
+
+    func testBrightnessLeftOfThresholdIsSleepingAndRightIsStand() {
+        XCTAssertEqual(
+            EnvironmentDisplayMode.resolve(brightness: 0.2, threshold: 0.5),
+            .sleeping
+        )
+        XCTAssertEqual(
+            EnvironmentDisplayMode.resolve(brightness: 0.8, threshold: 0.5),
+            .stand
+        )
     }
 
     func testWeatherResponseDecodesAndMapsKoreanCondition() throws {

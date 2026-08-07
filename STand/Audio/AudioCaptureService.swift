@@ -159,6 +159,12 @@ final class AudioCaptureService: ObservableObject {
             return
         }
 
+#if targetEnvironment(simulator)
+        normalizedLevel = 0
+        state = .failed("시뮬레이터에서는 소리 감지를 사용하지 않습니다.")
+        return
+#endif
+
         recordingErrorMessage = nil
 
         do {

@@ -10,6 +10,9 @@ enum ClockFontChoice: String, Codable, CaseIterable, Identifiable {
     case tenada
     case blackHanSans
     case doHyeon
+    case paperlogyBold
+    case nexonLv1Gothic
+    case poppins
 
     var id: String { rawValue }
 
@@ -22,6 +25,9 @@ enum ClockFontChoice: String, Codable, CaseIterable, Identifiable {
         case .tenada: "태나다"
         case .blackHanSans: "검은고딕"
         case .doHyeon: "도현"
+        case .paperlogyBold: "페이퍼로지 Bold"
+        case .nexonLv1Gothic: "넥슨 Lv.1 고딕"
+        case .poppins: "Poppins"
         }
     }
 
@@ -34,6 +40,9 @@ enum ClockFontChoice: String, Codable, CaseIterable, Identifiable {
         case .tenada: "Tenada"
         case .blackHanSans: "BlackHanSans-Regular"
         case .doHyeon: "DoHyeon-Regular"
+        case .paperlogyBold: "Paperlogy-7Bold"
+        case .nexonLv1Gothic: "NEXONLv1GothicRegular"
+        case .poppins: "Poppins-Regular"
         }
     }
 
@@ -46,6 +55,9 @@ enum ClockFontChoice: String, Codable, CaseIterable, Identifiable {
         case .tenada: "Tenada-LICENSE"
         case .blackHanSans: "BlackHanSans-OFL"
         case .doHyeon: "DoHyeon-OFL"
+        case .paperlogyBold: "Paperlogy-OFL"
+        case .nexonLv1Gothic: "NEXONLv1Gothic-LICENSE"
+        case .poppins: "Poppins-OFL"
         }
     }
 
@@ -65,6 +77,9 @@ enum ClockFontChoice: String, Codable, CaseIterable, Identifiable {
         case .tenada: 5
         case .blackHanSans: 7
         case .doHyeon: 4
+        case .paperlogyBold: 1
+        case .nexonLv1Gothic: 2
+        case .poppins: 0
         }
         return adjustmentAt64Points * size / 64
     }
@@ -94,11 +109,66 @@ enum OrientationPreference: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum ClockHourMode: String, Codable, CaseIterable {
+    case twelve
+    case twentyFour
+
+    mutating func toggle() {
+        self = self == .twelve ? .twentyFour : .twelve
+    }
+}
+
+struct PanelTransform: Codable, Equatable {
+    var x: Double
+    var y: Double
+    var scale: Double
+
+    init(x: Double, y: Double, scale: Double = 1) {
+        self.x = x
+        self.y = y
+        self.scale = scale
+    }
+}
+
+struct StandScreenLayout: Codable, Equatable {
+    var weatherIcon: PanelTransform
+    var weatherTemperature: PanelTransform
+    var weatherCondition: PanelTransform
+    var date: PanelTransform
+    var status: PanelTransform
+    var brightnessRule: PanelTransform
+    var weatherGroupIDs: [Int]
+
+    static let portrait = StandScreenLayout(
+        weatherIcon: .init(x: -0.22, y: -0.24),
+        weatherTemperature: .init(x: 0, y: -0.24),
+        weatherCondition: .init(x: 0.22, y: -0.24),
+        date: .init(x: 0, y: 0.10),
+        status: .init(x: 0, y: 0.15),
+        brightnessRule: .init(x: 0, y: 0.21),
+        weatherGroupIDs: [0, 1, 2]
+    )
+
+    static let landscape = StandScreenLayout(
+        weatherIcon: .init(x: -0.27, y: -0.27),
+        weatherTemperature: .init(x: 0, y: -0.27),
+        weatherCondition: .init(x: 0.27, y: -0.27),
+        date: .init(x: 0, y: 0.18),
+        status: .init(x: 0, y: 0.25),
+        brightnessRule: .init(x: 0, y: 0.32),
+        weatherGroupIDs: [0, 1, 2]
+    )
+}
+
 struct AppSettings: Codable, Equatable {
     var lampIntensity = 0.72
     var silhouetteIntensity = 0.05
     var clockScale = 1.0
     var clockFont = ClockFontChoice.systemRounded
+    var clockHourMode = ClockHourMode.twelve
+    var portraitLayout = StandScreenLayout.portrait
+    var landscapeLayout = StandScreenLayout.landscape
+    var brightnessModeThreshold = 0.35
     var holdDuration = 60.0
     var fadeDuration = 30.0
     var automaticDimmingEnabled = true
@@ -118,6 +188,10 @@ struct AppSettings: Codable, Equatable {
         silhouetteIntensity: Double = 0.05,
         clockScale: Double = 1,
         clockFont: ClockFontChoice = .systemRounded,
+        clockHourMode: ClockHourMode = .twelve,
+        portraitLayout: StandScreenLayout = .portrait,
+        landscapeLayout: StandScreenLayout = .landscape,
+        brightnessModeThreshold: Double = 0.35,
         holdDuration: Double = 60,
         fadeDuration: Double = 30,
         automaticDimmingEnabled: Bool = true,
@@ -134,6 +208,10 @@ struct AppSettings: Codable, Equatable {
         self.silhouetteIntensity = silhouetteIntensity
         self.clockScale = clockScale
         self.clockFont = clockFont
+        self.clockHourMode = clockHourMode
+        self.portraitLayout = portraitLayout
+        self.landscapeLayout = landscapeLayout
+        self.brightnessModeThreshold = brightnessModeThreshold
         self.holdDuration = holdDuration
         self.fadeDuration = fadeDuration
         self.automaticDimmingEnabled = automaticDimmingEnabled
@@ -152,6 +230,10 @@ struct AppSettings: Codable, Equatable {
         case silhouetteIntensity
         case clockScale
         case clockFont
+        case clockHourMode
+        case portraitLayout
+        case landscapeLayout
+        case brightnessModeThreshold
         case holdDuration
         case fadeDuration
         case automaticDimmingEnabled
@@ -180,6 +262,22 @@ struct AppSettings: Codable, Equatable {
             ClockFontChoice.self,
             forKey: .clockFont
         ) ?? .systemRounded
+        clockHourMode = try container.decodeIfPresent(
+            ClockHourMode.self,
+            forKey: .clockHourMode
+        ) ?? .twelve
+        portraitLayout = try container.decodeIfPresent(
+            StandScreenLayout.self,
+            forKey: .portraitLayout
+        ) ?? .portrait
+        landscapeLayout = try container.decodeIfPresent(
+            StandScreenLayout.self,
+            forKey: .landscapeLayout
+        ) ?? .landscape
+        brightnessModeThreshold = min(1, max(
+            0,
+            try container.decodeIfPresent(Double.self, forKey: .brightnessModeThreshold) ?? 0.35
+        ))
         holdDuration = min(300, max(
             10,
             try container.decodeIfPresent(Double.self, forKey: .holdDuration) ?? 60
@@ -248,7 +346,7 @@ enum AppVersion {
     }
 
     static var build: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.9.1"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.10.0"
     }
 
     static var display: String { "\(marketing) (\(build))" }
