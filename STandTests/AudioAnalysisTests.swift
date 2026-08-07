@@ -15,6 +15,11 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertTrue(offsets.allSatisfy { abs($0.width) <= 5 && abs($0.height) <= 3 })
     }
 
+    func testFlipClockSecondsAreTwiceAsVisible() {
+        XCTAssertEqual(FlipClockSecondStyle.opacity(isDimmed: false), 0.40)
+        XCTAssertEqual(FlipClockSecondStyle.opacity(isDimmed: true), 0.16)
+    }
+
     func testBundledClockFontsAreRegistered() {
         for choice in ClockFontChoice.allCases {
             guard let postScriptName = choice.postScriptName else { continue }
@@ -65,7 +70,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertFalse(settings.wakeOnSleepSound)
         XCTAssertEqual(settings.silhouetteIntensity, 0.05)
         XCTAssertEqual(settings.clockScale, 1)
-        XCTAssertEqual(settings.clockFont, .systemRounded)
+        XCTAssertEqual(settings.clockFont, .tenada)
         XCTAssertTrue(settings.preventAutoDimmingWhenScreenBright)
         XCTAssertTrue(settings.automaticDimmingEnabled)
         XCTAssertTrue(settings.multiStimulusWakeEnabled)
@@ -73,6 +78,80 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(settings.portraitLayout, .portrait)
         XCTAssertEqual(settings.landscapeLayout, .landscape)
         XCTAssertEqual(settings.brightnessModeThreshold, 0.35)
+    }
+
+    func testRecommendedAndLegacyClockFontUseFifthTenadaChoice() {
+        XCTAssertEqual(ClockFontChoice.allCases[4], .tenada)
+        XCTAssertEqual(AppSettings.recommended.clockFont, .tenada)
+    }
+
+    func testPortraitAndLandscapeControlOrdersRoundTripIndependently() throws {
+        var portrait = StandScreenLayout.portrait
+        portrait.controlOrder = [.settings, .recordings, .orientation, .aiShot, .flashlight, .brightness, .stopDetection]
+        var landscape = StandScreenLayout.landscape
+        landscape.controlOrder = [.brightness, .flashlight, .stopDetection, .aiShot, .settings, .recordings, .orientation]
+
+        let decoded = try JSONDecoder().decode(
+            AppSettings.self,
+            from: JSONEncoder().encode(
+                AppSettings(portraitLayout: portrait, landscapeLayout: landscape)
+            )
+        )
+
+        XCTAssertEqual(decoded.portraitLayout.controlOrder, portrait.controlOrder)
+        XCTAssertEqual(decoded.landscapeLayout.controlOrder, landscape.controlOrder)
+    }
+
+    func testControlOrderDecodeIgnoresUnknownsAndCompletesMissingKinds() throws {
+        let encoded = try JSONEncoder().encode(StandScreenLayout.portrait)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object["controlOrder"] = ["settings", "futureControl", "settings", "flashlight"]
+
+        let decoded = try JSONDecoder().decode(
+            StandScreenLayout.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertEqual(
+            decoded.controlOrder,
+            [.settings, .flashlight, .brightness, .stopDetection, .orientation, .recordings, .aiShot]
+        )
+    }
+
+    func testBottomControlWrappingAndEditorBoundaryUseSameThreeRowPlan() {
+        let availableWidth: CGFloat = 353
+        let threeRowOrder: [StandControlKind] = [
+            .flashlight, .orientation, .recordings,
+            .brightness, .stopDetection, .aiShot, .settings
+        ]
+
+        XCTAssertEqual(
+            BottomControlLayoutPolicy.rows(
+                for: StandControlKind.defaultOrder,
+                availableWidth: availableWidth
+            ).count,
+            2
+        )
+        XCTAssertEqual(
+            BottomControlLayoutPolicy.rows(for: threeRowOrder, availableWidth: availableWidth).count,
+            3
+        )
+        XCTAssertEqual(
+            BottomControlLayoutPolicy.height(for: threeRowOrder, availableWidth: availableWidth),
+            192
+        )
+
+        let region = PanelEditingPolicy.editingRegion(
+            canvasSize: CGSize(width: 393, height: 852),
+            safeAreaInsets: EdgeInsets(top: 59, leading: 0, bottom: 34, trailing: 0),
+            isPortrait: true,
+            controlOrder: threeRowOrder,
+            bottomAvailableWidth: availableWidth
+        )
+        XCTAssertEqual(region.insets.bottom, 250)
+        XCTAssertEqual(region.frame.maxY, 602)
     }
 
     func testOrientationPreferenceRoundTripsThroughSettingsEncoding() throws {
@@ -146,13 +225,17 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(legacyDecoded.displayTheme, .color)
     }
 
-    func testWeatherPanelsMergeAtTenPercentOverlap() {
+    func testWeatherPanelsMergeAtFortyPercentOverlap() {
         let source = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let tenPercent = CGRect(x: 90, y: 0, width: 100, height: 100)
-        let lessThanTenPercent = CGRect(x: 91, y: 0, width: 100, height: 100)
+        let fortyPercent = CGRect(x: 60, y: 0, width: 100, height: 100)
+        let thirtyNinePercent = CGRect(x: 61, y: 0, width: 100, height: 100)
 
-        XCTAssertEqual(PanelEditingPolicy.overlapFraction(source, tenPercent), 0.1)
-        XCTAssertLessThan(PanelEditingPolicy.overlapFraction(source, lessThanTenPercent), 0.1)
+        XCTAssertEqual(PanelEditingPolicy.weatherMergeOverlapThreshold, 0.4)
+        XCTAssertEqual(PanelEditingPolicy.overlapFraction(source, fortyPercent), 0.4)
+        XCTAssertLessThan(
+            PanelEditingPolicy.overlapFraction(source, thirtyNinePercent),
+            PanelEditingPolicy.weatherMergeOverlapThreshold
+        )
     }
 
     func testPanelSnapsWhenGuideEntersItsMiddleTenPercent() {
@@ -206,13 +289,45 @@ final class AudioAnalysisTests: XCTestCase {
             isPortrait: false
         )
 
-        // Top: 14 outer + 46 toolbar + 12 clearance.
-        XCTAssertEqual(region.frame.minY, 72)
-        // Bottom: 21 safe + 6 outer + 60 row + 6 clearance.
-        XCTAssertEqual(region.frame.maxY, 300)
-        XCTAssertEqual(region.insets.bottom, 93)
+        // Top: 14 outer + 46 toolbar + 2 clearance.
+        XCTAssertEqual(region.frame.minY, 62)
+        // Bottom: 21 safe + 6 outer + 60 row + 2 clearance.
+        XCTAssertEqual(region.frame.maxY, 304)
+        XCTAssertEqual(region.insets.bottom, 89)
         XCTAssertEqual(region.frame.minX, 83)
         XCTAssertEqual(region.frame.maxX, 769)
+    }
+
+    func testEditorMovementUsesFullCanvasVerticallyWithoutChromeBoundary() {
+        let canvas = CGSize(width: 393, height: 852)
+        let region = PanelEditingPolicy.editingRegion(
+            canvasSize: canvas,
+            safeAreaInsets: EdgeInsets(top: 59, leading: 0, bottom: 34, trailing: 0),
+            isPortrait: true,
+            fontPaletteVisible: true,
+            controlOrder: StandControlKind.defaultOrder,
+            bottomAvailableWidth: 353,
+            reservesEditorChrome: false
+        )
+
+        XCTAssertEqual(region.insets.top, 0)
+        XCTAssertEqual(region.insets.bottom, 0)
+        XCTAssertEqual(region.frame.minY, 0)
+        XCTAssertEqual(region.frame.maxY, canvas.height)
+
+        let panelSize = CGSize(width: 260, height: StatusPanelMetrics.height)
+        for requestedY in [-1.0, 1.0] {
+            let result = PanelEditingPolicy.clampedTransform(
+                PanelTransform(x: 0, y: requestedY, scale: 1),
+                panelSize: panelSize,
+                canvasSize: canvas,
+                insets: region.insets,
+                screenScale: 1
+            )
+            let centerY = canvas.height / 2 + CGFloat(result.y) * canvas.height
+            XCTAssertGreaterThanOrEqual(centerY - panelSize.height / 2, 0)
+            XCTAssertLessThanOrEqual(centerY + panelSize.height / 2, canvas.height)
+        }
     }
 
     func testLandscapePanelBoundingBoxCannotCrossVisibleEditorGuidesAtScreenScale() {
@@ -263,9 +378,9 @@ final class AudioAnalysisTests: XCTestCase {
             fontPaletteVisible: true
         )
 
-        // 21 safe + 14 palette padding + 126 palette + 8 clearance.
-        XCTAssertEqual(region.insets.bottom, 169)
-        XCTAssertEqual(region.frame.maxY, 224)
+        // 21 safe + 14 palette padding + 126 palette + 2 clearance.
+        XCTAssertEqual(region.insets.bottom, 163)
+        XCTAssertEqual(region.frame.maxY, 230)
     }
 
     func testSavedPanelStaysAboveBottomControlsAfterWholeScreenScaling() {
@@ -335,6 +450,32 @@ final class AudioAnalysisTests: XCTestCase {
 
     func testBrightnessAndActionTilesShareFullContainerOpacity() {
         XCTAssertEqual(StandControlLayoutMetrics.tileOpacity, 1)
+    }
+
+    func testBottomControlTypographyAndThreeColumnSliderMetrics() {
+        XCTAssertEqual(StandControlLayoutMetrics.brightnessTileWidth, 168)
+        XCTAssertEqual(StandControlLayoutMetrics.titleFontSize, 10.5)
+        XCTAssertEqual(StandControlLayoutMetrics.statusFontSize, 8.5)
+        XCTAssertEqual(StandControlLayoutMetrics.foregroundOpacity, 0.78)
+
+        let nightRowWidth = StandControlLayoutMetrics.buttonWidth * 2
+            + StandControlLayoutMetrics.brightnessTileWidth
+            + StandControlLayoutMetrics.rowSpacing * 2
+        let secondaryRowWidth = StandControlLayoutMetrics.buttonWidth * 4
+            + StandControlLayoutMetrics.rowSpacing * 3
+
+        XCTAssertEqual(nightRowWidth, 328)
+        XCTAssertEqual(secondaryRowWidth, 314)
+        XCTAssertLessThanOrEqual(nightRowWidth, 393 - 40)
+        XCTAssertLessThanOrEqual(secondaryRowWidth, 393 - 40)
+    }
+
+    func testStatusPanelUsesSingleLineWidthAndMatchingBoundaryHeight() {
+        XCTAssertEqual(StatusPanelMetrics.width(isPortrait: true), 260)
+        XCTAssertEqual(StatusPanelMetrics.width(isPortrait: false), 320)
+        XCTAssertEqual(StatusPanelMetrics.height, 36)
+        XCTAssertLessThanOrEqual(260 * 1.35, 393 - 28)
+        XCTAssertLessThanOrEqual(320 * 1.35, 852 - 166)
     }
 
     func testThresholdLeftOfBrightnessIsSleepingAndRightIsStand() {

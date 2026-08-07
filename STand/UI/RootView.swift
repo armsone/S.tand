@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct HoldDurationAdjustment {
     static func value(startingAt startingValue: Double, translation: CGFloat) -> Double {
@@ -67,12 +68,145 @@ private enum ScreenAdjustmentAxis {
 
 enum StandControlLayoutMetrics {
     static let itemHeight: CGFloat = 60
+    static let buttonWidth: CGFloat = 74
+    static let brightnessTileWidth: CGFloat = 168
     static let rowSpacing: CGFloat = 6
     static let editorToolbarHeight: CGFloat = 46
     static let tileOpacity = 1.0
+    static let foregroundOpacity = 0.78
+    static let titleFontSize: CGFloat = 10.5
+    static let statusFontSize: CGFloat = 8.5
 
     static func bottomPadding(isPortrait: Bool) -> CGFloat {
         isPortrait ? 18 : 6
+    }
+}
+
+enum BottomControlLayoutPolicy {
+    static func itemWidth(for kind: StandControlKind) -> CGFloat {
+        kind == .brightness
+            ? StandControlLayoutMetrics.brightnessTileWidth
+            : StandControlLayoutMetrics.buttonWidth
+    }
+
+    static func rows(
+        for order: [StandControlKind],
+        availableWidth: CGFloat
+    ) -> [[StandControlKind]] {
+        guard availableWidth > 0 else { return order.map { [$0] } }
+        var rows: [[StandControlKind]] = []
+        var current: [StandControlKind] = []
+        var usedWidth: CGFloat = 0
+
+        for kind in order {
+            let width = itemWidth(for: kind)
+            let proposedWidth = current.isEmpty
+                ? width
+                : usedWidth + StandControlLayoutMetrics.rowSpacing + width
+            if !current.isEmpty, proposedWidth > availableWidth {
+                rows.append(current)
+                current = [kind]
+                usedWidth = width
+            } else {
+                current.append(kind)
+                usedWidth = proposedWidth
+            }
+        }
+        if !current.isEmpty { rows.append(current) }
+        return rows
+    }
+
+    static func height(
+        for order: [StandControlKind],
+        availableWidth: CGFloat
+    ) -> CGFloat {
+        let count = rows(for: order, availableWidth: availableWidth).count
+        guard count > 0 else { return 0 }
+        return CGFloat(count) * StandControlLayoutMetrics.itemHeight
+            + CGFloat(count - 1) * StandControlLayoutMetrics.rowSpacing
+    }
+}
+
+enum StatusPanelMetrics {
+    static let height: CGFloat = 36
+
+    static func width(isPortrait: Bool) -> CGFloat {
+        isPortrait ? 260 : 320
+    }
+}
+
+private struct WrappingControlLayout: Layout {
+    var spacing = StandControlLayoutMetrics.rowSpacing
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let availableWidth = proposal.width ?? sizes.reduce(0) { $0 + $1.width }
+        return layout(sizes: sizes, availableWidth: availableWidth).size
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let result = layout(sizes: sizes, availableWidth: bounds.width)
+        let horizontalInset = max(0, (bounds.width - result.size.width) / 2)
+        for (index, position) in result.positions.enumerated() {
+            subviews[index].place(
+                at: CGPoint(
+                    x: bounds.minX + horizontalInset + position.x,
+                    y: bounds.minY + position.y
+                ),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(sizes[index])
+            )
+        }
+    }
+
+    private func layout(
+        sizes: [CGSize],
+        availableWidth: CGFloat
+    ) -> (positions: [CGPoint], size: CGSize) {
+        var positions: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var rowStartIndex = 0
+        var rowRangesAndWidths: [(Range<Int>, CGFloat)] = []
+
+        for size in sizes {
+            if x > 0, x + size.width > availableWidth {
+                rowRangesAndWidths.append((rowStartIndex..<positions.count, x - spacing))
+                rowStartIndex = positions.count
+                x = 0
+                y += lineHeight + spacing
+                lineHeight = 0
+            }
+            positions.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
+        if !sizes.isEmpty {
+            rowRangesAndWidths.append((rowStartIndex..<positions.count, max(0, x - spacing)))
+        }
+        let maximumLineWidth = rowRangesAndWidths.map { $0.1 }.max() ?? 0
+        for (indices, rowWidth) in rowRangesAndWidths {
+            let inset = max(0, (maximumLineWidth - rowWidth) / 2)
+            for index in indices { positions[index].x += inset }
+        }
+        return (
+            positions,
+            CGSize(
+                width: min(availableWidth, maximumLineWidth),
+                height: sizes.isEmpty ? 0 : y + lineHeight
+            )
+        )
     }
 }
 
@@ -189,7 +323,16 @@ struct RootView: View {
             .onChange(of: proxy.size) { _, _ in
                 updateCanvasMetrics(proxy: proxy, isPortrait: isPortrait)
             }
-            .onChange(of: isPortrait) { _, value in currentIsPortrait = value }
+            .onChange(of: settings.value.portraitLayout.controlOrder) { _, _ in
+                updateCanvasMetrics(proxy: proxy, isPortrait: isPortrait)
+            }
+            .onChange(of: settings.value.landscapeLayout.controlOrder) { _, _ in
+                updateCanvasMetrics(proxy: proxy, isPortrait: isPortrait)
+            }
+            .onChange(of: isPortrait) { _, value in
+                currentIsPortrait = value
+                updateCanvasMetrics(proxy: proxy, isPortrait: value)
+            }
         }
         .grayscale(settings.value.displayTheme == .grayscale ? 1 : 0)
         .animation(.easeInOut(duration: 0.28), value: settings.value.displayTheme)
@@ -557,10 +700,16 @@ struct RootView: View {
 
     private func updateCanvasMetrics(proxy: GeometryProxy, isPortrait: Bool) {
         currentCanvasSize = proxy.size
-        currentProtectedInsets = PanelEditingPolicy.protectedInsets(
+        let layout = isPortrait
+            ? settings.value.portraitLayout
+            : settings.value.landscapeLayout
+        currentProtectedInsets = PanelEditingPolicy.editingRegion(
+            canvasSize: proxy.size,
             safeAreaInsets: proxy.safeAreaInsets,
-            isPortrait: isPortrait
-        )
+            isPortrait: isPortrait,
+            controlOrder: layout.controlOrder,
+            bottomAvailableWidth: max(0, proxy.size.width - (isPortrait ? 40 : 64))
+        ).insets
     }
 
     private func scheduleBrightnessFeedbackHide() {
@@ -604,120 +753,92 @@ struct RootView: View {
 
     @ViewBuilder
     private func bottomControls(isPortrait: Bool) -> some View {
-        if isPortrait {
-            portraitBottomControls
+        if model.isNightSessionActive, !model.controlsVisible {
+            tapToControlText
         } else {
-            landscapeBottomControls
+            WrappingControlLayout {
+                ForEach(visibleControlOrder(isPortrait: isPortrait)) { kind in
+                    bottomControl(for: kind)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .animation(.easeOut(duration: 0.3), value: model.controlsVisible)
         }
     }
 
-    private var landscapeBottomControls: some View {
-        HStack(spacing: StandControlLayoutMetrics.rowSpacing) {
-            if model.isNightSessionActive {
-                if model.controlsVisible {
-                    nightControlButtons
-                } else {
-                    tapToControlText
-                }
-            }
-
-            if model.controlsVisible || !model.isNightSessionActive {
-                secondaryControlButtons
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .animation(.easeOut(duration: 0.3), value: model.controlsVisible)
-    }
-
-    private var portraitBottomControls: some View {
-        VStack(spacing: StandControlLayoutMetrics.rowSpacing) {
-            if model.isNightSessionActive {
-                if model.controlsVisible {
-                    HStack(spacing: StandControlLayoutMetrics.rowSpacing) {
-                        nightControlButtons
-                    }
-                } else {
-                    tapToControlText
-                }
-            }
-
-            if model.controlsVisible || !model.isNightSessionActive {
-                HStack(spacing: StandControlLayoutMetrics.rowSpacing) {
-                    Spacer(minLength: 0)
-                    secondaryControlButtons
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-        .animation(.easeOut(duration: 0.3), value: model.controlsVisible)
+    private func visibleControlOrder(isPortrait: Bool) -> [StandControlKind] {
+        let order = isPortrait
+            ? settings.value.portraitLayout.controlOrder
+            : settings.value.landscapeLayout.controlOrder
+        guard !model.isNightSessionActive else { return order }
+        return order.filter { ![.flashlight, .brightness, .stopDetection].contains($0) }
     }
 
     @ViewBuilder
-    private var nightControlButtons: some View {
-        ControlButton(
-            title: "플래시 연동",
-            systemImage: settings.value.torchEnabled ? "flashlight.on.fill" : "flashlight.off.fill",
-            status: settings.value.torchEnabled ? "화면 점등과 함께 켜짐" : "사용 안 함",
-            hint: "화면이 켜질 때 후면 플래시를 함께 켤지 바꿉니다"
-        ) {
-            settings.value.torchEnabled.toggle()
-            if settings.value.torchEnabled { model.activateLamp() }
-        }
-        brightnessThresholdControl
-        ControlButton(
-            title: "감지 종료",
-            systemImage: "stop.circle.fill",
-            role: .destructive,
-            hint: "소리 감지와 자동 녹음을 종료합니다"
-        ) {
-            model.stopNightSession()
-        }
-        ControlButton(
-            title: "AiShot 실행",
-            systemImage: "camera.aperture",
-            hint: "HanClip의 AiShot 촬영 화면을 엽니다"
-        ) {
-            if let url = URL(string: "hanclip://aishot") { openURL(url) }
-        }
-    }
-
-    private var brightnessThresholdControl: some View {
-        CompactBrightnessRuleControl(
-            currentBrightness: model.displayBrightness,
-            threshold: Binding(
-                get: { settings.value.brightnessModeThreshold },
-                set: { settings.value.brightnessModeThreshold = $0 }
+    private func bottomControl(for kind: StandControlKind) -> some View {
+        switch kind {
+        case .flashlight:
+            ControlButton(
+                title: "플래시 연동",
+                systemImage: settings.value.torchEnabled ? "flashlight.on.fill" : "flashlight.off.fill",
+                status: settings.value.torchEnabled ? "점등 시 연동" : "연동 안 함",
+                hint: "화면이 켜질 때 후면 플래시를 함께 켤지 바꿉니다"
+            ) {
+                settings.value.torchEnabled.toggle()
+                if settings.value.torchEnabled { model.activateLamp() }
+            }
+        case .brightness:
+            CompactBrightnessRuleControl(
+                currentBrightness: model.displayBrightness,
+                threshold: Binding(
+                    get: { settings.value.brightnessModeThreshold },
+                    set: { settings.value.brightnessModeThreshold = $0 }
+                )
             )
-        )
-    }
-
-    @ViewBuilder
-    private var secondaryControlButtons: some View {
-        ControlButton(
-            title: model.orientationControlTitle,
-            systemImage: model.orientationControlImage,
-            status: model.orientationControlStatus,
-            hint: model.orientationPreference == .automatic
-                ? "현재 화면 방향으로 고정합니다"
-                : "화면 방향이 iPhone 회전을 따르도록 바꿉니다"
-        ) {
-            model.toggleOrientationLock()
-        }
-        ControlButton(
-            title: "녹음 목록 보기",
-            systemImage: "waveform",
-            status: library.clips.isEmpty ? "저장된 녹음 없음" : "\(library.clips.count)개 저장됨",
-            hint: "저장된 수면 소리 녹음 목록을 엽니다"
-        ) {
-            model.pauseMonitoringForPlayback()
-            presentedSheet = .recordings
-        }
-        ControlButton(
-            title: "설정 열기",
-            systemImage: "slider.horizontal.3",
-            hint: "밝기, 감지, 녹음 설정을 엽니다"
-        ) {
-            presentedSheet = .settings
+        case .stopDetection:
+            ControlButton(
+                title: "감지 종료",
+                systemImage: "stop.circle.fill",
+                hint: "소리 감지와 자동 녹음을 종료합니다"
+            ) {
+                model.stopNightSession()
+            }
+        case .orientation:
+            ControlButton(
+                title: model.orientationControlTitle,
+                systemImage: model.orientationControlImage,
+                hint: model.orientationPreference == .automatic
+                    ? "현재 화면 방향으로 고정합니다"
+                    : "화면 방향이 iPhone 회전을 따르도록 바꿉니다"
+            ) {
+                model.toggleOrientationLock()
+            }
+        case .recordings:
+            ControlButton(
+                title: "녹음 목록 보기",
+                systemImage: "waveform",
+                status: library.clips.isEmpty ? "녹음 없음" : "\(library.clips.count)개 녹음",
+                hint: "저장된 수면 소리 녹음 목록을 엽니다"
+            ) {
+                model.pauseMonitoringForPlayback()
+                presentedSheet = .recordings
+            }
+        case .aiShot:
+            ControlButton(
+                title: "AiShot 실행",
+                systemImage: "camera.aperture",
+                hint: "HanClip의 AiShot 촬영 화면을 엽니다"
+            ) {
+                if let url = URL(string: "hanclip://aishot") { openURL(url) }
+            }
+        case .settings:
+            ControlButton(
+                title: "설정 열기",
+                systemImage: "slider.horizontal.3",
+                hint: "밝기, 감지, 녹음 설정을 엽니다"
+            ) {
+                presentedSheet = .settings
+            }
         }
     }
 
@@ -1037,6 +1158,12 @@ private struct DashboardCanvas: View {
 
                 Text(statusText)
                     .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.58)
+                    .frame(
+                        width: StatusPanelMetrics.width(isPortrait: isPortrait),
+                        height: StatusPanelMetrics.height
+                    )
                     .panelTransform(layout.status, canvasSize: canvasSize)
 
                 if isDimmed {
@@ -1353,7 +1480,7 @@ private struct CompactBrightnessRuleControl: View {
                 Label("스탠드", systemImage: "sun.max.fill")
                     .foregroundStyle(threshold >= currentBrightness ? Color.orange : Color.white.opacity(0.42))
             }
-            .font(.system(size: 7, weight: .semibold))
+            .font(.system(size: StandControlLayoutMetrics.titleFontSize, weight: .semibold))
             .labelStyle(.titleAndIcon)
 
             GeometryReader { proxy in
@@ -1398,12 +1525,21 @@ private struct CompactBrightnessRuleControl: View {
             .frame(height: 12)
 
             Text("현재 \(Int((currentBrightness * 100).rounded())) · 기준 \(Int((threshold * 100).rounded()))")
-                .font(.system(size: 7, weight: .medium, design: .rounded))
+                .font(
+                    .system(
+                        size: StandControlLayoutMetrics.statusFontSize,
+                        weight: .medium,
+                        design: .rounded
+                    )
+                )
                 .monospacedDigit()
                 .foregroundStyle(.white.opacity(0.52))
         }
         .padding(.horizontal, 8)
-        .frame(width: 112, height: StandControlLayoutMetrics.itemHeight)
+        .frame(
+            width: StandControlLayoutMetrics.brightnessTileWidth,
+            height: StandControlLayoutMetrics.itemHeight
+        )
         .background {
             FlipPanelSurface(isDimmed: false, cornerRadius: 13, splitGap: 2)
         }
@@ -1440,11 +1576,16 @@ private struct ScreenEditorView: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let bottomHorizontalPadding: CGFloat = isPortrait ? 20 : 32
+            let bottomAvailableWidth = max(0, proxy.size.width - bottomHorizontalPadding * 2)
             let editingRegion = PanelEditingPolicy.editingRegion(
                 canvasSize: proxy.size,
                 safeAreaInsets: proxy.safeAreaInsets,
                 isPortrait: isPortrait,
-                fontPaletteVisible: showFontPalette
+                fontPaletteVisible: showFontPalette,
+                controlOrder: layout.controlOrder,
+                bottomAvailableWidth: bottomAvailableWidth,
+                reservesEditorChrome: false
             )
             let protectedInsets = editingRegion.insets
 
@@ -1453,9 +1594,6 @@ private struct ScreenEditorView: View {
 
                 Rectangle().fill(.white.opacity(0.16)).frame(width: 0.5)
                 Rectangle().fill(.white.opacity(0.16)).frame(height: 0.5)
-
-                EditorBoundaryGuides(frame: editingRegion.frame)
-                    .zIndex(4)
 
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     FlipClockFace(
@@ -1501,7 +1639,13 @@ private struct ScreenEditorView: View {
                 ) {
                     Text("현재 상태 · 스탠드 모드")
                         .font(.caption.weight(.medium))
-                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.58)
+                        .padding(.horizontal, 12)
+                        .frame(
+                            width: StatusPanelMetrics.width(isPortrait: isPortrait),
+                            height: StatusPanelMetrics.height
+                        )
                         .background(.white.opacity(0.08), in: Capsule())
                 }
 
@@ -1526,6 +1670,20 @@ private struct ScreenEditorView: View {
                     .padding(.horizontal, isPortrait ? 14 : 28)
                     .padding(.bottom, isPortrait ? 22 : 14)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(5)
+                } else {
+                    VStack {
+                        Spacer()
+                        EditorControlOrderView(
+                            order: $layout.controlOrder,
+                            availableWidth: bottomAvailableWidth
+                        )
+                    }
+                    .padding(.horizontal, bottomHorizontalPadding)
+                    .padding(
+                        .bottom,
+                        StandControlLayoutMetrics.bottomPadding(isPortrait: isPortrait)
+                    )
                     .zIndex(5)
                 }
 
@@ -1615,7 +1773,7 @@ private struct ScreenEditorView: View {
             sourceBounds,
             weatherBounds(for: targetID, canvasSize: canvasSize)
         )
-        guard overlap >= 0.10 else { return }
+        guard overlap >= PanelEditingPolicy.weatherMergeOverlapThreshold else { return }
 
         let targetIndices = layout.weatherGroupIDs.indices.filter { layout.weatherGroupIDs[$0] == targetID }
         let leftIndex = (sourceIndices + targetIndices).min {
@@ -1685,25 +1843,125 @@ private struct ScreenEditorView: View {
     }
 }
 
-private struct EditorBoundaryGuides: View {
-    let frame: CGRect
+private extension StandControlKind {
+    var editorTitle: String {
+        switch self {
+        case .flashlight: "플래시"
+        case .brightness: "밝기 기준"
+        case .stopDetection: "감지 종료"
+        case .orientation: "화면 방향"
+        case .recordings: "수면 소리"
+        case .aiShot: "AiShot"
+        case .settings: "설정"
+        }
+    }
+
+    var editorSystemImage: String {
+        switch self {
+        case .flashlight: "flashlight.on.fill"
+        case .brightness: "slider.horizontal.3"
+        case .stopDetection: "stop.circle.fill"
+        case .orientation: "rectangle.portrait.rotate"
+        case .recordings: "waveform"
+        case .aiShot: "camera.aperture"
+        case .settings: "gearshape.fill"
+        }
+    }
+}
+
+private struct EditorControlOrderView: View {
+    @Binding var order: [StandControlKind]
+    let availableWidth: CGFloat
+    @State private var draggedKind: StandControlKind?
 
     var body: some View {
-        GeometryReader { _ in
-            Path { path in
-                path.move(to: CGPoint(x: frame.minX, y: frame.minY))
-                path.addLine(to: CGPoint(x: frame.maxX, y: frame.minY))
-                path.move(to: CGPoint(x: frame.minX, y: frame.maxY))
-                path.addLine(to: CGPoint(x: frame.maxX, y: frame.maxY))
+        WrappingControlLayout {
+            ForEach(order) { kind in
+                EditorControlOrderTile(kind: kind)
+                    .onDrag {
+                        draggedKind = kind
+                        return NSItemProvider(object: kind.rawValue as NSString)
+                    }
+                    .onDrop(
+                        of: [UTType.text],
+                        delegate: ControlOrderDropDelegate(
+                            target: kind,
+                            order: $order,
+                            draggedKind: $draggedKind
+                        )
+                    )
             }
-            .stroke(
-                Color.orange.opacity(0.62),
-                style: StrokeStyle(lineWidth: 1, dash: [5, 4])
+        }
+        .frame(
+            width: availableWidth,
+            height: BottomControlLayoutPolicy.height(
+                for: order,
+                availableWidth: availableWidth
+            )
+        )
+        .accessibilityLabel("하단 버튼 순서 편집")
+        .accessibilityHint("버튼을 끌어 순서를 변경합니다")
+    }
+}
+
+private struct EditorControlOrderTile: View {
+    let kind: StandControlKind
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Image(systemName: kind.editorSystemImage)
+                .font(.system(size: 15, weight: .semibold))
+            Text(kind.editorTitle)
+                .font(.system(size: StandControlLayoutMetrics.titleFontSize, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(.white.opacity(StandControlLayoutMetrics.foregroundOpacity))
+        .frame(
+            width: BottomControlLayoutPolicy.itemWidth(for: kind),
+            height: StandControlLayoutMetrics.itemHeight
+        )
+        .background {
+            FlipPanelSurface(isDimmed: false, cornerRadius: 13, splitGap: 2)
+        }
+        .overlay(alignment: .topTrailing) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(.orange.opacity(0.72))
+                .padding(7)
+        }
+        .contentShape(Rectangle())
+        .accessibilityLabel("\(kind.editorTitle), 순서 변경")
+    }
+}
+
+private struct ControlOrderDropDelegate: DropDelegate {
+    let target: StandControlKind
+    @Binding var order: [StandControlKind]
+    @Binding var draggedKind: StandControlKind?
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedKind,
+              draggedKind != target,
+              let sourceIndex = order.firstIndex(of: draggedKind),
+              let targetIndex = order.firstIndex(of: target)
+        else { return }
+
+        withAnimation(.snappy(duration: 0.2)) {
+            order.move(
+                fromOffsets: IndexSet(integer: sourceIndex),
+                toOffset: targetIndex > sourceIndex ? targetIndex + 1 : targetIndex
             )
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggedKind = nil
+        return true
     }
 }
 
@@ -1713,26 +1971,29 @@ struct PanelEditingRegion: Equatable {
 }
 
 enum PanelEditingPolicy {
+    static let weatherMergeOverlapThreshold: CGFloat = 0.40
+
     static func protectedInsets(
         safeAreaInsets: EdgeInsets,
         isPortrait: Bool,
-        fontPaletteVisible: Bool = false
+        fontPaletteVisible: Bool = false,
+        bottomControlAreaHeight: CGFloat? = nil
     ) -> EdgeInsets {
         let topOuterPadding: CGFloat = isPortrait ? 18 : 14
-        let topGuideClearance: CGFloat = 12
+        let topGuideClearance: CGFloat = isPortrait ? 12 : 2
         let bottomOuterPadding = StandControlLayoutMetrics.bottomPadding(isPortrait: isPortrait)
-        let bottomGuideClearance: CGFloat = 6
+        let bottomGuideClearance: CGFloat = isPortrait ? 6 : 2
         let bottomRowCount: CGFloat = isPortrait ? 2 : 1
-        let bottomRowsHeight = StandControlLayoutMetrics.itemHeight * bottomRowCount
+        let defaultBottomRowsHeight = StandControlLayoutMetrics.itemHeight * bottomRowCount
             + StandControlLayoutMetrics.rowSpacing * max(0, bottomRowCount - 1)
         let controlBoundary = safeAreaInsets.bottom
             + bottomOuterPadding
-            + bottomRowsHeight
+            + (bottomControlAreaHeight ?? defaultBottomRowsHeight)
             + bottomGuideClearance
 
         let paletteHeight: CGFloat = isPortrait ? 190 : 126
         let paletteBottomPadding: CGFloat = isPortrait ? 22 : 14
-        let paletteGuideClearance: CGFloat = 8
+        let paletteGuideClearance: CGFloat = isPortrait ? 8 : 2
         let fontPaletteBoundary = safeAreaInsets.bottom
             + paletteBottomPadding
             + paletteHeight
@@ -1755,13 +2016,28 @@ enum PanelEditingPolicy {
         canvasSize: CGSize,
         safeAreaInsets: EdgeInsets,
         isPortrait: Bool,
-        fontPaletteVisible: Bool = false
+        fontPaletteVisible: Bool = false,
+        controlOrder: [StandControlKind]? = nil,
+        bottomAvailableWidth: CGFloat? = nil,
+        reservesEditorChrome: Bool = true
     ) -> PanelEditingRegion {
-        let insets = protectedInsets(
+        let controlAreaHeight: CGFloat? = controlOrder.map {
+            BottomControlLayoutPolicy.height(
+                for: $0,
+                availableWidth: bottomAvailableWidth
+                    ?? max(0, canvasSize.width - (isPortrait ? 40 : 64))
+            )
+        }
+        var insets = protectedInsets(
             safeAreaInsets: safeAreaInsets,
             isPortrait: isPortrait,
-            fontPaletteVisible: fontPaletteVisible
+            fontPaletteVisible: fontPaletteVisible,
+            bottomControlAreaHeight: controlAreaHeight
         )
+        if !reservesEditorChrome {
+            insets.top = 0
+            insets.bottom = 0
+        }
         let minimumX = min(canvasSize.width, insets.leading)
         let maximumX = max(minimumX, canvasSize.width - insets.trailing)
         let minimumY = min(canvasSize.height, insets.top)
@@ -1858,7 +2134,7 @@ enum PanelEditingPolicy {
             (layout.weatherTemperature, weatherHeight),
             (layout.weatherCondition, weatherHeight),
             (layout.date, 36),
-            (layout.status, 36),
+            (layout.status, StatusPanelMetrics.height),
             (layout.battery, 36),
             (.init(x: 0, y: 0), isPortrait ? 92 : 116)
         ]
@@ -1929,7 +2205,7 @@ private struct EditablePanel<Content: View>: View {
                         let start = dragStart ?? transform
                         dragStart = start
                         transform.x = min(0.46, max(-0.46, start.x + value.translation.width / canvasSize.width))
-                        transform.y = min(0.44, max(-0.44, start.y + value.translation.height / canvasSize.height))
+                        transform.y = start.y + value.translation.height / canvasSize.height
                         constrainToEditableArea()
                     }
                     .onEnded { _ in
@@ -2061,6 +2337,12 @@ private struct NightClock: View {
     }
 }
 
+enum FlipClockSecondStyle {
+    static func opacity(isDimmed: Bool) -> Double {
+        isDimmed ? 0.16 : 0.40
+    }
+}
+
 private struct FlipClockFace: View {
     let date: Date
     let isPortrait: Bool
@@ -2095,7 +2377,9 @@ private struct FlipClockFace: View {
                     Text(String(format: "%02d", components.second ?? 0))
                         .font(clockFont.font(size: isPortrait ? 13 : 16))
                         .monospacedDigit()
-                        .foregroundStyle(.white.opacity(isDimmed ? 0.08 : 0.20))
+                        .foregroundStyle(
+                            .white.opacity(FlipClockSecondStyle.opacity(isDimmed: isDimmed))
+                        )
                         .contentTransition(.numericText())
                         .frame(width: isPortrait ? 24 : 30)
                         .padding(.trailing, isPortrait ? 20 : 26)
@@ -2271,35 +2555,37 @@ private struct BatteryStatusPill: View {
 private struct ControlButton: View {
     let title: String
     let systemImage: String
-    var role: ButtonRole? = nil
     var status: String? = nil
     var hint: String? = nil
     let action: () -> Void
 
     var body: some View {
-        Button(role: role, action: action) {
+        Button(action: action) {
             VStack(spacing: 3) {
                 Image(systemName: systemImage)
                     .font(.system(size: 15, weight: .semibold))
                     .frame(width: 20, height: 16)
 
                 Text(title)
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: StandControlLayoutMetrics.titleFontSize, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .minimumScaleFactor(0.7)
 
                 if let status {
                     Text(status)
-                        .font(.system(size: 7.5, weight: .medium))
+                        .font(.system(size: StandControlLayoutMetrics.statusFontSize, weight: .medium))
                         .foregroundStyle(.white.opacity(0.52))
                         .lineLimit(1)
                         .minimumScaleFactor(0.65)
                 }
             }
-            .foregroundStyle(role == .destructive ? Color.red.opacity(0.9) : Color.white.opacity(0.78))
+            .foregroundStyle(.white.opacity(StandControlLayoutMetrics.foregroundOpacity))
             .padding(.horizontal, 4)
-            .frame(width: 74, height: StandControlLayoutMetrics.itemHeight)
+            .frame(
+                width: StandControlLayoutMetrics.buttonWidth,
+                height: StandControlLayoutMetrics.itemHeight
+            )
             .background {
                 FlipPanelSurface(isDimmed: false, cornerRadius: 13, splitGap: 2)
             }

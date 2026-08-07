@@ -447,14 +447,6 @@ final class StandViewModel: ObservableObject {
         }
     }
 
-    var orientationControlStatus: String {
-        switch orientationPreference {
-        case .automatic: "현재: 자동 회전"
-        case .portrait: "현재: 세로 고정"
-        case .landscape: "현재: 가로 고정"
-        }
-    }
-
     var orientationControlImage: String {
         orientationPreference == .automatic ? "lock.rotation" : "lock.open.fill"
     }

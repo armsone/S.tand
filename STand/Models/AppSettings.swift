@@ -139,6 +139,36 @@ struct PanelTransform: Codable, Equatable {
     }
 }
 
+enum StandControlKind: String, Codable, CaseIterable, Identifiable {
+    case flashlight
+    case brightness
+    case stopDetection
+    case orientation
+    case recordings
+    case aiShot
+    case settings
+
+    var id: String { rawValue }
+
+    static let defaultOrder: [StandControlKind] = [
+        .flashlight,
+        .brightness,
+        .stopDetection,
+        .orientation,
+        .recordings,
+        .aiShot,
+        .settings
+    ]
+
+    static func normalizedOrder(_ order: [StandControlKind]?) -> [StandControlKind] {
+        var result: [StandControlKind] = []
+        for kind in (order ?? []) + defaultOrder where !result.contains(kind) {
+            result.append(kind)
+        }
+        return result
+    }
+}
+
 struct StandScreenLayout: Codable, Equatable {
     var weatherIcon: PanelTransform
     var weatherTemperature: PanelTransform
@@ -148,6 +178,7 @@ struct StandScreenLayout: Codable, Equatable {
     var brightnessRule: PanelTransform
     var battery: PanelTransform
     var weatherGroupIDs: [Int]
+    var controlOrder: [StandControlKind]
 
     init(
         weatherIcon: PanelTransform,
@@ -157,7 +188,8 @@ struct StandScreenLayout: Codable, Equatable {
         status: PanelTransform,
         brightnessRule: PanelTransform,
         battery: PanelTransform = .init(x: 0, y: 0.18),
-        weatherGroupIDs: [Int]
+        weatherGroupIDs: [Int],
+        controlOrder: [StandControlKind] = StandControlKind.defaultOrder
     ) {
         self.weatherIcon = weatherIcon
         self.weatherTemperature = weatherTemperature
@@ -167,11 +199,12 @@ struct StandScreenLayout: Codable, Equatable {
         self.brightnessRule = brightnessRule
         self.battery = battery
         self.weatherGroupIDs = weatherGroupIDs
+        self.controlOrder = StandControlKind.normalizedOrder(controlOrder)
     }
 
     private enum CodingKeys: String, CodingKey {
         case weatherIcon, weatherTemperature, weatherCondition
-        case date, status, brightnessRule, battery, weatherGroupIDs
+        case date, status, brightnessRule, battery, weatherGroupIDs, controlOrder
     }
 
     init(from decoder: Decoder) throws {
@@ -185,6 +218,10 @@ struct StandScreenLayout: Codable, Equatable {
         battery = try values.decodeIfPresent(PanelTransform.self, forKey: .battery)
             ?? .init(x: 0, y: 0.18)
         weatherGroupIDs = try values.decode([Int].self, forKey: .weatherGroupIDs)
+        let rawControlOrder = try? values.decode([String].self, forKey: .controlOrder)
+        controlOrder = StandControlKind.normalizedOrder(
+            rawControlOrder?.compactMap(StandControlKind.init(rawValue:))
+        )
     }
 
     static let portrait = StandScreenLayout(
@@ -214,7 +251,7 @@ struct AppSettings: Codable, Equatable {
     var lampIntensity = 0.72
     var silhouetteIntensity = 0.05
     var clockScale = 1.0
-    var clockFont = ClockFontChoice.systemRounded
+    var clockFont = ClockFontChoice.tenada
     var clockHourMode = ClockHourMode.twelve
     var displayTheme = StandDisplayTheme.color
     var portraitLayout = StandScreenLayout.portrait
@@ -238,7 +275,7 @@ struct AppSettings: Codable, Equatable {
         lampIntensity: Double = 0.72,
         silhouetteIntensity: Double = 0.05,
         clockScale: Double = 1,
-        clockFont: ClockFontChoice = .systemRounded,
+        clockFont: ClockFontChoice = .tenada,
         clockHourMode: ClockHourMode = .twelve,
         displayTheme: StandDisplayTheme = .color,
         portraitLayout: StandScreenLayout = .portrait,
@@ -315,7 +352,7 @@ struct AppSettings: Codable, Equatable {
         clockFont = try container.decodeIfPresent(
             ClockFontChoice.self,
             forKey: .clockFont
-        ) ?? .systemRounded
+        ) ?? .tenada
         clockHourMode = try container.decodeIfPresent(
             ClockHourMode.self,
             forKey: .clockHourMode
