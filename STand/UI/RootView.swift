@@ -265,7 +265,8 @@ struct RootView: View {
                 WeatherBadge(
                     service: weather,
                     isDimmed: isDimmed,
-                    dimmedIntensity: settings.value.silhouetteIntensity
+                    dimmedIntensity: settings.value.silhouetteIntensity,
+                    clockScale: settings.value.clockScale
                 )
                 .offset(y: -178 - max(0, settings.value.clockScale - 1) * 62)
             }
@@ -722,9 +723,10 @@ private struct WeatherBadge: View {
     let isDimmed: Bool
     let dimmedIntensity: Double
     var compact = false
+    var clockScale = 1.0
 
     var body: some View {
-        HStack(spacing: compact ? 6 : 14) {
+        HStack(spacing: compact ? 6 : 16) {
             Image(systemName: systemImage)
                 .symbolRenderingMode(.hierarchical)
                 .font(.system(size: compact ? 13 : 34, weight: .medium))
@@ -741,8 +743,16 @@ private struct WeatherBadge: View {
         }
         .foregroundStyle(.white.opacity(isDimmed ? dimmedIntensity : 0.62))
         .padding(.horizontal, compact ? 9 : 24)
-        .padding(.vertical, compact ? 6 : 16)
-        .background(.white.opacity(isDimmed ? dimmedIntensity * 0.18 : 0.06), in: Capsule())
+        .frame(width: compact ? nil : 282, height: compact ? nil : 92)
+        .background {
+            if compact {
+                Capsule()
+                    .fill(.white.opacity(isDimmed ? dimmedIntensity * 0.18 : 0.06))
+            } else {
+                FlipPanelSurface(isDimmed: isDimmed, cornerRadius: 18)
+            }
+        }
+        .scaleEffect(compact ? 1 : clockScale)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
     }
@@ -845,7 +855,7 @@ private struct FlipClockFace: View {
 
     var body: some View {
         let components = Calendar.current.dateComponents([.hour, .minute, .second], from: date)
-        ZStack(alignment: .bottomTrailing) {
+        ZStack(alignment: .trailing) {
             HStack(spacing: isPortrait ? 8 : 12) {
                 FlipClockCard(
                     value: String(format: "%02d", components.hour ?? 0),
@@ -867,9 +877,10 @@ private struct FlipClockFace: View {
             Text(String(format: "%02d", components.second ?? 0))
                 .font(clockFont.font(size: isPortrait ? 13 : 16))
                 .monospacedDigit()
-                .foregroundStyle(.white.opacity(isDimmed ? 0.16 : 0.24))
+                .foregroundStyle(.white.opacity(isDimmed ? 0.04 : 0.10))
                 .contentTransition(.numericText())
-                .offset(x: isPortrait ? 4 : 6, y: isPortrait ? 3 : 4)
+                .frame(width: isPortrait ? 24 : 30)
+                .offset(x: isPortrait ? 12 : 15)
         }
         .scaleEffect(clockScale)
         .frame(height: (isPortrait ? 92 : 116) * clockScale)
@@ -886,25 +897,10 @@ private struct FlipClockCard: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: isPortrait ? 18 : 22, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            .white.opacity(isDimmed ? 0.014 : 0.095),
-                            .white.opacity(isDimmed ? 0.008 : 0.052)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: isPortrait ? 18 : 22, style: .continuous)
-                        .stroke(.white.opacity(isDimmed ? 0.018 : 0.08), lineWidth: 1)
-                }
-
-            Rectangle()
-                .fill(.black.opacity(isDimmed ? 0.35 : 0.42))
-                .frame(height: 1)
+            FlipPanelSurface(
+                isDimmed: isDimmed,
+                cornerRadius: isPortrait ? 18 : 22
+            )
 
             Text(value)
                 .font(clockFont.font(size: isPortrait ? 64 : 82))
@@ -917,6 +913,34 @@ private struct FlipClockCard: View {
             width: isPortrait ? 126 : 164,
             height: isPortrait ? 92 : 116
         )
+    }
+}
+
+private struct FlipPanelSurface: View {
+    let isDimmed: Bool
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [
+                        .white.opacity(isDimmed ? 0.014 : 0.095),
+                        .white.opacity(isDimmed ? 0.008 : 0.052)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(.white.opacity(isDimmed ? 0.018 : 0.08), lineWidth: 1)
+            }
+            .overlay {
+                Rectangle()
+                    .fill(.black.opacity(isDimmed ? 0.35 : 0.42))
+                    .frame(height: 1)
+            }
     }
 }
 
@@ -1016,10 +1040,10 @@ private struct ControlButton: View {
 
     var body: some View {
         Button(role: role, action: action) {
-            VStack(spacing: 4) {
+            VStack(spacing: 5) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 19, weight: .semibold))
-                    .frame(width: 24, height: 22)
+                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 24, height: 20)
 
                 Text(title)
                     .font(.caption.weight(.semibold))
@@ -1035,13 +1059,14 @@ private struct ControlButton: View {
                         .minimumScaleFactor(0.75)
                 }
             }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, minHeight: 68)
+            .foregroundStyle(role == .destructive ? Color.red.opacity(0.9) : Color.white.opacity(0.78))
+            .padding(.horizontal, 6)
+            .frame(width: 102, height: 72)
+            .background {
+                FlipPanelSurface(isDimmed: false, cornerRadius: 15)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .buttonStyle(.bordered)
-        .tint(role == .destructive ? .red : .white.opacity(0.78))
+        .buttonStyle(.plain)
         .accessibilityHint(hint ?? "")
     }
 }

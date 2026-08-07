@@ -6,12 +6,10 @@ struct RecordingsView: View {
     @StateObject private var player = RecordingPlayer()
     @Environment(\.dismiss) private var dismiss
     @State private var confirmsDeleteAll = false
-    @State private var confirmsMergeSelection = false
-    @State private var confirmsMergeToday = false
-    @State private var isSelecting = false
     @State private var selectedClipURLs: Set<URL> = []
     @State private var isMerging = false
     @State private var mergeErrorMessage: String?
+    @State private var mergeStatusMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -34,73 +32,32 @@ struct RecordingsView: View {
                         }
 
                         if library.mergeableClips.count >= 2 {
-                            Section {
-                                Button {
-                                    player.stop()
-                                    isSelecting = true
-                                } label: {
-                                    HStack {
-                                        Label("선택한 소리 합치기", systemImage: "checkmark.circle")
-                                        Spacer()
-                                        Text("2개 이상 선택")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .disabled(playbackDisabled || isMerging || isSelecting)
+                            mergeActions
+                        }
 
-                                Button {
-                                    confirmsMergeToday = true
-                                } label: {
-                                    HStack {
-                                        Label("오늘 녹음 합치기", systemImage: "calendar")
-                                        Spacer()
-                                        Text("\(todayClips.count)개")
-                                            .font(.caption.monospacedDigit())
-                                            .foregroundStyle(.secondary)
-                                    }
+                        if !mergedClips.isEmpty {
+                            Section("합친 녹음 · \(mergedClips.count)개") {
+                                ForEach(mergedClips) { clip in
+                                    recordingRow(clip)
                                 }
-                                .disabled(playbackDisabled || isMerging || todayClips.count < 2)
-                            } footer: {
-                                Text("선택한 원본 또는 오늘의 원본을 시간순으로 합칩니다. 원본과 이전 합본은 그대로 보관됩니다.")
                             }
                         }
 
-                        Section {
-                            ForEach(library.clips) { clip in
-                                RecordingRow(
-                                    clip: clip,
-                                    isActive: player.playingURL == clip.url,
-                                    isPlaying: player.playingURL == clip.url && player.isPlaying,
-                                    playbackDisabled: playbackDisabled,
-                                    selectionEnabled: isSelecting,
-                                    isSelected: selectedClipURLs.contains(clip.url),
-                                    toggleSelection: { toggleSelection(of: clip) },
-                                    play: { player.toggle(clip) },
-                                    delete: {
-                                        if player.playingURL == clip.url {
-                                            player.stop()
-                                        }
-                                        selectedClipURLs.remove(clip.url)
-                                        library.delete(clip)
-                                    }
-                                )
+                        ForEach(originalGroups) { group in
+                            Section {
+                                ForEach(group.clips) { clip in
+                                    recordingRow(clip)
+                                }
+                            } header: {
+                                DailySleepTimelineHeader(date: group.date, clips: group.clips)
+                                    .textCase(nil)
                             }
-                        } header: {
-                            Text("\(library.clips.count)개 · 총 \(library.totalDuration.durationText)")
                         }
                     }
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if isSelecting {
-                    SelectionMergeBar(
-                        selectionCount: selectedClipURLs.count,
-                        isMerging: isMerging,
-                        merge: { confirmsMergeSelection = true },
-                        cancel: { cancelSelection() }
-                    )
-                } else if let playingURL = player.playingURL,
+                if let playingURL = player.playingURL,
                    let clip = library.clips.first(where: { $0.url == playingURL }) {
                     PlaybackProgressBar(clip: clip, player: player)
                 }
@@ -112,26 +69,19 @@ struct RecordingsView: View {
                 }
                 if !library.clips.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
-                        if isSelecting {
-                            Button("선택 취소") { cancelSelection() }
-                        } else {
-                            Menu {
-                                Button {
-                                    player.stop()
-                                    isSelecting = true
-                                } label: {
-                                    Label("합칠 녹음 선택", systemImage: "checkmark.circle")
-                                }
-                                .disabled(library.mergeableClips.count < 2)
-
-                                Divider()
-
-                                Button("전체 삭제", systemImage: "trash", role: .destructive) {
-                                    confirmsDeleteAll = true
-                                }
-                            } label: {
-                                Label("목록 작업", systemImage: "ellipsis.circle")
+                        Menu {
+                            Button("선택 모두 해제", systemImage: "checkmark.circle.badge.xmark") {
+                                selectedClipURLs.removeAll()
                             }
+                            .disabled(selectedClipURLs.isEmpty)
+
+                            Divider()
+
+                            Button("전체 삭제", systemImage: "trash", role: .destructive) {
+                                confirmsDeleteAll = true
+                            }
+                        } label: {
+                            Label("목록 작업", systemImage: "ellipsis.circle")
                         }
                     }
                 }
@@ -143,35 +93,12 @@ struct RecordingsView: View {
             ) {
                 Button("모두 삭제", role: .destructive) {
                     player.stop()
+                    selectedClipURLs.removeAll()
                     library.deleteAll()
                 }
                 Button("취소", role: .cancel) {}
             } message: {
                 Text("삭제한 녹음은 복구할 수 없습니다.")
-            }
-            .confirmationDialog(
-                "선택한 \(selectedClipURLs.count)개의 소리를 하나로 합칠까요?",
-                isPresented: $confirmsMergeSelection,
-                titleVisibility: .visible
-            ) {
-                Button("선택한 소리 합치기") {
-                    mergeSelectedRecordings()
-                }
-                Button("취소", role: .cancel) {}
-            } message: {
-                Text("녹음 시각 순서로 이어 붙입니다. 원본 파일은 삭제하지 않습니다.")
-            }
-            .confirmationDialog(
-                "오늘 녹음 \(todayClips.count)개를 하나로 합칠까요?",
-                isPresented: $confirmsMergeToday,
-                titleVisibility: .visible
-            ) {
-                Button("오늘 녹음 합치기") {
-                    mergeTodayRecordings()
-                }
-                Button("취소", role: .cancel) {}
-            } message: {
-                Text("오늘 자정 이후 저장된 원본 녹음을 시간순으로 합칩니다. 원본 파일은 삭제하지 않습니다.")
             }
             .alert(
                 "녹음을 합치지 못했습니다",
@@ -187,6 +114,70 @@ struct RecordingsView: View {
             .onAppear { library.reload() }
             .onDisappear { player.stop() }
         }
+    }
+
+    private var mergeActions: some View {
+        Section {
+            Button(action: mergeSelectedRecordings) {
+                HStack {
+                    Label("선택한 소리 합치기", systemImage: "waveform.path.badge.plus")
+                    Spacer()
+                    if isMerging {
+                        ProgressView()
+                    } else {
+                        Text("\(selectedClipURLs.count)개 선택")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .disabled(playbackDisabled || isMerging || selectedClips.count < 2)
+
+            Button(action: mergeTodayRecordings) {
+                HStack {
+                    Label("오늘 녹음 합치기", systemImage: "calendar")
+                    Spacer()
+                    Text("\(todayClips.count)개")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .disabled(playbackDisabled || isMerging || todayClips.count < 2)
+        } footer: {
+            Text(mergeStatusMessage ?? "체크한 원본을 누르면 바로 합칩니다. 시간순으로 0.5초 간격을 두며 원본은 그대로 남습니다.")
+        }
+    }
+
+    @ViewBuilder
+    private func recordingRow(_ clip: RecordingClip) -> some View {
+        RecordingRow(
+            clip: clip,
+            isActive: player.playingURL == clip.url,
+            isPlaying: player.playingURL == clip.url && player.isPlaying,
+            playbackDisabled: playbackDisabled,
+            isSelected: selectedClipURLs.contains(clip.url),
+            toggleSelection: { toggleSelection(of: clip) },
+            play: { player.toggle(clip) },
+            delete: {
+                if player.playingURL == clip.url { player.stop() }
+                selectedClipURLs.remove(clip.url)
+                library.delete(clip)
+            }
+        )
+    }
+
+    private var mergedClips: [RecordingClip] {
+        library.clips.filter(\.isMerged)
+    }
+
+    private var originalGroups: [RecordingDayGroup] {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: library.mergeableClips) {
+            calendar.startOfDay(for: $0.createdAt)
+        }
+        return grouped
+            .map { RecordingDayGroup(date: $0.key, clips: $0.value.sorted { $0.createdAt < $1.createdAt }) }
+            .sorted { $0.date > $1.date }
     }
 
     private var todayClips: [RecordingClip] {
@@ -206,11 +197,6 @@ struct RecordingsView: View {
         }
     }
 
-    private func cancelSelection() {
-        selectedClipURLs.removeAll()
-        isSelecting = false
-    }
-
     private func mergeSelectedRecordings() {
         let clips = selectedClips
         isMerging = true
@@ -218,8 +204,9 @@ struct RecordingsView: View {
         Task {
             defer { isMerging = false }
             do {
-                _ = try await library.merge(clips, kind: .selected)
-                cancelSelection()
+                let merged = try await library.merge(clips, kind: .selected)
+                selectedClipURLs.removeAll()
+                mergeStatusMessage = "\(clips.count)개를 합쳤습니다 · \(merged.createdAt.formatted(date: .omitted, time: .shortened)) 시작 · 원본 보관됨"
             } catch {
                 mergeErrorMessage = error.localizedDescription
             }
@@ -227,16 +214,89 @@ struct RecordingsView: View {
     }
 
     private func mergeTodayRecordings() {
+        let count = todayClips.count
         isMerging = true
         player.stop()
         Task {
             defer { isMerging = false }
             do {
-                _ = try await library.mergeToday()
+                let merged = try await library.mergeToday()
+                mergeStatusMessage = "오늘 녹음 \(count)개를 합쳤습니다 · \(merged.createdAt.formatted(date: .omitted, time: .shortened)) 시작 · 원본 보관됨"
             } catch {
                 mergeErrorMessage = error.localizedDescription
             }
         }
+    }
+}
+
+private struct RecordingDayGroup: Identifiable {
+    let date: Date
+    let clips: [RecordingClip]
+    var id: Date { date }
+}
+
+private struct DailySleepTimelineHeader: View {
+    let date: Date
+    let clips: [RecordingClip]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(date, format: .dateTime.year().month().day().weekday(.short))
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(clips.count)개 · \(clips.reduce(0) { $0 + $1.duration }.durationText)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.secondary.opacity(0.18))
+                        .frame(height: 8)
+
+                    ForEach(clips) { clip in
+                        Capsule()
+                            .fill(Color.orange)
+                            .frame(width: markerWidth(for: clip, totalWidth: proxy.size.width), height: 8)
+                            .position(
+                                x: markerX(for: clip, totalWidth: proxy.size.width),
+                                y: 4
+                            )
+                    }
+                }
+            }
+            .frame(height: 8)
+
+            HStack {
+                Text("0시")
+                Spacer()
+                Text("6시")
+                Spacer()
+                Text("12시")
+                Spacer()
+                Text("18시")
+                Spacer()
+                Text("24시")
+            }
+            .font(.system(size: 9, design: .monospaced))
+            .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 5)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(date.formatted(date: .long, time: .omitted)), 녹음 \(clips.count)개")
+    }
+
+    private func markerX(for clip: RecordingClip, totalWidth: CGFloat) -> CGFloat {
+        let dayStart = Calendar.current.startOfDay(for: date)
+        let seconds = max(0, min(86_400, clip.createdAt.timeIntervalSince(dayStart)))
+        let x = totalWidth * seconds / 86_400
+        return min(max(2, x), max(2, totalWidth - 2))
+    }
+
+    private func markerWidth(for clip: RecordingClip, totalWidth: CGFloat) -> CGFloat {
+        max(4, min(12, totalWidth * clip.duration / 86_400))
     }
 }
 
@@ -245,109 +305,83 @@ private struct RecordingRow: View {
     let isActive: Bool
     let isPlaying: Bool
     let playbackDisabled: Bool
-    let selectionEnabled: Bool
     let isSelected: Bool
     let toggleSelection: () -> Void
     let play: () -> Void
     let delete: () -> Void
 
     var body: some View {
-        Group {
-            if selectionEnabled {
+        HStack(spacing: 10) {
+            if clip.isMerged {
+                Image(systemName: "square.stack.3d.up.fill")
+                    .foregroundStyle(.orange)
+                    .frame(width: 28, height: 40)
+                    .accessibilityLabel("합친 녹음")
+            } else {
                 Button(action: toggleSelection) {
-                    HStack(spacing: 14) {
-                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                            .font(.title3)
-                            .foregroundStyle(isSelected ? Color.orange : Color.secondary)
-                            .frame(width: 28, height: 40)
-
-                        clipDescription
-                        Spacer()
-                    }
-                    .contentShape(Rectangle())
+                    Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                        .font(.title3)
+                        .foregroundStyle(isSelected ? Color.orange : Color.secondary)
+                        .frame(width: 28, height: 40)
                 }
                 .buttonStyle(.plain)
-                .disabled(clip.isMerged)
-                .opacity(clip.isMerged ? 0.2 : 1)
-                .accessibilityLabel(isSelected ? "병합 선택 해제" : "병합할 녹음 선택")
-            } else {
-                HStack(spacing: 12) {
-                    Button(action: play) {
-                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                            .frame(width: 40, height: 40)
-                            .background(Color.orange.opacity(0.14), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(playbackDisabled)
-                    .accessibilityLabel(isPlaying ? "재생 일시 정지" : isActive ? "재생 계속" : "녹음 재생")
-
-                    Button(action: play) {
-                        clipDescription
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(playbackDisabled)
-                    .accessibilityLabel("\(clip.mergedTitle ?? "수면 소리") 재생")
-
-                    ShareLink(item: clip.url) {
-                        Image(systemName: "square.and.arrow.up")
-                            .frame(width: 36, height: 40)
-                    }
-                    .accessibilityLabel("녹음 공유")
-
-                    Button(role: .destructive, action: delete) {
-                        Image(systemName: "trash")
-                            .frame(width: 36, height: 40)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("녹음 삭제")
-                }
+                .accessibilityLabel(isSelected ? "합치기 선택 해제" : "합칠 녹음 선택")
             }
+
+            Button(action: play) {
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .frame(width: 38, height: 38)
+                    .background(Color.orange.opacity(0.14), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(playbackDisabled)
+            .accessibilityLabel(isPlaying ? "재생 일시 정지" : isActive ? "재생 계속" : "녹음 재생")
+
+            Button(action: play) {
+                clipDescription
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(playbackDisabled)
+            .accessibilityLabel("\(clip.mergedTitle ?? "수면 소리") 재생")
+
+            ShareLink(item: clip.url) {
+                Image(systemName: "square.and.arrow.up")
+                    .frame(width: 32, height: 40)
+            }
+            .accessibilityLabel("녹음 공유")
+
+            Button(role: .destructive, action: delete) {
+                Image(systemName: "trash")
+                    .frame(width: 32, height: 40)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("녹음 삭제")
         }
     }
 
     private var clipDescription: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(clip.mergedTitle ?? clip.createdAt.formatted(.dateTime.month().day().hour().minute().second()))
+            Text(rowTitle)
                 .font(.body.weight(.medium))
-            Text(clip.duration.durationText)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
-private struct SelectionMergeBar: View {
-    let selectionCount: Int
-    let isMerging: Bool
-    let merge: () -> Void
-    let cancel: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Button("취소", action: cancel)
-
-            Spacer()
-
-            Text("\(selectionCount)개 선택")
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(.secondary)
-
-            Button(action: merge) {
-                if isMerging {
-                    ProgressView()
-                } else {
-                    Label("하나로 합치기", systemImage: "waveform.path.badge.plus")
+            HStack(spacing: 6) {
+                Text(clip.duration.durationText)
+                if clip.isMerged {
+                    Text("합본 · 원본 보관")
                 }
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.orange)
-            .disabled(selectionCount < 2 || isMerging)
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.bar)
+    }
+
+    private var rowTitle: String {
+        if let mergedTitle = clip.mergedTitle { return mergedTitle }
+        if clip.isEmbeddedSample {
+            return "테스트 코골이 · \(Int(clip.duration.rounded()))초"
+        }
+        return clip.createdAt.formatted(.dateTime.hour().minute().second())
     }
 }
 

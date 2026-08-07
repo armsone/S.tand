@@ -27,27 +27,20 @@ struct SettingsView: View {
                 }
 
                 Section("시계") {
-                    Picker("시계 글꼴", selection: $store.value.clockFont) {
-                        ForEach(ClockFontChoice.allCases) { choice in
-                            HStack {
-                                Text("12:34")
-                                    .font(choice.font(size: 18))
-                                Text(choice.displayName)
-                            }
-                            .tag(choice)
+                    NavigationLink {
+                        ClockFontSelectionView(store: store)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("시계 글꼴")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            ClockFontFlipPreview(choice: store.value.clockFont)
+                            Text(store.value.clockFont.displayName)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
                         }
                     }
-
-                    HStack {
-                        Spacer()
-                        Text("12:34")
-                            .font(store.value.clockFont.font(size: 38))
-                            .monospacedDigit()
-                            .contentTransition(.opacity)
-                            .padding(.vertical, 8)
-                        Spacer()
-                    }
-                    .accessibilityLabel("선택한 시계 글꼴 미리보기 12시 34분")
+                    .accessibilityLabel("시계 글꼴, 현재 (store.value.clockFont.displayName)")
 
                     HStack {
                         Text("시계 크기")
@@ -182,6 +175,80 @@ struct SettingsView: View {
         let minutes = seconds / 60
         let remainder = seconds % 60
         return remainder == 0 ? "\(minutes)분" : "\(minutes)분 \(remainder)초"
+    }
+}
+
+private struct ClockFontSelectionView: View {
+    @ObservedObject var store: SettingsStore
+
+    var body: some View {
+        List(ClockFontChoice.allCases) { choice in
+            Button {
+                store.value.clockFont = choice
+            } label: {
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack {
+                        Text(choice.displayName)
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        if store.value.clockFont == choice {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    ClockFontFlipPreview(choice: choice)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                "\(choice.displayName), 플립시계 미리보기\(store.value.clockFont == choice ? ", 선택됨" : "")"
+            )
+        }
+        .navigationTitle("시계 글꼴")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct ClockFontFlipPreview: View {
+    let choice: ClockFontChoice
+
+    var body: some View {
+        HStack(spacing: 6) {
+            previewCard("12")
+            Text(":")
+                .font(choice.font(size: 28))
+                .foregroundStyle(.white.opacity(0.7))
+            previewCard("34")
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(Color.black, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func previewCard(_ value: String) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [.white.opacity(0.14), .white.opacity(0.07)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(.white.opacity(0.11), lineWidth: 1)
+                }
+            Rectangle()
+                .fill(.black.opacity(0.45))
+                .frame(height: 1)
+            Text(value)
+                .font(choice.font(size: 38))
+                .minimumScaleFactor(0.7)
+                .foregroundStyle(.white.opacity(0.88))
+        }
+        .frame(width: 78, height: 58)
     }
 }
 

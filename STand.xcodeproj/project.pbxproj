@@ -34,6 +34,9 @@
 		B0000000000000000000001D /* WakeMotionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001D /* WakeMotionMonitor.swift */; };
 		B0000000000000000000001E /* STandWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001E /* STandWidget.swift */; };
 		B0000000000000000000001F /* STandWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F00000000000000000000203 /* STandWidget.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		B00000000000000000000020 /* sample-snore-5s.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000020 /* sample-snore-5s.m4a */; };
+		B00000000000000000000021 /* sample-snore-10s.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000021 /* sample-snore-10s.m4a */; };
+		B00000000000000000000022 /* sample-snore-15s.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000022 /* sample-snore-15s.m4a */; };
 		B00000000000000000000101 /* AudioAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000101 /* AudioAnalysisTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -98,6 +101,9 @@
 		F0000000000000000000001D /* WakeMotionMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeMotionMonitor.swift; sourceTree = "<group>"; };
 		F0000000000000000000001E /* STandWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STandWidget.swift; sourceTree = "<group>"; };
 		F0000000000000000000001F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		F00000000000000000000020 /* sample-snore-5s.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = "sample-snore-5s.m4a"; sourceTree = "<group>"; };
+		F00000000000000000000021 /* sample-snore-10s.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = "sample-snore-10s.m4a"; sourceTree = "<group>"; };
+		F00000000000000000000022 /* sample-snore-15s.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = "sample-snore-15s.m4a"; sourceTree = "<group>"; };
 		F00000000000000000000101 /* AudioAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAnalysisTests.swift; sourceTree = "<group>"; };
 		F00000000000000000000201 /* STand.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = STand.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000202 /* STandTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = STandTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -205,6 +211,7 @@
 				F0000000000000000000000A /* Assets.xcassets */,
 				A2000000000000000000000C /* Fonts */,
 				A2000000000000000000000D /* FontLicenses */,
+				A2000000000000000000000F /* SampleRecordings */,
 				F0000000000000000000000C /* Info.plist */,
 				F0000000000000000000000D /* PrivacyInfo.xcprivacy */,
 			);
@@ -235,6 +242,16 @@
 				F0000000000000000000001B /* DoHyeon-OFL.txt */,
 			);
 			path = FontLicenses;
+			sourceTree = "<group>";
+		};
+		A2000000000000000000000F /* SampleRecordings */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000020 /* sample-snore-5s.m4a */,
+				F00000000000000000000021 /* sample-snore-10s.m4a */,
+				F00000000000000000000022 /* sample-snore-15s.m4a */,
+			);
+			path = SampleRecordings;
 			sourceTree = "<group>";
 		};
 		A20000000000000000000009 /* STandTests */ = {
@@ -398,6 +415,9 @@
 				B00000000000000000000019 /* Tenada-LICENSE.txt in Resources */,
 				B0000000000000000000001A /* BlackHanSans-OFL.txt in Resources */,
 				B0000000000000000000001B /* DoHyeon-OFL.txt in Resources */,
+				B00000000000000000000020 /* sample-snore-5s.m4a in Resources */,
+				B00000000000000000000021 /* sample-snore-10s.m4a in Resources */,
+				B00000000000000000000022 /* sample-snore-15s.m4a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

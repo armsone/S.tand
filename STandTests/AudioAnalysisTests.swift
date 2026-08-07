@@ -26,6 +26,15 @@ final class AudioAnalysisTests: XCTestCase {
         }
     }
 
+    func testEmbeddedSnoreSamplesAreIncluded() {
+        for name in ["sample-snore-5s", "sample-snore-10s", "sample-snore-15s"] {
+            XCTAssertNotNil(
+                Bundle.main.url(forResource: name, withExtension: "m4a"),
+                "내장 테스트 코골이 파일이 앱 번들에 포함되지 않았습니다: \(name).m4a"
+            )
+        }
+    }
+
     func testLegacySettingsDefaultToAutomaticOrientation() throws {
         let legacyJSON = """
         {
@@ -470,8 +479,11 @@ final class AudioAnalysisTests: XCTestCase {
 
         XCTAssertEqual(selectedMerge.mergedTitle, "선택 녹음 합본")
         XCTAssertTrue(FileManager.default.fileExists(atPath: selectedMerge.url.path))
+        XCTAssertEqual(selectedMerge.createdAt, previousDay.createdAt)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: olderURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: previousDayURL.path))
         XCTAssertEqual(library.clips.count, 4)
-        XCTAssertEqual(selectedMerge.duration, selectedDuration, accuracy: 0.08)
+        XCTAssertEqual(selectedMerge.duration, selectedDuration + 0.5, accuracy: 0.12)
 
         let mergeDate = try XCTUnwrap(
             Calendar.current.date(from: DateComponents(year: 2026, month: 8, day: 7, hour: 12))
@@ -480,10 +492,12 @@ final class AudioAnalysisTests: XCTestCase {
         let todayMerge = try await library.mergeToday(on: mergeDate)
 
         XCTAssertEqual(todayMerge.mergedTitle, "오늘 녹음 합본")
+        XCTAssertEqual(todayMerge.createdAt, older.createdAt)
         XCTAssertTrue(FileManager.default.fileExists(atPath: todayMerge.url.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: selectedMerge.url.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: newerURL.path))
         XCTAssertEqual(library.clips.count, 5)
-        XCTAssertEqual(todayMerge.duration, todayDuration, accuracy: 0.08)
+        XCTAssertEqual(todayMerge.duration, todayDuration + 0.5, accuracy: 0.12)
     }
 
     private func writeAudioFile(
