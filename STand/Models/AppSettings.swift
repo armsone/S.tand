@@ -265,7 +265,7 @@ struct AppSettings: Codable, Equatable {
     var portraitLayout = StandScreenLayout.portrait
     var landscapeLayout = StandScreenLayout.landscape
     var brightnessModeThreshold = 0.35
-    var holdDuration = 60.0
+    var holdDuration = 5.0
     var fadeDuration = 30.0
     var automaticDimmingEnabled = true
     var preventAutoDimmingWhenScreenBright = true
@@ -289,7 +289,7 @@ struct AppSettings: Codable, Equatable {
         portraitLayout: StandScreenLayout = .portrait,
         landscapeLayout: StandScreenLayout = .landscape,
         brightnessModeThreshold: Double = 0.35,
-        holdDuration: Double = 60,
+        holdDuration: Double = 5,
         fadeDuration: Double = 30,
         automaticDimmingEnabled: Bool = true,
         preventAutoDimmingWhenScreenBright: Bool = true,
@@ -382,8 +382,8 @@ struct AppSettings: Codable, Equatable {
             try container.decodeIfPresent(Double.self, forKey: .brightnessModeThreshold) ?? 0.35
         ))
         holdDuration = min(300, max(
-            10,
-            try container.decodeIfPresent(Double.self, forKey: .holdDuration) ?? 60
+            5,
+            try container.decodeIfPresent(Double.self, forKey: .holdDuration) ?? 5
         ))
         fadeDuration = try container.decodeIfPresent(Double.self, forKey: .fadeDuration) ?? 30
         automaticDimmingEnabled = try container.decodeIfPresent(
@@ -410,6 +410,31 @@ struct AppSettings: Codable, Equatable {
     }
 }
 
+enum SettingsMigration {
+    static let torchEnabledByDefaultKey = "settingsMigration.torchEnabledByDefault.v1"
+    static let fiveSecondHoldDurationKey = "settingsMigration.fiveSecondHoldDuration.v1"
+
+    static func applyingTorchDefault(
+        to settings: AppSettings,
+        hasMigrated: Bool
+    ) -> AppSettings {
+        guard !hasMigrated else { return settings }
+        var migrated = settings
+        migrated.torchEnabled = true
+        return migrated
+    }
+
+    static func applyingFiveSecondHoldDuration(
+        to settings: AppSettings,
+        hasMigrated: Bool
+    ) -> AppSettings {
+        guard !hasMigrated else { return settings }
+        var migrated = settings
+        migrated.holdDuration = 5
+        return migrated
+    }
+}
+
 @MainActor
 final class SettingsStore: ObservableObject {
     @Published var value: AppSettings {
@@ -422,15 +447,34 @@ final class SettingsStore: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
-        guard
-            let data = defaults.data(forKey: storageKey),
-            let saved = try? JSONDecoder().decode(AppSettings.self, from: data)
-        else {
-            value = .recommended
-            return
-        }
+        let saved = defaults.data(forKey: storageKey)
+            .flatMap { try? JSONDecoder().decode(AppSettings.self, from: $0) }
+            ?? .recommended
+        let hasMigratedTorchDefault = defaults.bool(
+            forKey: SettingsMigration.torchEnabledByDefaultKey
+        )
+        let hasMigratedHoldDuration = defaults.bool(
+            forKey: SettingsMigration.fiveSecondHoldDurationKey
+        )
+        let torchMigrated = SettingsMigration.applyingTorchDefault(
+            to: saved,
+            hasMigrated: hasMigratedTorchDefault
+        )
+        value = SettingsMigration.applyingFiveSecondHoldDuration(
+            to: torchMigrated,
+            hasMigrated: hasMigratedHoldDuration
+        )
 
-        value = saved
+        guard !hasMigratedTorchDefault || !hasMigratedHoldDuration else { return }
+        if let data = try? JSONEncoder().encode(value) {
+            defaults.set(data, forKey: storageKey)
+            if !hasMigratedTorchDefault {
+                defaults.set(true, forKey: SettingsMigration.torchEnabledByDefaultKey)
+            }
+            if !hasMigratedHoldDuration {
+                defaults.set(true, forKey: SettingsMigration.fiveSecondHoldDurationKey)
+            }
+        }
     }
 
     func restoreRecommendedValues() {

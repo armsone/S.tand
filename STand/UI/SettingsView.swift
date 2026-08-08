@@ -151,7 +151,9 @@ struct SettingsView: View {
 
                 SettingsActionTile(
                     title: "플래시 연동",
-                    status: store.value.torchEnabled ? "사용" : "사용 안 함",
+                    status: store.value.torchEnabled
+                        ? "터치·뒤척임 100%"
+                        : "터치 0% · 뒤척임 10%",
                     systemImage: store.value.torchEnabled ? "flashlight.on.fill" : "flashlight.off.fill",
                     isActive: store.value.torchEnabled,
                     accent: accent
@@ -337,7 +339,7 @@ struct SettingsView: View {
                     title: "어두워지기까지",
                     valueText: holdDurationText,
                     value: $store.value.holdDuration,
-                    range: 10...300,
+                    range: 5...300,
                     step: 5,
                     accent: accent
                 )
@@ -353,22 +355,14 @@ struct SettingsView: View {
             }
 
             SettingsToggleRow(
-                title: "화면 점등 시 플래시",
-                subtitle: "뒤척임을 알아차리기 위한 보조 불빛",
+                title: "뒤척임 플래시 100% 연동",
+                subtitle: store.value.torchEnabled
+                    ? "연동함 · 터치와 뒤척임 모두 100%"
+                    : "연동 해제 · 터치 0%, 뒤척임 10%",
                 systemImage: "flashlight.on.fill",
                 isOn: $store.value.torchEnabled,
                 accent: accent
             )
-
-            if store.value.torchEnabled {
-                SettingsSliderRow(
-                    title: "플래시 최대 밝기",
-                    valueText: "\(Int((store.value.torchIntensity * 100).rounded()))%",
-                    value: $store.value.torchIntensity,
-                    range: 0.05...1,
-                    accent: accent
-                )
-            }
 
             SettingsHelpText(
                 "기준선이 현재 밝기보다 왼쪽이면 시간이 지난 뒤 잠자기 모드로 들어가고, 오른쪽이면 스탠드 모드를 유지합니다. 기준 타일을 탭하면 현재 밝기 가까이에서 두 모드를 바꿉니다."

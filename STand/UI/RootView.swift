@@ -4,9 +4,9 @@ import UniformTypeIdentifiers
 
 struct HoldDurationAdjustment {
     static func value(startingAt startingValue: Double, translation: CGFloat) -> Double {
-        let rawValue = startingValue + Double(translation / 300) * 290
+        let rawValue = startingValue + Double(translation / 300) * 295
         let steppedValue = (rawValue / 5).rounded() * 5
-        return min(300, max(10, steppedValue))
+        return min(300, max(5, steppedValue))
     }
 }
 
@@ -300,6 +300,7 @@ struct RootView: View {
                     .padding(.top, isPortrait ? 18 : 20)
                     .padding(.bottom, StandControlLayoutMetrics.bottomPadding(isPortrait: isPortrait))
                     .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
+                    .zIndex(5)
 
                     centerContent(isPortrait: isPortrait, canvasSize: proxy.size)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -815,14 +816,12 @@ struct RootView: View {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
             } label: {
                 tapToControlText
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .frame(
-                maxWidth: .infinity,
-                minHeight: StandControlLayoutMetrics.hiddenControlRevealHeight
-            )
+            .frame(maxWidth: .infinity)
+            .frame(height: StandControlLayoutMetrics.hiddenControlRevealHeight)
             .contentShape(Rectangle())
             .accessibilityLabel("하단 기능 버튼 열기")
             .accessibilityHint("두 번 누르면 플래시, 밝기 기준, 녹음 및 설정 버튼이 나타납니다")
@@ -859,8 +858,8 @@ struct RootView: View {
             ControlButton(
                 title: "플래시 연동",
                 systemImage: settings.value.torchEnabled ? "flashlight.on.fill" : "flashlight.off.fill",
-                status: settings.value.torchEnabled ? "점등 시 연동" : "연동 안 함",
-                hint: "화면이 켜질 때 후면 플래시를 함께 켤지 바꿉니다",
+                status: settings.value.torchEnabled ? "터치·뒤척임 100%" : "터치 0% · 뒤척임 10%",
+                hint: "연동하면 터치와 뒤척임 모두 100퍼센트, 해제하면 터치는 끄고 뒤척임만 10퍼센트로 켭니다",
                 width: width
             ) {
                 settings.value.torchEnabled.toggle()

@@ -78,6 +78,32 @@ enum SleepCareMonitoringPolicy {
     }
 }
 
+enum SleepMovementLightingPolicy {
+    static func torchLevel(
+        torchEnabled: Bool,
+        environmentDisplayMode: EnvironmentDisplayMode
+    ) -> Double {
+        guard environmentDisplayMode == .sleeping else { return 0 }
+        return torchEnabled ? 1 : 0.1
+    }
+}
+
+enum LampTorchLightingPolicy {
+    static func maximumLevel(
+        torchEnabled: Bool,
+        isMovementTriggered: Bool,
+        environmentDisplayMode: EnvironmentDisplayMode
+    ) -> Double {
+        if isMovementTriggered {
+            return SleepMovementLightingPolicy.torchLevel(
+                torchEnabled: torchEnabled,
+                environmentDisplayMode: environmentDisplayMode
+            )
+        }
+        return torchEnabled ? 1 : 0
+    }
+}
+
 @MainActor
 final class StandViewModel: ObservableObject {
     @Published private(set) var isNightSessionActive = false
@@ -105,6 +131,7 @@ final class StandViewModel: ObservableObject {
     let weather: WeatherService
 
     private var lampTask: Task<Void, Never>?
+    private var movementTorchSyncTask: Task<Void, Never>?
     private var controlsTask: Task<Void, Never>?
     private var settingsSubscription: AnyCancellable?
     private var screenBrightnessSubscription: AnyCancellable?
@@ -112,6 +139,7 @@ final class StandViewModel: ObservableObject {
     private let torch = TorchController()
     private let motionMonitor = WakeMotionMonitor()
     private var activeLampMaximumIntensity = 1.0
+    private var isMovementTriggeredLamp = false
     private var monitoringPausedForPlayback = false
     private var brightnessBeforeSession: CGFloat?
     private var activeRecordingSessionID: UUID?
@@ -137,7 +165,7 @@ final class StandViewModel: ObservableObject {
                   SleepSoundWakePolicy.shouldWake(classification),
                   self.settings.value.multiStimulusWakeEnabled
             else { return }
-            self.activateLamp()
+            self.wakeForSleepMovement()
         }
         audio.onClipSaved = { [weak self] url in
             guard let self else { return }
@@ -151,7 +179,7 @@ final class StandViewModel: ObservableObject {
                   self.environmentDisplayMode == .sleeping,
                   self.settings.value.multiStimulusWakeEnabled
             else { return }
-            self.activateLamp()
+            self.wakeForSleepMovement()
         }
         orientationPreference = settings.value.orientationPreference
         OrientationController.shared.setPreference(settings.value.orientationPreference)
@@ -244,6 +272,8 @@ final class StandViewModel: ObservableObject {
         automaticDimmingPaused = false
         UIApplication.shared.isIdleTimerDisabled = false
         restoreScreenBrightness()
+        movementTorchSyncTask?.cancel()
+        movementTorchSyncTask = nil
         torch.turnOff()
         guard isNightSessionActive else { return }
         audio.stop()
@@ -255,6 +285,10 @@ final class StandViewModel: ObservableObject {
     }
 
     func activateLamp() {
+        activateLamp(triggeredBySleepMovement: false)
+    }
+
+    private func activateLamp(triggeredBySleepMovement: Bool) {
         guard isNightSessionActive else { return }
         lampTask?.cancel()
 
@@ -263,6 +297,7 @@ final class StandViewModel: ObservableObject {
         let fadeDuration = max(0.1, settings.value.fadeDuration)
         let maximumIntensity = settings.value.lampIntensity
         activeLampMaximumIntensity = maximumIntensity
+        isMovementTriggeredLamp = triggeredBySleepMovement
         automaticDimmingPaused = false
 
         lampPhase = .holding
@@ -327,10 +362,41 @@ final class StandViewModel: ObservableObject {
         }
     }
 
+    private func wakeForSleepMovement() {
+        activateLamp(triggeredBySleepMovement: true)
+        let torchLevel = SleepMovementLightingPolicy.torchLevel(
+            torchEnabled: settings.value.torchEnabled,
+            environmentDisplayMode: environmentDisplayMode
+        )
+        guard torchLevel > 0 else { return }
+
+        // 점등 순간 카메라 장치가 잠시 바쁘더라도 뒤척임 보조 불빛이 빠지지 않도록
+        // 짧은 간격으로 다시 동기화한다. TorchController가 이미 켜진 경우에는 no-op이다.
+        movementTorchSyncTask?.cancel()
+        movementTorchSyncTask = Task { [weak self] in
+            for delay in [150, 450] {
+                try? await Task.sleep(for: .milliseconds(delay))
+                guard let self,
+                      !Task.isCancelled,
+                      self.isNightSessionActive,
+                      self.lampPhase != .off,
+                      SleepMovementLightingPolicy.torchLevel(
+                        torchEnabled: self.settings.value.torchEnabled,
+                        environmentDisplayMode: self.environmentDisplayMode
+                      ) > 0
+                else { return }
+                self.syncTorch()
+            }
+        }
+    }
+
     func turnOffLamp(animated: Bool) {
         lampTask?.cancel()
+        movementTorchSyncTask?.cancel()
+        movementTorchSyncTask = nil
         manualDimmingHoldActive = false
         automaticDimmingPaused = false
+        isMovementTriggeredLamp = false
         lampPhase = .off
         torch.turnOff()
         if animated {
@@ -497,14 +563,23 @@ final class StandViewModel: ObservableObject {
 
     private func syncTorch(using settingsOverride: AppSettings? = nil) {
         let currentSettings = settingsOverride ?? settings.value
-        guard currentSettings.torchEnabled, isNightSessionActive, lampPhase != .off else {
+        guard isNightSessionActive, lampPhase != .off else {
+            torch.turnOff()
+            return
+        }
+        let maximumTorchLevel = LampTorchLightingPolicy.maximumLevel(
+            torchEnabled: currentSettings.torchEnabled,
+            isMovementTriggered: isMovementTriggeredLamp,
+            environmentDisplayMode: environmentDisplayMode
+        )
+        guard maximumTorchLevel > 0 else {
             torch.turnOff()
             return
         }
         let progress = activeLampMaximumIntensity > 0
             ? lampIntensity / activeLampMaximumIntensity
             : 0
-        torch.setLevel(progress * currentSettings.torchIntensity)
+        torch.setLevel(progress * maximumTorchLevel)
     }
 
     func revealControls() {

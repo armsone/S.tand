@@ -84,6 +84,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(ClockFontChoice.allCases[4], .tenada)
         XCTAssertEqual(AppSettings.recommended.clockFont, .tenada)
         XCTAssertTrue(AppSettings.recommended.torchEnabled)
+        XCTAssertEqual(AppSettings.recommended.holdDuration, 5)
     }
 
     func testRecommendedLayoutsMatchCapturedSimulatorArrangement() {
@@ -238,6 +239,45 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(decoded.clockFont, .doHyeon)
         XCTAssertTrue(decoded.preventAutoDimmingWhenScreenBright)
         XCTAssertFalse(decoded.automaticDimmingEnabled)
+    }
+
+    @MainActor
+    func testTorchDefaultMigrationForcesOnceThenPreservesUserOptOut() throws {
+        let suiteName = "STandTests.torch-default-migration.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        var previouslySaved = AppSettings.recommended
+        previouslySaved.torchEnabled = false
+        defaults.set(try JSONEncoder().encode(previouslySaved), forKey: "appSettings")
+
+        let migrated = SettingsStore(defaults: defaults)
+        XCTAssertTrue(migrated.value.torchEnabled)
+        XCTAssertTrue(defaults.bool(forKey: SettingsMigration.torchEnabledByDefaultKey))
+
+        migrated.value.torchEnabled = false
+        let reopened = SettingsStore(defaults: defaults)
+        XCTAssertFalse(reopened.value.torchEnabled)
+    }
+
+    @MainActor
+    func testFiveSecondHoldDurationMigrationForcesOnceThenPreservesUserChoice() throws {
+        let suiteName = "STandTests.hold-duration-migration.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        var previouslySaved = AppSettings.recommended
+        previouslySaved.holdDuration = 120
+        defaults.set(try JSONEncoder().encode(previouslySaved), forKey: "appSettings")
+        defaults.set(true, forKey: SettingsMigration.torchEnabledByDefaultKey)
+
+        let migrated = SettingsStore(defaults: defaults)
+        XCTAssertEqual(migrated.value.holdDuration, 5)
+        XCTAssertTrue(defaults.bool(forKey: SettingsMigration.fiveSecondHoldDurationKey))
+
+        migrated.value.holdDuration = 90
+        let reopened = SettingsStore(defaults: defaults)
+        XCTAssertEqual(reopened.value.holdDuration, 90)
     }
 
     func testScreenEditingSettingsRoundTrip() throws {
@@ -733,6 +773,57 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
+    func testSleepMovementUsesFullOrTenPercentTorchOnlyInSleepingMode() {
+        XCTAssertEqual(
+            SleepMovementLightingPolicy.torchLevel(
+                torchEnabled: true,
+                environmentDisplayMode: .sleeping
+            ),
+            1
+        )
+        XCTAssertEqual(
+            SleepMovementLightingPolicy.torchLevel(
+                torchEnabled: false,
+                environmentDisplayMode: .sleeping
+            ),
+            0.1
+        )
+        XCTAssertEqual(
+            SleepMovementLightingPolicy.torchLevel(
+                torchEnabled: true,
+                environmentDisplayMode: .stand
+            ),
+            0
+        )
+    }
+
+    func testTouchWakeUsesFullTorchWhenLinkedAndNoTorchWhenUnlinked() {
+        XCTAssertEqual(
+            LampTorchLightingPolicy.maximumLevel(
+                torchEnabled: true,
+                isMovementTriggered: false,
+                environmentDisplayMode: .sleeping
+            ),
+            1
+        )
+        XCTAssertEqual(
+            LampTorchLightingPolicy.maximumLevel(
+                torchEnabled: false,
+                isMovementTriggered: false,
+                environmentDisplayMode: .sleeping
+            ),
+            0
+        )
+        XCTAssertEqual(
+            LampTorchLightingPolicy.maximumLevel(
+                torchEnabled: false,
+                isMovementTriggered: true,
+                environmentDisplayMode: .sleeping
+            ),
+            0.1
+        )
+    }
+
     @MainActor
     func testBrightnessThresholdChangeUsesTheNewPublishedValueImmediately() {
         let model = StandViewModel()
@@ -895,9 +986,9 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
-    func testHorizontalDragAdjustsHoldDurationBetweenTenSecondsAndFiveMinutes() {
+    func testHorizontalDragAdjustsHoldDurationBetweenFiveSecondsAndFiveMinutes() {
         XCTAssertEqual(HoldDurationAdjustment.value(startingAt: 60, translation: 300), 300)
-        XCTAssertEqual(HoldDurationAdjustment.value(startingAt: 60, translation: -300), 10)
+        XCTAssertEqual(HoldDurationAdjustment.value(startingAt: 60, translation: -300), 5)
         XCTAssertEqual(HoldDurationAdjustment.value(startingAt: 60, translation: 30), 90)
     }
 
