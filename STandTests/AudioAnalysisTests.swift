@@ -130,16 +130,25 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(
             BottomControlLayoutPolicy.rows(
                 for: StandControlKind.defaultOrder,
-                availableWidth: availableWidth
+                availableWidth: availableWidth,
+                isPortrait: true
             ).count,
             2
         )
         XCTAssertEqual(
-            BottomControlLayoutPolicy.rows(for: threeRowOrder, availableWidth: availableWidth).count,
+            BottomControlLayoutPolicy.rows(
+                for: threeRowOrder,
+                availableWidth: availableWidth,
+                isPortrait: true
+            ).count,
             3
         )
         XCTAssertEqual(
-            BottomControlLayoutPolicy.height(for: threeRowOrder, availableWidth: availableWidth),
+            BottomControlLayoutPolicy.height(
+                for: threeRowOrder,
+                availableWidth: availableWidth,
+                isPortrait: true
+            ),
             192
         )
 
@@ -189,6 +198,7 @@ final class AudioAnalysisTests: XCTestCase {
 
     func testScreenEditingSettingsRoundTrip() throws {
         var portrait = StandScreenLayout.portrait
+        portrait.clock = PanelTransform(x: 0.08, y: -0.04, scale: 1.15)
         portrait.date = PanelTransform(x: 0.15, y: -0.12, scale: 1.2)
         portrait.weatherGroupIDs = [4, 4, 9]
 
@@ -208,6 +218,19 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(decoded.portraitLayout, portrait)
         XCTAssertEqual(decoded.landscapeLayout, .landscape)
         XCTAssertEqual(decoded.brightnessModeThreshold, 0.18)
+    }
+
+    func testLegacyScreenLayoutWithoutClockUsesCenteredClock() throws {
+        let encoded = try JSONEncoder().encode(StandScreenLayout.portrait)
+        var legacy = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        legacy.removeValue(forKey: "clock")
+
+        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+        let decoded = try JSONDecoder().decode(StandScreenLayout.self, from: legacyData)
+
+        XCTAssertEqual(decoded.clock, PanelTransform(x: 0, y: 0, scale: 1))
     }
 
     func testDisplayThemeRoundTripsAndLegacySettingsUseColor() throws {
@@ -238,13 +261,52 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
-    func testPanelSnapsWhenGuideEntersItsMiddleTenPercent() {
+    func testPanelCenterSnapsToEitherGuideInsideItsMiddleTenPercent() {
         XCTAssertTrue(
-            PanelEditingPolicy.shouldSnapToVerticalCenter(centerOffset: 6, panelWidth: 120)
+            PanelEditingPolicy.shouldSnapToCenter(centerOffset: 6, panelLength: 120)
         )
         XCTAssertFalse(
-            PanelEditingPolicy.shouldSnapToVerticalCenter(centerOffset: 6.1, panelWidth: 120)
+            PanelEditingPolicy.shouldSnapToCenter(centerOffset: 6.1, panelLength: 120)
         )
+        XCTAssertTrue(PanelEditingPolicy.shouldSnapToCenter(centerOffset: -2, panelLength: 40))
+        XCTAssertFalse(PanelEditingPolicy.shouldSnapToCenter(centerOffset: -2.1, panelLength: 40))
+    }
+
+    func testTopLeadingResizeKeepsCenterAndChangesOnlyScale() {
+        let original = PanelTransform(x: 0.18, y: -0.22, scale: 1)
+        let smallerScale = PanelEditingPolicy.scaleFromTopLeadingDrag(
+            startScale: original.scale,
+            panelSize: CGSize(width: 100, height: 80),
+            translation: CGSize(width: 20, height: 16)
+        )
+        let largerScale = PanelEditingPolicy.scaleFromTopLeadingDrag(
+            startScale: original.scale,
+            panelSize: CGSize(width: 100, height: 80),
+            translation: CGSize(width: -20, height: -16)
+        )
+
+        XCTAssertLessThan(smallerScale, original.scale)
+        XCTAssertGreaterThan(largerScale, original.scale)
+        XCTAssertEqual(original.x, 0.18)
+        XCTAssertEqual(original.y, -0.22)
+        XCTAssertEqual(
+            PanelEditingPolicy.scaleFromTopLeadingDrag(
+                startScale: PanelEditingPolicy.minimumPanelScale,
+                panelSize: CGSize(width: 100, height: 80),
+                translation: CGSize(width: 500, height: 500)
+            ),
+            PanelEditingPolicy.minimumPanelScale
+        )
+        XCTAssertEqual(
+            PanelEditingPolicy.scaleFromTopLeadingDrag(
+                startScale: 1,
+                panelSize: CGSize(width: 100, height: 80),
+                translation: CGSize(width: -500, height: -500)
+            ),
+            PanelEditingPolicy.maximumPanelScale
+        )
+        XCTAssertEqual(PanelEditingPolicy.minimumPanelScale, 0.30)
+        XCTAssertEqual(PanelEditingPolicy.maximumPanelScale, 2.00)
     }
 
     func testEditablePanelCenterStaysInsideProtectedControls() {
@@ -448,26 +510,79 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(BrightnessThresholdPolicy.value(locationX: 300, width: 240), 1)
     }
 
+    func testBrightnessThresholdTapAlternatesAtTheNearestQuarterPoints() {
+        let brightness = 0.6
+        let sleepingThreshold = BrightnessThresholdPolicy.valueAfterTap(
+            currentBrightness: brightness,
+            threshold: 0.8
+        )
+        XCTAssertEqual(sleepingThreshold, 0.45, accuracy: 0.000_001)
+        XCTAssertEqual(
+            EnvironmentDisplayMode.resolve(
+                brightness: brightness,
+                threshold: sleepingThreshold
+            ),
+            .sleeping
+        )
+
+        let standThreshold = BrightnessThresholdPolicy.valueAfterTap(
+            currentBrightness: brightness,
+            threshold: sleepingThreshold
+        )
+        XCTAssertEqual(standThreshold, 0.7, accuracy: 0.000_001)
+        XCTAssertEqual(
+            EnvironmentDisplayMode.resolve(brightness: brightness, threshold: standThreshold),
+            .stand
+        )
+    }
+
     func testBrightnessAndActionTilesShareFullContainerOpacity() {
         XCTAssertEqual(StandControlLayoutMetrics.tileOpacity, 1)
     }
 
     func testBottomControlTypographyAndThreeColumnSliderMetrics() {
-        XCTAssertEqual(StandControlLayoutMetrics.brightnessTileWidth, 168)
         XCTAssertEqual(StandControlLayoutMetrics.titleFontSize, 10.5)
         XCTAssertEqual(StandControlLayoutMetrics.statusFontSize, 8.5)
         XCTAssertEqual(StandControlLayoutMetrics.foregroundOpacity, 0.78)
 
-        let nightRowWidth = StandControlLayoutMetrics.buttonWidth * 2
-            + StandControlLayoutMetrics.brightnessTileWidth
+        let screenWidth: CGFloat = 393
+        let availableWidth = screenWidth - StandControlLayoutMetrics.rowSpacing * 2
+        let buttonWidth = BottomControlLayoutPolicy.itemWidth(
+            for: .flashlight,
+            availableWidth: availableWidth,
+            isPortrait: true
+        )
+        let sliderWidth = BottomControlLayoutPolicy.itemWidth(
+            for: .brightness,
+            availableWidth: availableWidth,
+            isPortrait: true
+        )
+        let nightRowWidth = buttonWidth * 2 + sliderWidth
             + StandControlLayoutMetrics.rowSpacing * 2
-        let secondaryRowWidth = StandControlLayoutMetrics.buttonWidth * 4
+        let secondaryRowWidth = buttonWidth * 4
             + StandControlLayoutMetrics.rowSpacing * 3
 
-        XCTAssertEqual(nightRowWidth, 328)
-        XCTAssertEqual(secondaryRowWidth, 314)
-        XCTAssertLessThanOrEqual(nightRowWidth, 393 - 40)
-        XCTAssertLessThanOrEqual(secondaryRowWidth, 393 - 40)
+        XCTAssertEqual(buttonWidth, 90.75)
+        XCTAssertEqual(sliderWidth, 187.5)
+        XCTAssertEqual(nightRowWidth, availableWidth)
+        XCTAssertEqual(secondaryRowWidth, availableWidth)
+        XCTAssertEqual(screenWidth - availableWidth, StandControlLayoutMetrics.rowSpacing * 2)
+
+        let landscapeAvailableWidth: CGFloat = 852 - StandControlLayoutMetrics.rowSpacing * 2
+        let landscapeRows = BottomControlLayoutPolicy.rows(
+            for: StandControlKind.defaultOrder,
+            availableWidth: landscapeAvailableWidth,
+            isPortrait: false
+        )
+        XCTAssertEqual(landscapeRows.count, 1)
+        let landscapeRowWidth = StandControlKind.defaultOrder.reduce(CGFloat.zero) {
+            $0 + BottomControlLayoutPolicy.itemWidth(
+                for: $1,
+                availableWidth: landscapeAvailableWidth,
+                isPortrait: false
+            )
+        } + StandControlLayoutMetrics.rowSpacing * 6
+        XCTAssertEqual(landscapeRowWidth, landscapeAvailableWidth)
     }
 
     func testStatusPanelUsesSingleLineWidthAndMatchingBoundaryHeight() {

@@ -170,6 +170,7 @@ enum StandControlKind: String, Codable, CaseIterable, Identifiable {
 }
 
 struct StandScreenLayout: Codable, Equatable {
+    var clock: PanelTransform
     var weatherIcon: PanelTransform
     var weatherTemperature: PanelTransform
     var weatherCondition: PanelTransform
@@ -181,6 +182,7 @@ struct StandScreenLayout: Codable, Equatable {
     var controlOrder: [StandControlKind]
 
     init(
+        clock: PanelTransform = .init(x: 0, y: 0),
         weatherIcon: PanelTransform,
         weatherTemperature: PanelTransform,
         weatherCondition: PanelTransform,
@@ -191,6 +193,7 @@ struct StandScreenLayout: Codable, Equatable {
         weatherGroupIDs: [Int],
         controlOrder: [StandControlKind] = StandControlKind.defaultOrder
     ) {
+        self.clock = clock
         self.weatherIcon = weatherIcon
         self.weatherTemperature = weatherTemperature
         self.weatherCondition = weatherCondition
@@ -203,12 +206,15 @@ struct StandScreenLayout: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case clock
         case weatherIcon, weatherTemperature, weatherCondition
         case date, status, brightnessRule, battery, weatherGroupIDs, controlOrder
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        clock = try values.decodeIfPresent(PanelTransform.self, forKey: .clock)
+            ?? .init(x: 0, y: 0)
         weatherIcon = try values.decode(PanelTransform.self, forKey: .weatherIcon)
         weatherTemperature = try values.decode(PanelTransform.self, forKey: .weatherTemperature)
         weatherCondition = try values.decode(PanelTransform.self, forKey: .weatherCondition)
@@ -225,6 +231,7 @@ struct StandScreenLayout: Codable, Equatable {
     }
 
     static let portrait = StandScreenLayout(
+        clock: .init(x: 0, y: 0),
         weatherIcon: .init(x: -0.22, y: -0.24),
         weatherTemperature: .init(x: 0, y: -0.24),
         weatherCondition: .init(x: 0.22, y: -0.24),
@@ -236,6 +243,7 @@ struct StandScreenLayout: Codable, Equatable {
     )
 
     static let landscape = StandScreenLayout(
+        clock: .init(x: 0, y: 0),
         weatherIcon: .init(x: -0.27, y: -0.27),
         weatherTemperature: .init(x: 0, y: -0.27),
         weatherCondition: .init(x: 0.27, y: -0.27),

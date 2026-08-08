@@ -68,8 +68,6 @@ private enum ScreenAdjustmentAxis {
 
 enum StandControlLayoutMetrics {
     static let itemHeight: CGFloat = 60
-    static let buttonWidth: CGFloat = 74
-    static let brightnessTileWidth: CGFloat = 168
     static let rowSpacing: CGFloat = 6
     static let editorToolbarHeight: CGFloat = 46
     static let tileOpacity = 1.0
@@ -83,15 +81,31 @@ enum StandControlLayoutMetrics {
 }
 
 enum BottomControlLayoutPolicy {
-    static func itemWidth(for kind: StandControlKind) -> CGFloat {
-        kind == .brightness
-            ? StandControlLayoutMetrics.brightnessTileWidth
-            : StandControlLayoutMetrics.buttonWidth
+    static func columnCount(isPortrait: Bool) -> Int {
+        isPortrait ? 4 : 8
+    }
+
+    static func columnWidth(availableWidth: CGFloat, isPortrait: Bool) -> CGFloat {
+        let count = CGFloat(columnCount(isPortrait: isPortrait))
+        let spacingWidth = CGFloat(max(0, Int(count) - 1)) * StandControlLayoutMetrics.rowSpacing
+        return max(0, (availableWidth - spacingWidth) / count)
+    }
+
+    static func itemWidth(
+        for kind: StandControlKind,
+        availableWidth: CGFloat,
+        isPortrait: Bool
+    ) -> CGFloat {
+        let column = columnWidth(availableWidth: availableWidth, isPortrait: isPortrait)
+        return kind == .brightness
+            ? column * 2 + StandControlLayoutMetrics.rowSpacing
+            : column
     }
 
     static func rows(
         for order: [StandControlKind],
-        availableWidth: CGFloat
+        availableWidth: CGFloat,
+        isPortrait: Bool
     ) -> [[StandControlKind]] {
         guard availableWidth > 0 else { return order.map { [$0] } }
         var rows: [[StandControlKind]] = []
@@ -99,7 +113,11 @@ enum BottomControlLayoutPolicy {
         var usedWidth: CGFloat = 0
 
         for kind in order {
-            let width = itemWidth(for: kind)
+            let width = itemWidth(
+                for: kind,
+                availableWidth: availableWidth,
+                isPortrait: isPortrait
+            )
             let proposedWidth = current.isEmpty
                 ? width
                 : usedWidth + StandControlLayoutMetrics.rowSpacing + width
@@ -118,9 +136,14 @@ enum BottomControlLayoutPolicy {
 
     static func height(
         for order: [StandControlKind],
-        availableWidth: CGFloat
+        availableWidth: CGFloat,
+        isPortrait: Bool
     ) -> CGFloat {
-        let count = rows(for: order, availableWidth: availableWidth).count
+        let count = rows(
+            for: order,
+            availableWidth: availableWidth,
+            isPortrait: isPortrait
+        ).count
         guard count > 0 else { return 0 }
         return CGFloat(count) * StandControlLayoutMetrics.itemHeight
             + CGFloat(count - 1) * StandControlLayoutMetrics.rowSpacing
@@ -260,10 +283,17 @@ struct RootView: View {
 
                     VStack(spacing: 0) {
                         topBar(isPortrait: isPortrait)
+                            .padding(.horizontal, isPortrait ? 20 : 32)
                         Spacer(minLength: 0)
-                        bottomControls(isPortrait: isPortrait)
+                        bottomControls(
+                            isPortrait: isPortrait,
+                            availableWidth: max(
+                                0,
+                                proxy.size.width - StandControlLayoutMetrics.rowSpacing * 2
+                            )
+                        )
+                        .padding(.horizontal, StandControlLayoutMetrics.rowSpacing)
                     }
-                    .padding(.horizontal, isPortrait ? 20 : 32)
                     .padding(.top, isPortrait ? 18 : 20)
                     .padding(.bottom, StandControlLayoutMetrics.bottomPadding(isPortrait: isPortrait))
                     .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
@@ -305,7 +335,6 @@ struct RootView: View {
                             get: { settings.value.clockHourMode },
                             set: { settings.value.clockHourMode = $0 }
                         ),
-                        screenScale: settings.value.clockScale,
                         batteryText: silhouetteBatteryText,
                         onReset: {
                             editingLayout = editingIsPortrait ? .portrait : .landscape
@@ -708,7 +737,10 @@ struct RootView: View {
             safeAreaInsets: proxy.safeAreaInsets,
             isPortrait: isPortrait,
             controlOrder: layout.controlOrder,
-            bottomAvailableWidth: max(0, proxy.size.width - (isPortrait ? 40 : 64))
+            bottomAvailableWidth: max(
+                0,
+                proxy.size.width - StandControlLayoutMetrics.rowSpacing * 2
+            )
         ).insets
     }
 
@@ -752,13 +784,20 @@ struct RootView: View {
     }
 
     @ViewBuilder
-    private func bottomControls(isPortrait: Bool) -> some View {
+    private func bottomControls(isPortrait: Bool, availableWidth: CGFloat) -> some View {
         if model.isNightSessionActive, !model.controlsVisible {
             tapToControlText
         } else {
             WrappingControlLayout {
                 ForEach(visibleControlOrder(isPortrait: isPortrait)) { kind in
-                    bottomControl(for: kind)
+                    bottomControl(
+                        for: kind,
+                        width: BottomControlLayoutPolicy.itemWidth(
+                            for: kind,
+                            availableWidth: availableWidth,
+                            isPortrait: isPortrait
+                        )
+                    )
                 }
             }
             .frame(maxWidth: .infinity)
@@ -775,14 +814,15 @@ struct RootView: View {
     }
 
     @ViewBuilder
-    private func bottomControl(for kind: StandControlKind) -> some View {
+    private func bottomControl(for kind: StandControlKind, width: CGFloat) -> some View {
         switch kind {
         case .flashlight:
             ControlButton(
                 title: "플래시 연동",
                 systemImage: settings.value.torchEnabled ? "flashlight.on.fill" : "flashlight.off.fill",
                 status: settings.value.torchEnabled ? "점등 시 연동" : "연동 안 함",
-                hint: "화면이 켜질 때 후면 플래시를 함께 켤지 바꿉니다"
+                hint: "화면이 켜질 때 후면 플래시를 함께 켤지 바꿉니다",
+                width: width
             ) {
                 settings.value.torchEnabled.toggle()
                 if settings.value.torchEnabled { model.activateLamp() }
@@ -790,6 +830,7 @@ struct RootView: View {
         case .brightness:
             CompactBrightnessRuleControl(
                 currentBrightness: model.displayBrightness,
+                width: width,
                 threshold: Binding(
                     get: { settings.value.brightnessModeThreshold },
                     set: { settings.value.brightnessModeThreshold = $0 }
@@ -799,7 +840,8 @@ struct RootView: View {
             ControlButton(
                 title: "감지 종료",
                 systemImage: "stop.circle.fill",
-                hint: "소리 감지와 자동 녹음을 종료합니다"
+                hint: "소리 감지와 자동 녹음을 종료합니다",
+                width: width
             ) {
                 model.stopNightSession()
             }
@@ -809,7 +851,8 @@ struct RootView: View {
                 systemImage: model.orientationControlImage,
                 hint: model.orientationPreference == .automatic
                     ? "현재 화면 방향으로 고정합니다"
-                    : "화면 방향이 iPhone 회전을 따르도록 바꿉니다"
+                    : "화면 방향이 iPhone 회전을 따르도록 바꿉니다",
+                width: width
             ) {
                 model.toggleOrientationLock()
             }
@@ -818,7 +861,8 @@ struct RootView: View {
                 title: "녹음 목록 보기",
                 systemImage: "waveform",
                 status: library.clips.isEmpty ? "녹음 없음" : "\(library.clips.count)개 녹음",
-                hint: "저장된 수면 소리 녹음 목록을 엽니다"
+                hint: "저장된 수면 소리 녹음 목록을 엽니다",
+                width: width
             ) {
                 model.pauseMonitoringForPlayback()
                 presentedSheet = .recordings
@@ -827,7 +871,8 @@ struct RootView: View {
             ControlButton(
                 title: "AiShot 실행",
                 systemImage: "camera.aperture",
-                hint: "HanClip의 AiShot 촬영 화면을 엽니다"
+                hint: "HanClip의 AiShot 촬영 화면을 엽니다",
+                width: width
             ) {
                 if let url = URL(string: "hanclip://aishot") { openURL(url) }
             }
@@ -835,7 +880,8 @@ struct RootView: View {
             ControlButton(
                 title: "설정 열기",
                 systemImage: "slider.horizontal.3",
-                hint: "밝기, 감지, 녹음 설정을 엽니다"
+                hint: "밝기, 감지, 녹음 설정을 엽니다",
+                width: width
             ) {
                 presentedSheet = .settings
             }
@@ -1151,6 +1197,7 @@ private struct DashboardCanvas: View {
                     clockFont: clockFont,
                     hourMode: hourMode
                 )
+                .panelTransform(layout.clock, canvasSize: canvasSize)
 
                 Text(context.date, format: .dateTime.month().day().weekday(.wide))
                     .font(.system(.subheadline, design: .rounded, weight: .medium))
@@ -1469,7 +1516,9 @@ private struct WeatherPieceContent: View {
 
 private struct CompactBrightnessRuleControl: View {
     let currentBrightness: Double
+    let width: CGFloat
     @Binding var threshold: Double
+    @State private var isDraggingTrack = false
 
     var body: some View {
         VStack(spacing: 3) {
@@ -1515,10 +1564,33 @@ private struct CompactBrightnessRuleControl: View {
                 .highPriorityGesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
+                            let horizontalDistance = abs(value.translation.width)
+                            let verticalDistance = abs(value.translation.height)
+                            guard isDraggingTrack
+                                || (horizontalDistance >= 5 && horizontalDistance >= verticalDistance)
+                            else { return }
+                            isDraggingTrack = true
                             threshold = BrightnessThresholdPolicy.value(
                                 locationX: value.location.x,
                                 width: width
                             )
+                        }
+                        .onEnded { value in
+                            if isDraggingTrack {
+                                threshold = BrightnessThresholdPolicy.value(
+                                    locationX: value.location.x,
+                                    width: width
+                                )
+                            } else {
+                                withAnimation(.easeInOut(duration: 0.24)) {
+                                    threshold = BrightnessThresholdPolicy.valueAfterTap(
+                                        currentBrightness: currentBrightness,
+                                        threshold: threshold
+                                    )
+                                }
+                                UISelectionFeedbackGenerator().selectionChanged()
+                            }
+                            isDraggingTrack = false
                         }
                 )
             }
@@ -1537,7 +1609,7 @@ private struct CompactBrightnessRuleControl: View {
         }
         .padding(.horizontal, 8)
         .frame(
-            width: StandControlLayoutMetrics.brightnessTileWidth,
+            width: width,
             height: StandControlLayoutMetrics.itemHeight
         )
         .background {
@@ -1545,6 +1617,7 @@ private struct CompactBrightnessRuleControl: View {
         }
         .opacity(StandControlLayoutMetrics.tileOpacity)
         .accessibilityLabel("밝기 기준, 현재 \(Int(currentBrightness * 100))퍼센트, 기준 \(Int(threshold * 100))퍼센트")
+        .accessibilityHint("좌우로 밀어 기준을 조절하거나 탭하여 잠자기와 스탠드 모드를 전환합니다")
         .accessibilityAdjustableAction { direction in
             switch direction {
             case .increment: threshold = min(1, threshold + 0.05)
@@ -1560,6 +1633,14 @@ enum BrightnessThresholdPolicy {
         guard width > 0 else { return 0 }
         return min(1, max(0, Double(locationX / width)))
     }
+
+    static func valueAfterTap(currentBrightness: Double, threshold: Double) -> Double {
+        let brightness = min(1, max(0, currentBrightness))
+        if threshold < brightness {
+            return brightness + (1 - brightness) / 4
+        }
+        return brightness - brightness / 4
+    }
 }
 
 private struct ScreenEditorView: View {
@@ -1568,7 +1649,6 @@ private struct ScreenEditorView: View {
     @ObservedObject var weather: WeatherService
     @Binding var clockFont: ClockFontChoice
     @Binding var hourMode: ClockHourMode
-    let screenScale: Double
     let batteryText: String
     let onReset: () -> Void
     let onSave: () -> Void
@@ -1576,18 +1656,8 @@ private struct ScreenEditorView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let bottomHorizontalPadding: CGFloat = isPortrait ? 20 : 32
+            let bottomHorizontalPadding = StandControlLayoutMetrics.rowSpacing
             let bottomAvailableWidth = max(0, proxy.size.width - bottomHorizontalPadding * 2)
-            let editingRegion = PanelEditingPolicy.editingRegion(
-                canvasSize: proxy.size,
-                safeAreaInsets: proxy.safeAreaInsets,
-                isPortrait: isPortrait,
-                fontPaletteVisible: showFontPalette,
-                controlOrder: layout.controlOrder,
-                bottomAvailableWidth: bottomAvailableWidth,
-                reservesEditorChrome: false
-            )
-            let protectedInsets = editingRegion.insets
 
             ZStack {
                 Color.black.opacity(0.32).ignoresSafeArea()
@@ -1595,35 +1665,37 @@ private struct ScreenEditorView: View {
                 Rectangle().fill(.white.opacity(0.16)).frame(width: 0.5)
                 Rectangle().fill(.white.opacity(0.16)).frame(height: 0.5)
 
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    FlipClockFace(
-                        date: context.date,
-                        isPortrait: isPortrait,
-                        isDimmed: false,
-                        clockScale: 1,
-                        clockFont: clockFont,
-                        hourMode: hourMode
-                    )
-                    .contentShape(Rectangle())
-                    .highPriorityGesture(
-                        TapGesture(count: 2).onEnded {
-                            hourMode.toggle()
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        }
-                    )
-                    .onTapGesture { showFontPalette.toggle() }
+                EditablePanel(
+                    transform: $layout.clock,
+                    canvasSize: proxy.size
+                ) {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        FlipClockFace(
+                            date: context.date,
+                            isPortrait: isPortrait,
+                            isDimmed: false,
+                            clockScale: 1,
+                            clockFont: clockFont,
+                            hourMode: hourMode
+                        )
+                        .contentShape(Rectangle())
+                        .highPriorityGesture(
+                            TapGesture(count: 2).onEnded {
+                                hourMode.toggle()
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            }
+                        )
+                        .onTapGesture { showFontPalette.toggle() }
+                    }
                 }
 
                 editableWeatherPanels(
-                    canvasSize: proxy.size,
-                    protectedInsets: protectedInsets
+                    canvasSize: proxy.size
                 )
 
                 EditablePanel(
                     transform: $layout.date,
-                    canvasSize: proxy.size,
-                    protectedInsets: protectedInsets,
-                    screenScale: screenScale
+                    canvasSize: proxy.size
                 ) {
                     Text(Date.now, format: .dateTime.month().day().weekday(.wide))
                         .font(.subheadline.weight(.medium))
@@ -1633,9 +1705,7 @@ private struct ScreenEditorView: View {
 
                 EditablePanel(
                     transform: $layout.status,
-                    canvasSize: proxy.size,
-                    protectedInsets: protectedInsets,
-                    screenScale: screenScale
+                    canvasSize: proxy.size
                 ) {
                     Text("현재 상태 · 스탠드 모드")
                         .font(.caption.weight(.medium))
@@ -1651,9 +1721,7 @@ private struct ScreenEditorView: View {
 
                 EditablePanel(
                     transform: $layout.battery,
-                    canvasSize: proxy.size,
-                    protectedInsets: protectedInsets,
-                    screenScale: screenScale
+                    canvasSize: proxy.size
                 ) {
                     Label(batteryText, systemImage: "battery.100percent.bolt")
                         .font(.caption.monospacedDigit())
@@ -1676,7 +1744,8 @@ private struct ScreenEditorView: View {
                         Spacer()
                         EditorControlOrderView(
                             order: $layout.controlOrder,
-                            availableWidth: bottomAvailableWidth
+                            availableWidth: bottomAvailableWidth,
+                            isPortrait: isPortrait
                         )
                     }
                     .padding(.horizontal, bottomHorizontalPadding)
@@ -1711,8 +1780,7 @@ private struct ScreenEditorView: View {
 
     @ViewBuilder
     private func editableWeatherPanels(
-        canvasSize: CGSize,
-        protectedInsets: EdgeInsets
+        canvasSize: CGSize
     ) -> some View {
         let groupIDs = Array(Set(layout.weatherGroupIDs)).sorted()
         ForEach(groupIDs, id: \.self) { groupID in
@@ -1722,8 +1790,6 @@ private struct ScreenEditorView: View {
             EditablePanel(
                 transform: weatherBinding(for: groupID),
                 canvasSize: canvasSize,
-                protectedInsets: protectedInsets,
-                screenScale: screenScale,
                 onEnded: { mergeWeatherGroup(groupID, canvasSize: canvasSize) }
             ) {
                 WeatherGroupPanel(
@@ -1872,12 +1938,20 @@ private extension StandControlKind {
 private struct EditorControlOrderView: View {
     @Binding var order: [StandControlKind]
     let availableWidth: CGFloat
+    let isPortrait: Bool
     @State private var draggedKind: StandControlKind?
 
     var body: some View {
         WrappingControlLayout {
             ForEach(order) { kind in
-                EditorControlOrderTile(kind: kind)
+                EditorControlOrderTile(
+                    kind: kind,
+                    width: BottomControlLayoutPolicy.itemWidth(
+                        for: kind,
+                        availableWidth: availableWidth,
+                        isPortrait: isPortrait
+                    )
+                )
                     .onDrag {
                         draggedKind = kind
                         return NSItemProvider(object: kind.rawValue as NSString)
@@ -1896,7 +1970,8 @@ private struct EditorControlOrderView: View {
             width: availableWidth,
             height: BottomControlLayoutPolicy.height(
                 for: order,
-                availableWidth: availableWidth
+                availableWidth: availableWidth,
+                isPortrait: isPortrait
             )
         )
         .accessibilityLabel("하단 버튼 순서 편집")
@@ -1906,6 +1981,7 @@ private struct EditorControlOrderView: View {
 
 private struct EditorControlOrderTile: View {
     let kind: StandControlKind
+    let width: CGFloat
 
     var body: some View {
         VStack(spacing: 3) {
@@ -1917,7 +1993,7 @@ private struct EditorControlOrderTile: View {
         }
         .foregroundStyle(.white.opacity(StandControlLayoutMetrics.foregroundOpacity))
         .frame(
-            width: BottomControlLayoutPolicy.itemWidth(for: kind),
+            width: width,
             height: StandControlLayoutMetrics.itemHeight
         )
         .background {
@@ -1972,6 +2048,8 @@ struct PanelEditingRegion: Equatable {
 
 enum PanelEditingPolicy {
     static let weatherMergeOverlapThreshold: CGFloat = 0.40
+    static let minimumPanelScale = 0.30
+    static let maximumPanelScale = 2.00
 
     static func protectedInsets(
         safeAreaInsets: EdgeInsets,
@@ -2025,7 +2103,8 @@ enum PanelEditingPolicy {
             BottomControlLayoutPolicy.height(
                 for: $0,
                 availableWidth: bottomAvailableWidth
-                    ?? max(0, canvasSize.width - (isPortrait ? 40 : 64))
+                    ?? max(0, canvasSize.width - StandControlLayoutMetrics.rowSpacing * 2),
+                isPortrait: isPortrait
             )
         }
         var insets = protectedInsets(
@@ -2053,8 +2132,30 @@ enum PanelEditingPolicy {
         )
     }
 
-    static func shouldSnapToVerticalCenter(centerOffset: CGFloat, panelWidth: CGFloat) -> Bool {
-        panelWidth > 0 && abs(centerOffset) <= panelWidth * 0.05
+    static func shouldSnapToCenter(centerOffset: CGFloat, panelLength: CGFloat) -> Bool {
+        panelLength > 0 && abs(centerOffset) <= panelLength * 0.05
+    }
+
+    static func scaleFromTopLeadingDrag(
+        startScale: Double,
+        panelSize: CGSize,
+        translation: CGSize
+    ) -> Double {
+        guard panelSize.width > 0, panelSize.height > 0 else { return startScale }
+        let halfWidth = panelSize.width * startScale / 2
+        let halfHeight = panelSize.height * startScale / 2
+        let denominator = halfWidth * halfWidth + halfHeight * halfHeight
+        guard denominator > 0 else { return startScale }
+        let resizedX = -halfWidth + translation.width
+        let resizedY = -halfHeight + translation.height
+        let projectedRatio = max(
+            0,
+            (resizedX * -halfWidth + resizedY * -halfHeight) / denominator
+        )
+        return min(
+            maximumPanelScale,
+            max(minimumPanelScale, startScale * projectedRatio)
+        )
     }
 
     static func overlapFraction(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
@@ -2136,7 +2237,7 @@ enum PanelEditingPolicy {
             (layout.date, 36),
             (layout.status, StatusPanelMetrics.height),
             (layout.battery, 36),
-            (.init(x: 0, y: 0), isPortrait ? 92 : 116)
+            (layout.clock, isPortrait ? 92 : 116)
         ]
 
         var maximum = hardLimit
@@ -2163,13 +2264,14 @@ private struct EditablePanelSizeKey: PreferenceKey {
 private struct EditablePanel<Content: View>: View {
     @Binding var transform: PanelTransform
     let canvasSize: CGSize
-    let protectedInsets: EdgeInsets
-    let screenScale: Double
     var onEnded: () -> Void = {}
     @ViewBuilder let content: () -> Content
     @State private var dragStart: PanelTransform?
     @State private var scaleStart: Double?
+    @State private var cornerResizeStart: Double?
     @State private var panelSize = CGSize.zero
+    @State private var snappedToVerticalGuide = false
+    @State private var snappedToHorizontalGuide = false
 
     var body: some View {
         content()
@@ -2180,23 +2282,41 @@ private struct EditablePanel<Content: View>: View {
             }
             .onPreferenceChange(EditablePanelSizeKey.self) { measuredSize in
                 panelSize = measuredSize
-                constrainToEditableArea(panelSize: measuredSize)
-            }
-            .onChange(of: protectedInsets.bottom) { _, _ in
-                constrainToEditableArea()
-            }
-            .onChange(of: protectedInsets.top) { _, _ in
-                constrainToEditableArea()
-            }
-            .onChange(of: canvasSize) { _, _ in
-                constrainToEditableArea()
-            }
-            .onChange(of: screenScale) { _, _ in
-                constrainToEditableArea()
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(.orange.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4]))
+            }
+            .overlay(alignment: .topLeading) {
+                ZStack {
+                    Circle()
+                        .fill(.orange.opacity(0.9))
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.black.opacity(0.72))
+                }
+                .frame(width: 26, height: 26)
+                .contentShape(Circle())
+                .offset(x: -10, y: -10)
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            let start = cornerResizeStart ?? transform.scale
+                            cornerResizeStart = start
+                            transform.scale = PanelEditingPolicy.scaleFromTopLeadingDrag(
+                                startScale: start,
+                                panelSize: panelSize,
+                                translation: value.translation
+                            )
+                        }
+                        .onEnded { _ in
+                            cornerResizeStart = nil
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            onEnded()
+                        }
+                )
+                .accessibilityLabel("패널 크기 조절")
+                .accessibilityHint("왼쪽 위 조절점을 끌어 패널 중심을 유지한 채 크기를 변경합니다")
             }
             .panelTransform(transform, canvasSize: canvasSize)
             .gesture(
@@ -2204,23 +2324,29 @@ private struct EditablePanel<Content: View>: View {
                     .onChanged { value in
                         let start = dragStart ?? transform
                         dragStart = start
-                        transform.x = min(0.46, max(-0.46, start.x + value.translation.width / canvasSize.width))
-                        transform.y = start.y + value.translation.height / canvasSize.height
-                        constrainToEditableArea()
-                    }
-                    .onEnded { _ in
-                        let centerOffset = CGFloat(transform.x) * canvasSize.width
-                        let renderedWidth = panelSize.width * transform.scale
-                        if PanelEditingPolicy.shouldSnapToVerticalCenter(
-                            centerOffset: centerOffset,
-                            panelWidth: renderedWidth
-                        ) {
-                            transform.x = 0
+                        let proposedX = start.x + value.translation.width / canvasSize.width
+                        let proposedY = start.y + value.translation.height / canvasSize.height
+                        let snapX = PanelEditingPolicy.shouldSnapToCenter(
+                            centerOffset: proposedX * canvasSize.width,
+                            panelLength: panelSize.width * transform.scale
+                        )
+                        let snapY = PanelEditingPolicy.shouldSnapToCenter(
+                            centerOffset: proposedY * canvasSize.height,
+                            panelLength: panelSize.height * transform.scale
+                        )
+                        transform.x = snapX ? 0 : proposedX
+                        transform.y = snapY ? 0 : proposedY
+                        if (snapX && !snappedToVerticalGuide)
+                            || (snapY && !snappedToHorizontalGuide) {
                             UISelectionFeedbackGenerator().selectionChanged()
                         }
-                        if abs(transform.y) < 0.045 { transform.y = 0 }
-                        constrainToEditableArea()
+                        snappedToVerticalGuide = snapX
+                        snappedToHorizontalGuide = snapY
+                    }
+                    .onEnded { _ in
                         dragStart = nil
+                        snappedToVerticalGuide = false
+                        snappedToHorizontalGuide = false
                         onEnded()
                     }
             )
@@ -2229,23 +2355,19 @@ private struct EditablePanel<Content: View>: View {
                     .onChanged { value in
                         let start = scaleStart ?? transform.scale
                         scaleStart = start
-                        transform.scale = min(1.6, max(0.65, start * Double(value)))
-                        constrainToEditableArea()
+                        transform.scale = min(
+                            PanelEditingPolicy.maximumPanelScale,
+                            max(
+                                PanelEditingPolicy.minimumPanelScale,
+                                start * Double(value)
+                            )
+                        )
                     }
                     .onEnded { _ in scaleStart = nil }
             )
     }
 
 
-    private func constrainToEditableArea(panelSize measuredSize: CGSize? = nil) {
-        transform = PanelEditingPolicy.clampedTransform(
-            transform,
-            panelSize: measuredSize ?? panelSize,
-            canvasSize: canvasSize,
-            insets: protectedInsets,
-            screenScale: screenScale
-        )
-    }
 }
 
 private struct FontMiniClock: View {
@@ -2557,6 +2679,7 @@ private struct ControlButton: View {
     let systemImage: String
     var status: String? = nil
     var hint: String? = nil
+    let width: CGFloat
     let action: () -> Void
 
     var body: some View {
@@ -2583,7 +2706,7 @@ private struct ControlButton: View {
             .foregroundStyle(.white.opacity(StandControlLayoutMetrics.foregroundOpacity))
             .padding(.horizontal, 4)
             .frame(
-                width: StandControlLayoutMetrics.buttonWidth,
+                width: width,
                 height: StandControlLayoutMetrics.itemHeight
             )
             .background {
