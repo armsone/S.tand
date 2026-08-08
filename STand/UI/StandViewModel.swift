@@ -60,6 +60,24 @@ enum EnvironmentDisplayMode: Equatable {
     }
 }
 
+enum StandAutomaticDimmingPolicy {
+    static func shouldFade(
+        automaticDimmingEnabled: Bool,
+        environmentDisplayMode: EnvironmentDisplayMode
+    ) -> Bool {
+        automaticDimmingEnabled && environmentDisplayMode == .sleeping
+    }
+}
+
+enum SleepCareMonitoringPolicy {
+    static func shouldMonitor(
+        isNightSessionActive: Bool,
+        environmentDisplayMode: EnvironmentDisplayMode
+    ) -> Bool {
+        isNightSessionActive && environmentDisplayMode == .sleeping
+    }
+}
+
 @MainActor
 final class StandViewModel: ObservableObject {
     @Published private(set) var isNightSessionActive = false
@@ -96,6 +114,7 @@ final class StandViewModel: ObservableObject {
     private var activeLampMaximumIntensity = 1.0
     private var monitoringPausedForPlayback = false
     private var brightnessBeforeSession: CGFloat?
+    private var activeRecordingSessionID: UUID?
 
     init() {
         let settings = SettingsStore()
@@ -106,24 +125,32 @@ final class StandViewModel: ObservableObject {
         audio = AudioCaptureService(recordingsDirectory: library.directory)
 
         audio.onClap = { [weak self] in
-            guard let self, self.settings.value.multiStimulusWakeEnabled else { return }
+            guard let self,
+                  self.environmentDisplayMode == .sleeping,
+                  self.settings.value.multiStimulusWakeEnabled
+            else { return }
             self.activateLamp()
         }
         audio.onSoundClassified = { [weak self] classification in
             guard let self,
-                  classification.kind != .snore,
-                  classification.confidence >= 0.42,
+                  self.environmentDisplayMode == .sleeping,
+                  SleepSoundWakePolicy.shouldWake(classification),
                   self.settings.value.multiStimulusWakeEnabled
             else { return }
             self.activateLamp()
         }
         audio.onClipSaved = { [weak self] url in
             guard let self else { return }
+            // 저장 완료 콜백은 잠자기→스탠드 전환 뒤에 늦게 도착할 수 있다.
+            // 파일명에 기록된 실제 녹음 시작 시각으로 올바른 잠자기 구간을 찾는다.
             self.library.add(url)
         }
         audio.configure(settings: settings.value)
         motionMonitor.onMovement = { [weak self] in
-            guard let self, self.settings.value.multiStimulusWakeEnabled else { return }
+            guard let self,
+                  self.environmentDisplayMode == .sleeping,
+                  self.settings.value.multiStimulusWakeEnabled
+            else { return }
             self.activateLamp()
         }
         orientationPreference = settings.value.orientationPreference
@@ -132,11 +159,15 @@ final class StandViewModel: ObservableObject {
         settingsSubscription = settings.$value
             .dropFirst()
             .sink { [weak self] value in
-                self?.audio.configure(settings: value)
-                self?.orientationPreference = value.orientationPreference
+                guard let self else { return }
+                audio.configure(settings: value)
+                orientationPreference = value.orientationPreference
                 OrientationController.shared.setPreference(value.orientationPreference)
-                self?.syncTorch()
-                self?.refreshEnvironmentDisplayMode(performTransition: false)
+                syncTorch(using: value)
+                refreshEnvironmentDisplayMode(
+                    threshold: value.brightnessModeThreshold,
+                    performTransition: isNightSessionActive
+                )
             }
 
         screenBrightnessSubscription = NotificationCenter.default
@@ -169,8 +200,7 @@ final class StandViewModel: ObservableObject {
         monitoringPausedForPlayback = false
         UIApplication.shared.isIdleTimerDisabled = true
         audio.configure(settings: settings.value)
-        audio.requestAccessAndStart()
-        motionMonitor.start()
+        syncSleepCareMonitoring()
         weather.refreshIfNeeded()
         controlsTask?.cancel()
         controlsVisible = false
@@ -182,6 +212,8 @@ final class StandViewModel: ObservableObject {
         isNightSessionActive = false
         audio.stop()
         motionMonitor.stop()
+        library.endSleepSession(id: activeRecordingSessionID)
+        activeRecordingSessionID = nil
         turnOffLamp(animated: true)
         controlsTask?.cancel()
         controlsVisible = true
@@ -200,10 +232,7 @@ final class StandViewModel: ObservableObject {
         UIApplication.shared.isIdleTimerDisabled = true
         OrientationController.shared.reapply()
         guard isNightSessionActive else { return }
-        if !monitoringPausedForPlayback {
-            audio.startIfAuthorized()
-        }
-        motionMonitor.start()
+        syncSleepCareMonitoring()
         weather.refreshIfNeeded()
         controlsTask?.cancel()
         controlsVisible = false
@@ -219,6 +248,10 @@ final class StandViewModel: ObservableObject {
         guard isNightSessionActive else { return }
         audio.stop()
         motionMonitor.stop()
+        // 앱이 화면을 떠난 동안에는 실제 감시가 중단되므로 잠자기 모드 구간도
+        // 여기서 닫는다. 다시 30분 이내 돌아오면 같은 잠자리로 재개된다.
+        library.endSleepSession(id: activeRecordingSessionID)
+        activeRecordingSessionID = nil
     }
 
     func activateLamp() {
@@ -243,6 +276,13 @@ final class StandViewModel: ObservableObject {
             return
         }
 
+        // 스탠드 모드는 사용자가 직접 어둡게 할 때까지 밝은 화면을 유지한다.
+        // 타이머를 만들지 않아 이전 잠자기 모드의 감광 작업이 다시 이어지지 않는다.
+        if environmentDisplayMode == .stand {
+            automaticDimmingPaused = settings.value.automaticDimmingEnabled
+            return
+        }
+
         lampTask = Task { [weak self] in
             var fadeStartedAt: TimeInterval?
             while !Task.isCancelled {
@@ -256,18 +296,13 @@ final class StandViewModel: ObservableObject {
                     continue
                 }
 
-                if !settings.value.automaticDimmingEnabled {
+                if !StandAutomaticDimmingPolicy.shouldFade(
+                    automaticDimmingEnabled: settings.value.automaticDimmingEnabled,
+                    environmentDisplayMode: environmentDisplayMode
+                ) {
                     fadeStartedAt = nil
-                    automaticDimmingPaused = false
-                    lampPhase = .holding
-                    lampIntensity = maximumIntensity
-                    syncTorch()
-                    continue
-                }
-
-                if shouldPauseAutomaticDimming {
-                    fadeStartedAt = nil
-                    automaticDimmingPaused = true
+                    automaticDimmingPaused = settings.value.automaticDimmingEnabled
+                        && environmentDisplayMode == .stand
                     lampPhase = .holding
                     lampIntensity = maximumIntensity
                     syncTorch()
@@ -345,27 +380,63 @@ final class StandViewModel: ObservableObject {
         guard monitoringPausedForPlayback else { return }
         monitoringPausedForPlayback = false
         guard isNightSessionActive else { return }
-        audio.startIfAuthorized()
+        syncSleepCareMonitoring()
     }
 
-    private var shouldPauseAutomaticDimming: Bool {
-        environmentDisplayMode == .stand
-    }
-
-    private func refreshEnvironmentDisplayMode(performTransition: Bool) {
+    private func refreshEnvironmentDisplayMode(
+        threshold: Double? = nil,
+        performTransition: Bool
+    ) {
         let newMode = EnvironmentDisplayMode.resolve(
             brightness: displayBrightness,
-            threshold: settings.value.brightnessModeThreshold
+            threshold: threshold ?? settings.value.brightnessModeThreshold
         )
         let changed = newMode != environmentDisplayMode
         environmentDisplayMode = newMode
+        if isNightSessionActive {
+            syncRecordingSessionForDisplayMode()
+        }
         guard performTransition, changed, isNightSessionActive else { return }
+        syncSleepCareMonitoring()
         switch newMode {
         case .sleeping:
             if lampPhase == .holding { activateLamp() }
         case .stand:
             activateLamp()
         }
+    }
+
+    /// 녹음 묶음은 감지 세션 전체가 아니라 실제 잠자기 모드 구간을 기준으로 한다.
+    /// 잠자기 모드 사이의 짧은 깨어남은 RecordingLibrary가 30분까지 같은 세션으로 잇는다.
+    private func syncRecordingSessionForDisplayMode(at date: Date = Date()) {
+        switch environmentDisplayMode {
+        case .sleeping:
+            if activeRecordingSessionID == nil {
+                activeRecordingSessionID = library.beginSleepSession(at: date)
+            }
+        case .stand:
+            guard activeRecordingSessionID != nil else { return }
+            library.endSleepSession(id: activeRecordingSessionID, at: date)
+            activeRecordingSessionID = nil
+        }
+    }
+
+    private func syncSleepCareMonitoring() {
+        guard SleepCareMonitoringPolicy.shouldMonitor(
+            isNightSessionActive: isNightSessionActive,
+            environmentDisplayMode: environmentDisplayMode
+        ) else {
+            audio.stop()
+            motionMonitor.stop()
+            return
+        }
+
+        motionMonitor.start()
+        guard !monitoringPausedForPlayback else {
+            audio.stop()
+            return
+        }
+        audio.requestAccessAndStart()
     }
 
     private func rememberScreenBrightnessIfNeeded() {
@@ -424,15 +495,16 @@ final class StandViewModel: ObservableObject {
         activateLamp()
     }
 
-    private func syncTorch() {
-        guard settings.value.torchEnabled, isNightSessionActive, lampPhase != .off else {
+    private func syncTorch(using settingsOverride: AppSettings? = nil) {
+        let currentSettings = settingsOverride ?? settings.value
+        guard currentSettings.torchEnabled, isNightSessionActive, lampPhase != .off else {
             torch.turnOff()
             return
         }
         let progress = activeLampMaximumIntensity > 0
             ? lampIntensity / activeLampMaximumIntensity
             : 0
-        torch.setLevel(progress * settings.value.torchIntensity)
+        torch.setLevel(progress * currentSettings.torchIntensity)
     }
 
     func revealControls() {
@@ -489,6 +561,8 @@ final class StandViewModel: ObservableObject {
         isNightSessionActive = false
         audio.stop()
         motionMonitor.stop()
+        library.endSleepSession(id: activeRecordingSessionID)
+        activeRecordingSessionID = nil
         turnOffLamp(animated: true)
         controlsTask?.cancel()
         controlsVisible = true

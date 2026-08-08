@@ -79,7 +79,7 @@ final class AudioCaptureService: ObservableObject {
             let recordingSettingChanged = recordingEnabled != settings.recordingEnabled
             recordingEnabled = settings.recordingEnabled
             if !settings.recordingEnabled {
-                clipRecorder.finishCurrentClip()
+                clipRecorder.finalizeApprovedOrDiscard()
                 clipRecorder.clearPreRoll()
             } else if recordingSettingChanged {
                 detector.reset()
@@ -136,7 +136,7 @@ final class AudioCaptureService: ObservableObject {
         processingQueue.sync {
             detector.reset()
             soundClassifier.reset()
-            clipRecorder.finishCurrentClip()
+            clipRecorder.finalizeApprovedOrDiscard()
             clipRecorder.clearPreRoll()
         }
         normalizedLevel = 0
@@ -162,9 +162,7 @@ final class AudioCaptureService: ObservableObject {
 #if targetEnvironment(simulator)
         normalizedLevel = 0
         state = .failed("시뮬레이터에서는 소리 감지를 사용하지 않습니다.")
-        return
-#endif
-
+#else
         recordingErrorMessage = nil
 
         do {
@@ -215,6 +213,7 @@ final class AudioCaptureService: ObservableObject {
             try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
             state = .failed(error.localizedDescription)
         }
+#endif
     }
 
     private func receive(buffer: AVAudioPCMBuffer) {
@@ -243,8 +242,12 @@ final class AudioCaptureService: ObservableObject {
                 features: features,
                 detection: detection
             ) {
-                if recordingEnabled, classification.kind != .snore {
-                    clipRecorder.discardCurrentClip()
+                if recordingEnabled {
+                    if SleepSoundRecordingPolicy.shouldKeep(classification) {
+                        clipRecorder.approveCurrentClip()
+                    } else {
+                        clipRecorder.rejectCurrentClip()
+                    }
                 }
                 DispatchQueue.main.async {
                     self.lastClassifiedSound = classification
@@ -302,7 +305,7 @@ final class AudioCaptureService: ObservableObject {
             shouldResumeAfterInterruption = engine.isRunning || state == .monitoring
             engine.stop()
             processingQueue.sync {
-                clipRecorder.finishCurrentClip()
+                clipRecorder.finalizeApprovedOrDiscard()
                 clipRecorder.clearPreRoll()
                 detector.reset()
                 soundClassifier.reset()
@@ -343,7 +346,7 @@ final class AudioCaptureService: ObservableObject {
         tapInstalled = false
         engine.stop()
         processingQueue.sync {
-            clipRecorder.finishCurrentClip()
+            clipRecorder.finalizeApprovedOrDiscard()
             clipRecorder.clearPreRoll()
             detector.reset()
             soundClassifier.reset()
@@ -459,6 +462,7 @@ final class ClipSegmentRecorder {
     }
 
     private let directory: URL
+    private let stagingDirectory: URL
     private let onRecordingChanged: (Bool) -> Void
     private let onSaved: (URL) -> Void
     private let onFailure: (String) -> Void
@@ -472,6 +476,8 @@ final class ClipSegmentRecorder {
     private var currentURL: URL?
     private var startedAt: TimeInterval?
     private var silenceDeadline: TimeInterval?
+    private var pendingSegmentURLs: [URL] = []
+    private var isApproved = false
 
     init(
         directory: URL,
@@ -483,12 +489,14 @@ final class ClipSegmentRecorder {
         maximumClipDuration: TimeInterval = 90
     ) {
         self.directory = directory
+        stagingDirectory = directory.appendingPathComponent(".Pending", isDirectory: true)
         self.onRecordingChanged = onRecordingChanged
         self.onSaved = onSaved
         self.onFailure = onFailure
         self.preRollDuration = preRollDuration
         self.postRollDuration = postRollDuration
         self.maximumClipDuration = maximumClipDuration
+        removeStalePendingFiles()
     }
 
     func rememberForPreRoll(buffer: AVAudioPCMBuffer) {
@@ -522,12 +530,14 @@ final class ClipSegmentRecorder {
         }
 
         if let startedAt, now - startedAt >= maximumClipDuration {
-            finishCurrentClip()
+            rollCurrentClip()
             if detection.isAboveSoundThreshold {
                 startClip(format: buffer.format, now: now)
+            } else {
+                finalizeApprovedOrDiscard()
             }
         } else if let silenceDeadline, now >= silenceDeadline {
-            finishCurrentClip()
+            finalizeApprovedOrDiscard()
         }
     }
 
@@ -536,8 +546,26 @@ final class ClipSegmentRecorder {
         preRollLength = 0
     }
 
-    func finishCurrentClip() {
-        guard file != nil else { return }
+    func approveCurrentClip() {
+        guard file != nil || !pendingSegmentURLs.isEmpty else { return }
+        isApproved = true
+    }
+
+    func rejectCurrentClip() {
+        guard !isApproved else { return }
+        discardCurrentClip()
+    }
+
+    func finalizeApprovedOrDiscard() {
+        if isApproved {
+            commitCurrentClip()
+        } else {
+            discardCurrentClip()
+        }
+    }
+
+    private func commitCurrentClip() {
+        guard file != nil || !pendingSegmentURLs.isEmpty else { return }
         file = nil
         let savedURL = currentURL
         currentURL = nil
@@ -546,13 +574,37 @@ final class ClipSegmentRecorder {
         clearPreRoll()
         onRecordingChanged(false)
 
-        if let savedURL {
-            onSaved(savedURL)
+        let completedURLs = pendingSegmentURLs + [savedURL].compactMap { $0 }
+        pendingSegmentURLs.removeAll(keepingCapacity: true)
+        isApproved = false
+        for stagingURL in completedURLs {
+            let finalURL = directory.appendingPathComponent(stagingURL.lastPathComponent)
+            do {
+                try FileManager.default.moveItem(at: stagingURL, to: finalURL)
+                onSaved(finalURL)
+            } catch {
+                try? FileManager.default.removeItem(at: stagingURL)
+                onFailure("승인된 녹음 파일을 보관함으로 옮길 수 없습니다.")
+            }
         }
+        removeStagingDirectoryIfEmpty()
+    }
+
+    private func rollCurrentClip() {
+        guard file != nil else { return }
+        let rolledURL = currentURL
+        file = nil
+        if let rolledURL {
+            pendingSegmentURLs.append(rolledURL)
+        }
+        currentURL = nil
+        startedAt = nil
+        silenceDeadline = nil
+        clearPreRoll()
     }
 
     func discardCurrentClip() {
-        guard file != nil else { return }
+        guard file != nil || !pendingSegmentURLs.isEmpty else { return }
         file = nil
         let discardedURL = currentURL
         currentURL = nil
@@ -561,14 +613,22 @@ final class ClipSegmentRecorder {
         clearPreRoll()
         onRecordingChanged(false)
 
-        if let discardedURL {
-            try? FileManager.default.removeItem(at: discardedURL)
+        let discardedURLs = pendingSegmentURLs + [discardedURL].compactMap { $0 }
+        pendingSegmentURLs.removeAll(keepingCapacity: true)
+        isApproved = false
+        for url in discardedURLs {
+            try? FileManager.default.removeItem(at: url)
         }
+        removeStagingDirectoryIfEmpty()
     }
 
     private func startClip(format: AVAudioFormat, now: TimeInterval) {
-        let url = directory.appendingPathComponent(Self.fileName(), isDirectory: false)
+        let url = stagingDirectory.appendingPathComponent(Self.fileName(), isDirectory: false)
         do {
+            try FileManager.default.createDirectory(
+                at: stagingDirectory,
+                withIntermediateDirectories: true
+            )
             let settings: [String: Any] = [
                 AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
                 AVSampleRateKey: format.sampleRate,
@@ -593,14 +653,8 @@ final class ClipSegmentRecorder {
             clearPreRoll()
             onRecordingChanged(true)
         } catch {
-            file = nil
-            currentURL = nil
-            startedAt = nil
-            silenceDeadline = nil
-            clearPreRoll()
             try? FileManager.default.removeItem(at: url)
-            onRecordingChanged(false)
-            onFailure("녹음 파일을 시작할 수 없습니다.")
+            abortCurrentClip(message: "녹음 파일을 시작할 수 없습니다.")
         }
     }
 
@@ -612,10 +666,34 @@ final class ClipSegmentRecorder {
         silenceDeadline = nil
         clearPreRoll()
         onRecordingChanged(false)
-        if let failedURL {
-            try? FileManager.default.removeItem(at: failedURL)
+        let failedURLs = pendingSegmentURLs + [failedURL].compactMap { $0 }
+        pendingSegmentURLs.removeAll(keepingCapacity: true)
+        isApproved = false
+        for url in failedURLs {
+            try? FileManager.default.removeItem(at: url)
         }
+        removeStagingDirectoryIfEmpty()
         onFailure(message)
+    }
+
+    private func removeStalePendingFiles() {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: stagingDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        for url in urls {
+            try? FileManager.default.removeItem(at: url)
+        }
+        removeStagingDirectoryIfEmpty()
+    }
+
+    private func removeStagingDirectoryIfEmpty() {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: stagingDirectory,
+            includingPropertiesForKeys: nil
+        ), contents.isEmpty else { return }
+        try? FileManager.default.removeItem(at: stagingDirectory)
     }
 
     private static func fileName() -> String {

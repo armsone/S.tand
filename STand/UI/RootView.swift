@@ -242,6 +242,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
     @State private var presentedSheet: PresentedSheet?
+    @State private var beginsScreenEditingAfterSheetDismiss = false
     @State private var didInitialize = false
     @State private var brightnessDragState: BrightnessDragState?
     @State private var brightnessFeedback: BrightnessFeedback?
@@ -371,15 +372,23 @@ struct RootView: View {
         .persistentSystemOverlays(.hidden)
         .sheet(item: $presentedSheet, onDismiss: {
             model.resumeMonitoringAfterPlayback()
+            if beginsScreenEditingAfterSheetDismiss {
+                beginsScreenEditingAfterSheetDismiss = false
+                enterScreenEditing(isPortrait: currentIsPortrait)
+            }
         }) { sheet in
             switch sheet {
             case .recordings:
                 RecordingsView(
                     library: library,
-                    playbackDisabled: false
+                    playbackDisabled: false,
+                    theme: settings.value.displayTheme
                 )
             case .settings:
-                SettingsView(store: model.settings)
+                SettingsView(
+                    model: model,
+                    onEditScreen: transitionFromSettingsToScreenEditor
+                )
             }
         }
         .onAppear {
@@ -429,15 +438,23 @@ struct RootView: View {
                 .tracking(0.8)
 
             if model.isNightSessionActive {
-                AudioStatusPill(audio: audio, compact: isPortrait)
+                AudioStatusPill(
+                    audio: audio,
+                    compact: isPortrait,
+                    monitoringSuspended: model.environmentDisplayMode == .stand
+                )
             }
 
             Spacer()
 
             if model.isNightSessionActive, !isPortrait {
                 Label(
-                    audio.isWritingClip ? "수면 소리 저장 중" : "기기에서 소리 분석 중",
-                    systemImage: audio.isWritingClip ? "waveform.badge.mic" : "ear"
+                    model.environmentDisplayMode == .stand
+                        ? "스탠드 모드 · 감시 멈춤"
+                        : (audio.isWritingClip ? "수면 소리 저장 중" : "기기에서 소리 분석 중"),
+                    systemImage: model.environmentDisplayMode == .stand
+                        ? "sun.max.fill"
+                        : (audio.isWritingClip ? "waveform.badge.mic" : "ear")
                 )
                 .font(.caption.weight(.medium))
                 .foregroundStyle(audio.isWritingClip ? Color.red.opacity(0.9) : Color.white.opacity(0.55))
@@ -545,6 +562,11 @@ struct RootView: View {
         editingLayout = isPortrait ? settings.value.portraitLayout : settings.value.landscapeLayout
         model.revealControls()
         withAnimation(.easeOut(duration: 0.25)) { isEditingScreen = true }
+    }
+
+    private func transitionFromSettingsToScreenEditor() {
+        beginsScreenEditingAfterSheetDismiss = true
+        presentedSheet = nil
     }
 
     private func saveScreenLayout() {
@@ -1518,7 +1540,10 @@ private struct CompactBrightnessRuleControl: View {
     let currentBrightness: Double
     let width: CGFloat
     @Binding var threshold: Double
-    @State private var isDraggingTrack = false
+    @State private var trackFrame = CGRect.zero
+    @State private var interactionPhase: BrightnessRuleGesturePhase = .undecided
+
+    private let coordinateSpaceName = "compactBrightnessRule"
 
     var body: some View {
         VStack(spacing: 3) {
@@ -1561,40 +1586,16 @@ private struct CompactBrightnessRuleControl: View {
                 }
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
-                .highPriorityGesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            let horizontalDistance = abs(value.translation.width)
-                            let verticalDistance = abs(value.translation.height)
-                            guard isDraggingTrack
-                                || (horizontalDistance >= 5 && horizontalDistance >= verticalDistance)
-                            else { return }
-                            isDraggingTrack = true
-                            threshold = BrightnessThresholdPolicy.value(
-                                locationX: value.location.x,
-                                width: width
-                            )
-                        }
-                        .onEnded { value in
-                            if isDraggingTrack {
-                                threshold = BrightnessThresholdPolicy.value(
-                                    locationX: value.location.x,
-                                    width: width
-                                )
-                            } else {
-                                withAnimation(.easeInOut(duration: 0.24)) {
-                                    threshold = BrightnessThresholdPolicy.valueAfterTap(
-                                        currentBrightness: currentBrightness,
-                                        threshold: threshold
-                                    )
-                                }
-                                UISelectionFeedbackGenerator().selectionChanged()
-                            }
-                            isDraggingTrack = false
-                        }
-                )
+                .background {
+                    GeometryReader { trackProxy in
+                        Color.clear.preference(
+                            key: BrightnessRuleTrackFramePreferenceKey.self,
+                            value: trackProxy.frame(in: .named(coordinateSpaceName))
+                        )
+                    }
+                }
             }
-            .frame(height: 12)
+            .frame(height: 20)
 
             Text("현재 \(Int((currentBrightness * 100).rounded())) · 기준 \(Int((threshold * 100).rounded()))")
                 .font(
@@ -1615,6 +1616,10 @@ private struct CompactBrightnessRuleControl: View {
         .background {
             FlipPanelSurface(isDimmed: false, cornerRadius: 13, splitGap: 2)
         }
+        .contentShape(RoundedRectangle(cornerRadius: 13))
+        .coordinateSpace(name: coordinateSpaceName)
+        .onPreferenceChange(BrightnessRuleTrackFramePreferenceKey.self) { trackFrame = $0 }
+        .highPriorityGesture(interactionGesture)
         .opacity(StandControlLayoutMetrics.tileOpacity)
         .accessibilityLabel("밝기 기준, 현재 \(Int(currentBrightness * 100))퍼센트, 기준 \(Int(threshold * 100))퍼센트")
         .accessibilityHint("좌우로 밀어 기준을 조절하거나 탭하여 잠자기와 스탠드 모드를 전환합니다")
@@ -1625,6 +1630,106 @@ private struct CompactBrightnessRuleControl: View {
             @unknown default: break
             }
         }
+    }
+
+    private var interactionGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(coordinateSpaceName))
+            .onChanged { value in
+                updateInteraction(
+                    translation: value.translation,
+                    startLocation: value.startLocation,
+                    currentLocation: value.location
+                )
+            }
+            .onEnded { value in
+                finishInteraction(
+                    translation: value.translation,
+                    currentLocation: value.location
+                )
+            }
+    }
+
+    private func updateInteraction(
+        translation: CGSize,
+        startLocation: CGPoint,
+        currentLocation: CGPoint
+    ) {
+        if interactionPhase == .undecided {
+            guard BrightnessRuleInteractionPolicy.hasReachedDecisionDistance(translation) else {
+                return
+            }
+            interactionPhase = BrightnessRuleInteractionPolicy.isDirectHorizontalDrag(
+                translation: translation
+            ) && trackFrame.contains(startLocation)
+                ? .draggingTrack
+                : .ignored
+        }
+
+        guard interactionPhase == .draggingTrack else { return }
+        threshold = BrightnessThresholdPolicy.value(
+            locationX: currentLocation.x - trackFrame.minX,
+            width: trackFrame.width
+        )
+    }
+
+    private func finishInteraction(translation: CGSize, currentLocation: CGPoint) {
+        if interactionPhase == .draggingTrack {
+            threshold = BrightnessThresholdPolicy.value(
+                locationX: currentLocation.x - trackFrame.minX,
+                width: trackFrame.width
+            )
+        } else if interactionPhase == .undecided,
+                  BrightnessRuleInteractionPolicy.isTap(translation) {
+            toggleMode()
+        }
+        interactionPhase = .undecided
+    }
+
+    private func toggleMode() {
+        withAnimation(.easeInOut(duration: 0.24)) {
+            threshold = BrightnessThresholdPolicy.valueAfterTap(
+                currentBrightness: currentBrightness,
+                threshold: threshold
+            )
+        }
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+}
+
+enum BrightnessRuleGesturePhase {
+    case undecided
+    case draggingTrack
+    case ignored
+}
+
+struct BrightnessRuleTrackFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
+enum BrightnessRuleInteractionPolicy {
+    static let minimumDragDistance: CGFloat = 6
+
+    static func hasReachedDecisionDistance(_ translation: CGSize) -> Bool {
+        max(abs(translation.width), abs(translation.height)) >= minimumDragDistance
+    }
+
+    static func isTap(_ translation: CGSize) -> Bool {
+        !hasReachedDecisionDistance(translation)
+    }
+
+    static func isDirectHorizontalDrag(
+        translation: CGSize,
+        alreadyDragging: Bool = false
+    ) -> Bool {
+        if alreadyDragging { return true }
+        let horizontalDistance = abs(translation.width)
+        let verticalDistance = abs(translation.height)
+        return horizontalDistance >= minimumDragDistance
+            && horizontalDistance >= verticalDistance
     }
 }
 
@@ -1909,7 +2014,7 @@ private struct ScreenEditorView: View {
     }
 }
 
-private extension StandControlKind {
+extension StandControlKind {
     var editorTitle: String {
         switch self {
         case .flashlight: "플래시"
@@ -2588,6 +2693,7 @@ private struct FlipPanelSurface: View {
 private struct AudioStatusPill: View {
     @ObservedObject var audio: AudioCaptureService
     let compact: Bool
+    let monitoringSuspended: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -2620,12 +2726,16 @@ private struct AudioStatusPill: View {
     }
 
     private var statusColor: Color {
+        if monitoringSuspended { return .white.opacity(0.42) }
         if audio.isWritingClip { return .red }
         if audio.state == .monitoring { return .green }
         return .orange
     }
 
     private var statusText: String {
+        if monitoringSuspended {
+            return compact ? "스탠드" : "감시 멈춤"
+        }
         if audio.microphoneAccess == .denied {
             return compact ? "감지 안 됨" : "소리 감지 안 됨"
         }

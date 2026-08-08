@@ -28,6 +28,85 @@ struct RecordingClip: Identifiable, Hashable {
     }
 }
 
+struct SleepRecordingSession: Identifiable, Codable, Equatable {
+    let id: UUID
+    let startedAt: Date
+    var endedAt: Date?
+    var clipFileNames: [String]
+}
+
+struct RecordingSessionGroup: Identifiable {
+    let id: String
+    let startedAt: Date
+    let endedAt: Date
+    let clips: [RecordingClip]
+    let isInferred: Bool
+
+    var totalDuration: TimeInterval {
+        clips.reduce(0) { $0 + $1.duration }
+    }
+}
+
+enum SleepSessionGroupingPolicy {
+    /// 잠자기 모드가 끝난 뒤 이 시간 안에 다시 잠자기 모드로 들어오면
+    /// 잠깐 깬 것으로 보고 기존 잠자리를 이어서 기록한다.
+    static let sleepModeResumeGap: TimeInterval = 30 * 60
+
+    /// 이전 버전의 녹음에는 잠자기 모드 진입·종료 시각이 없다.
+    /// 이 값은 새 기록의 30분 모드 재진입 규칙과 무관한 과거 파일 전용 추정값이다.
+    static let legacyRecordingGap: TimeInterval = 90 * 60
+    static let legacyTimelinePadding: TimeInterval = 15 * 60
+
+    static func inferredGroups(
+        from clips: [RecordingClip],
+        maximumGap: TimeInterval = legacyRecordingGap
+    ) -> [RecordingSessionGroup] {
+        let sorted = clips
+            .filter { !$0.isMerged }
+            .sorted { $0.createdAt < $1.createdAt }
+        guard let first = sorted.first else { return [] }
+
+        var clusters: [[RecordingClip]] = [[first]]
+        for clip in sorted.dropFirst() {
+            let previous = clusters[clusters.count - 1].last!
+            let previousEnd = previous.createdAt.addingTimeInterval(previous.duration)
+            if clip.createdAt.timeIntervalSince(previousEnd) > maximumGap {
+                clusters.append([clip])
+            } else {
+                clusters[clusters.count - 1].append(clip)
+            }
+        }
+
+        return clusters.map { cluster in
+            let firstClip = cluster[0]
+            let lastClip = cluster[cluster.count - 1]
+            let startedAt = firstClip.createdAt.addingTimeInterval(-legacyTimelinePadding)
+            let endedAt = max(
+                startedAt.addingTimeInterval(1),
+                lastClip.createdAt
+                    .addingTimeInterval(lastClip.duration)
+                    .addingTimeInterval(legacyTimelinePadding)
+            )
+            return RecordingSessionGroup(
+                id: "legacy-\(firstClip.url.lastPathComponent)",
+                startedAt: startedAt,
+                endedAt: endedAt,
+                clips: cluster,
+                isInferred: true
+            )
+        }
+    }
+
+    static func markerFraction(
+        for clip: RecordingClip,
+        sessionStart: Date,
+        sessionEnd: Date
+    ) -> Double {
+        let duration = max(1, sessionEnd.timeIntervalSince(sessionStart))
+        return min(1, max(0, clip.createdAt.timeIntervalSince(sessionStart) / duration))
+    }
+}
+
 enum RecordingMergeKind: String {
     case selected
     case today
@@ -71,6 +150,11 @@ final class RecordingLibrary: ObservableObject {
     }()
 
     let directory: URL
+    private var sleepSessions: [SleepRecordingSession] = []
+
+    private var sessionManifestURL: URL {
+        directory.appendingPathComponent(".sleep-sessions-v1.json")
+    }
 
     init(directory: URL = RecordingLibrary.defaultDirectory) {
         self.directory = directory
@@ -78,6 +162,7 @@ final class RecordingLibrary: ObservableObject {
             installEmbeddedSamplesIfNeeded()
         }
         reload()
+        closeOpenSessionsForRecovery()
     }
 
     var totalDuration: TimeInterval {
@@ -88,6 +173,45 @@ final class RecordingLibrary: ObservableObject {
         clips.filter { !$0.isMerged }
     }
 
+    var recordingSessions: [RecordingSessionGroup] {
+        let originals = mergeableClips
+        let clipsByName = Dictionary(
+            uniqueKeysWithValues: originals.map { ($0.url.lastPathComponent, $0) }
+        )
+        var assignedNames = Set<String>()
+        var groups: [RecordingSessionGroup] = []
+
+        for session in sleepSessions {
+            let sessionClips = session.clipFileNames
+                .compactMap { clipsByName[$0] }
+                .sorted { $0.createdAt < $1.createdAt }
+            guard !sessionClips.isEmpty else { continue }
+            assignedNames.formUnion(sessionClips.map { $0.url.lastPathComponent })
+            let lastClipEnd = sessionClips
+                .map { $0.createdAt.addingTimeInterval($0.duration) }
+                .max() ?? session.startedAt
+            let endedAt = max(
+                session.startedAt.addingTimeInterval(1),
+                session.endedAt ?? max(Date(), lastClipEnd)
+            )
+            groups.append(
+                RecordingSessionGroup(
+                    id: "session-\(session.id.uuidString)",
+                    startedAt: session.startedAt,
+                    endedAt: endedAt,
+                    clips: sessionClips,
+                    isInferred: false
+                )
+            )
+        }
+
+        let legacyClips = originals.filter {
+            !assignedNames.contains($0.url.lastPathComponent)
+        }
+        groups.append(contentsOf: SleepSessionGroupingPolicy.inferredGroups(from: legacyClips))
+        return groups.sorted { $0.startedAt > $1.startedAt }
+    }
+
     func mergeableClips(on date: Date, calendar: Calendar = .current) -> [RecordingClip] {
         mergeableClips.filter { calendar.isDate($0.createdAt, inSameDayAs: date) }
     }
@@ -95,6 +219,7 @@ final class RecordingLibrary: ObservableObject {
     func reload() {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            loadSleepSessions()
             let urls = try FileManager.default.contentsOfDirectory(
                 at: directory,
                 includingPropertiesForKeys: nil,
@@ -105,19 +230,64 @@ final class RecordingLibrary: ObservableObject {
                 .filter { $0.pathExtension.lowercased() == "m4a" }
                 .compactMap(makeClip)
                 .sorted { $0.createdAt > $1.createdAt }
+            associateUnassignedClipsWithRecordedSessions()
         } catch {
             clips = []
         }
     }
 
-    func add(_ url: URL) {
-        guard !clips.contains(where: { $0.url == url }), let clip = makeClip(url) else { return }
+    @discardableResult
+    func beginSleepSession(at date: Date = Date()) -> UUID {
+        let removedExpiredSessions = removeExpiredEmptySessions(at: date)
+        if let openSession = sleepSessions.last(where: { $0.endedAt == nil }) {
+            if removedExpiredSessions { persistSleepSessions() }
+            return openSession.id
+        }
+        if let index = sleepSessions.indices
+            .filter({ sleepSessions[$0].endedAt != nil })
+            .max(by: { sleepSessions[$0].endedAt! < sleepSessions[$1].endedAt! }),
+           let endedAt = sleepSessions[index].endedAt {
+            let gap = date.timeIntervalSince(endedAt)
+            if gap >= 0, gap <= SleepSessionGroupingPolicy.sleepModeResumeGap {
+                sleepSessions[index].endedAt = nil
+                persistSleepSessions()
+                return sleepSessions[index].id
+            }
+        }
+        let session = SleepRecordingSession(
+            id: UUID(),
+            startedAt: date,
+            endedAt: nil,
+            clipFileNames: []
+        )
+        sleepSessions.append(session)
+        persistSleepSessions()
+        return session.id
+    }
+
+    func endSleepSession(id: UUID?, at date: Date = Date()) {
+        guard let id,
+              let index = sleepSessions.firstIndex(where: { $0.id == id })
+        else { return }
+        sleepSessions[index].endedAt = max(sleepSessions[index].startedAt, date)
+        persistSleepSessions()
+        objectWillChange.send()
+    }
+
+    func add(_ url: URL, sessionID: UUID? = nil) {
+        if let existingClip = clips.first(where: { $0.url == url }) {
+            associate(existingClip, with: sessionID)
+            return
+        }
+        guard let clip = makeClip(url) else { return }
+        associate(clip, with: sessionID)
         clips.append(clip)
         clips.sort { $0.createdAt > $1.createdAt }
     }
 
     func delete(_ clip: RecordingClip) {
         try? FileManager.default.removeItem(at: clip.url)
+        removeSessionReferences(to: [clip.url])
         reload()
     }
 
@@ -126,13 +296,29 @@ final class RecordingLibrary: ObservableObject {
         for clip in selectedClips where availableURLs.contains(clip.url) {
             try FileManager.default.removeItem(at: clip.url)
         }
+        removeSessionReferences(to: selectedClips.map(\.url))
         reload()
     }
 
-    func deleteAll() {
-        for clip in clips {
-            try? FileManager.default.removeItem(at: clip.url)
+    func deleteAll(at date: Date = Date()) {
+        // clips 배열에 아직 반영되지 않은 저장 완료 콜백도 빠짐없이 지운다.
+        let storedAudioURLs = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ))?.filter { $0.pathExtension.lowercased() == "m4a" } ?? []
+        for url in storedAudioURLs {
+            try? FileManager.default.removeItem(at: url)
         }
+        let pendingDirectory = directory.appendingPathComponent(".Pending", isDirectory: true)
+        try? FileManager.default.removeItem(at: pendingDirectory)
+        // 파일 삭제가 잠자기 모드 이력을 바꾸면 안 된다. 열린 세션과 30분 안에
+        // 재개할 수 있는 최근 종료 세션은 비어 있어도 남기고, 오래된 빈 이력만 정리한다.
+        for index in sleepSessions.indices {
+            sleepSessions[index].clipFileNames.removeAll()
+        }
+        _ = removeExpiredEmptySessions(at: date)
+        persistSleepSessions()
         reload()
     }
 
@@ -232,11 +418,115 @@ final class RecordingLibrary: ObservableObject {
     private func makeClip(_ url: URL) -> RecordingClip? {
         guard let file = try? AVAudioFile(forReading: url) else { return nil }
         let duration = Double(file.length) / file.processingFormat.sampleRate
+        let resourceValues = try? url.resourceValues(
+            forKeys: [.creationDateKey, .contentModificationDateKey]
+        )
         return RecordingClip(
             url: url,
-            createdAt: Self.dateFromFileName(url) ?? .distantPast,
+            createdAt: Self.dateFromFileName(url)
+                ?? resourceValues?.creationDate
+                ?? resourceValues?.contentModificationDate
+                ?? .distantPast,
             duration: duration
         )
+    }
+
+    private func loadSleepSessions() {
+        guard let data = try? Data(contentsOf: sessionManifestURL),
+              let decoded = try? JSONDecoder().decode([SleepRecordingSession].self, from: data)
+        else {
+            sleepSessions = []
+            return
+        }
+        sleepSessions = decoded
+    }
+
+    private func persistSleepSessions() {
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try JSONEncoder().encode(sleepSessions)
+            try data.write(to: sessionManifestURL, options: .atomic)
+        } catch {
+            // 녹음 파일 자체는 보존하고, 세션 메타데이터는 다음 저장 때 다시 시도합니다.
+        }
+    }
+
+    private func closeOpenSessionsForRecovery() {
+        var changed = false
+        for index in sleepSessions.indices where sleepSessions[index].endedAt == nil {
+            // 비정상 종료에는 실제 모드 이탈 시각이 존재하지 않는다. 녹음 시각을
+            // 대신 쓰면 사용자가 정한 모드 기준이 무너지므로 마지막 확정 상태 변경
+            // 시각인 startedAt에서 보수적으로 닫는다. 정상 종료/백그라운드는
+            // StandViewModel이 실제 이탈 시각으로 endSleepSession을 먼저 기록한다.
+            sleepSessions[index].endedAt = sleepSessions[index].startedAt
+            changed = true
+        }
+        if changed { persistSleepSessions() }
+    }
+
+    private func associate(_ clip: RecordingClip, with requestedSessionID: UUID?) {
+        guard !clip.isMerged else { return }
+        let fallbackSessionID = sleepSessions
+            .reversed()
+            .first { session in
+                let lowerBound = session.startedAt.addingTimeInterval(-5)
+                let upperBound = (session.endedAt ?? .distantFuture).addingTimeInterval(5)
+                return clip.createdAt >= lowerBound && clip.createdAt <= upperBound
+            }?
+            .id
+        guard let sessionID = requestedSessionID ?? fallbackSessionID,
+              let index = sleepSessions.firstIndex(where: { $0.id == sessionID })
+        else { return }
+        let name = clip.url.lastPathComponent
+        guard !sleepSessions[index].clipFileNames.contains(name) else { return }
+        sleepSessions[index].clipFileNames.append(name)
+        persistSleepSessions()
+    }
+
+    private func associateUnassignedClipsWithRecordedSessions() {
+        guard !sleepSessions.isEmpty else { return }
+        var assignedNames = Set(sleepSessions.flatMap(\.clipFileNames))
+        var changed = false
+
+        for clip in clips where !clip.isMerged {
+            let name = clip.url.lastPathComponent
+            guard !assignedNames.contains(name) else { continue }
+            guard let index = sleepSessions.indices.reversed().first(where: { index in
+                let session = sleepSessions[index]
+                let lowerBound = session.startedAt.addingTimeInterval(-5)
+                let upperBound = (session.endedAt ?? .distantFuture).addingTimeInterval(5)
+                return clip.createdAt >= lowerBound && clip.createdAt <= upperBound
+            }) else { continue }
+
+            sleepSessions[index].clipFileNames.append(name)
+            assignedNames.insert(name)
+            changed = true
+        }
+
+        if changed { persistSleepSessions() }
+    }
+
+    private func removeSessionReferences(to urls: [URL]) {
+        let names = Set(urls.map(\.lastPathComponent))
+        guard !names.isEmpty else { return }
+        for index in sleepSessions.indices {
+            sleepSessions[index].clipFileNames.removeAll { names.contains($0) }
+        }
+        _ = removeExpiredEmptySessions(at: Date())
+        persistSleepSessions()
+    }
+
+    @discardableResult
+    private func removeExpiredEmptySessions(at referenceDate: Date) -> Bool {
+        let previousCount = sleepSessions.count
+        sleepSessions.removeAll { session in
+            guard session.clipFileNames.isEmpty, let endedAt = session.endedAt else {
+                return false
+            }
+            return referenceDate.timeIntervalSince(endedAt)
+                > SleepSessionGroupingPolicy.sleepModeResumeGap
+        }
+        return sleepSessions.count != previousCount
     }
 
     private static func dateFromFileName(_ url: URL) -> Date? {

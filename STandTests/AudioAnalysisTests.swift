@@ -65,7 +65,7 @@ final class AudioAnalysisTests: XCTestCase {
         let settings = try JSONDecoder().decode(AppSettings.self, from: legacyJSON)
 
         XCTAssertEqual(settings.orientationPreference, .automatic)
-        XCTAssertFalse(settings.torchEnabled)
+        XCTAssertTrue(settings.torchEnabled)
         XCTAssertEqual(settings.torchIntensity, 0.25)
         XCTAssertFalse(settings.wakeOnSleepSound)
         XCTAssertEqual(settings.silhouetteIntensity, 0.05)
@@ -83,6 +83,50 @@ final class AudioAnalysisTests: XCTestCase {
     func testRecommendedAndLegacyClockFontUseFifthTenadaChoice() {
         XCTAssertEqual(ClockFontChoice.allCases[4], .tenada)
         XCTAssertEqual(AppSettings.recommended.clockFont, .tenada)
+        XCTAssertTrue(AppSettings.recommended.torchEnabled)
+    }
+
+    func testRecommendedLayoutsMatchCapturedSimulatorArrangement() {
+        let portrait = AppSettings.recommended.portraitLayout
+        XCTAssertEqual(portrait.clock, PanelTransform(x: 0, y: 0, scale: 1))
+        XCTAssertEqual(
+            portrait.weatherIcon,
+            PanelTransform(x: 0, y: -0.22811053984575841, scale: 0.86922719107523572)
+        )
+        XCTAssertEqual(portrait.weatherIcon, portrait.weatherTemperature)
+        XCTAssertEqual(portrait.weatherIcon, portrait.weatherCondition)
+        XCTAssertEqual(portrait.weatherGroupIDs, [1, 1, 1])
+        XCTAssertEqual(portrait.date, PanelTransform(x: 0, y: 0.10, scale: 1))
+        XCTAssertEqual(portrait.status, PanelTransform(x: 0, y: 0.15, scale: 1))
+        XCTAssertEqual(
+            portrait.battery,
+            PanelTransform(x: 0, y: 0.20698371893744649, scale: 1)
+        )
+
+        let landscape = AppSettings.recommended.landscapeLayout
+        XCTAssertEqual(
+            landscape.clock,
+            PanelTransform(x: 0, y: 0.044502617801047181, scale: 1.2810187063251741)
+        )
+        XCTAssertEqual(
+            landscape.weatherIcon,
+            PanelTransform(x: 0, y: -0.26890924956369971, scale: 0.68640335461830571)
+        )
+        XCTAssertEqual(landscape.weatherIcon, landscape.weatherTemperature)
+        XCTAssertEqual(landscape.weatherIcon, landscape.weatherCondition)
+        XCTAssertEqual(landscape.weatherGroupIDs, [1, 1, 1])
+        XCTAssertEqual(
+            landscape.date,
+            PanelTransform(x: -0.17822222222222225, y: -0.10184991273996505, scale: 1)
+        )
+        XCTAssertEqual(
+            landscape.status,
+            PanelTransform(x: 0, y: 0.36518324607329838, scale: 1)
+        )
+        XCTAssertEqual(
+            landscape.battery,
+            PanelTransform(x: 0, y: 0.27773123909249542, scale: 1)
+        )
     }
 
     func testPortraitAndLandscapeControlOrdersRoundTripIndependently() throws {
@@ -510,6 +554,41 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(BrightnessThresholdPolicy.value(locationX: 300, width: 240), 1)
     }
 
+    func testBrightnessRuleTrackOnlyBeginsForDirectHorizontalDrag() {
+        XCTAssertFalse(
+            BrightnessRuleInteractionPolicy.hasReachedDecisionDistance(
+                CGSize(width: 5, height: 1)
+            )
+        )
+        XCTAssertTrue(
+            BrightnessRuleInteractionPolicy.isTap(CGSize(width: 5, height: 1))
+        )
+        XCTAssertFalse(
+            BrightnessRuleInteractionPolicy.isTap(CGSize(width: 6, height: 0))
+        )
+        XCTAssertTrue(
+            BrightnessRuleInteractionPolicy.isDirectHorizontalDrag(
+                translation: CGSize(width: 7, height: 2)
+            )
+        )
+        XCTAssertFalse(
+            BrightnessRuleInteractionPolicy.isDirectHorizontalDrag(
+                translation: CGSize(width: 4, height: 1)
+            )
+        )
+        XCTAssertFalse(
+            BrightnessRuleInteractionPolicy.isDirectHorizontalDrag(
+                translation: CGSize(width: 7, height: 12)
+            )
+        )
+        XCTAssertTrue(
+            BrightnessRuleInteractionPolicy.isDirectHorizontalDrag(
+                translation: CGSize(width: 1, height: 20),
+                alreadyDragging: true
+            )
+        )
+    }
+
     func testBrightnessThresholdTapAlternatesAtTheNearestQuarterPoints() {
         let brightness = 0.6
         let sleepingThreshold = BrightnessThresholdPolicy.valueAfterTap(
@@ -602,6 +681,74 @@ final class AudioAnalysisTests: XCTestCase {
             EnvironmentDisplayMode.resolve(brightness: 0.8, threshold: 0.5),
             .sleeping
         )
+    }
+
+    func testStandModeNeverAllowsAutomaticDimming() {
+        XCTAssertFalse(
+            StandAutomaticDimmingPolicy.shouldFade(
+                automaticDimmingEnabled: true,
+                environmentDisplayMode: .stand
+            )
+        )
+        XCTAssertTrue(
+            StandAutomaticDimmingPolicy.shouldFade(
+                automaticDimmingEnabled: true,
+                environmentDisplayMode: .sleeping
+            )
+        )
+        XCTAssertFalse(
+            StandAutomaticDimmingPolicy.shouldFade(
+                automaticDimmingEnabled: false,
+                environmentDisplayMode: .sleeping
+            )
+        )
+    }
+
+    func testSleepCareMonitoringRunsOnlyInSleepingMode() {
+        XCTAssertTrue(
+            SleepCareMonitoringPolicy.shouldMonitor(
+                isNightSessionActive: true,
+                environmentDisplayMode: .sleeping
+            )
+        )
+        XCTAssertFalse(
+            SleepCareMonitoringPolicy.shouldMonitor(
+                isNightSessionActive: true,
+                environmentDisplayMode: .stand
+            )
+        )
+        XCTAssertFalse(
+            SleepCareMonitoringPolicy.shouldMonitor(
+                isNightSessionActive: false,
+                environmentDisplayMode: .sleeping
+            )
+        )
+    }
+
+    @MainActor
+    func testBrightnessThresholdChangeUsesTheNewPublishedValueImmediately() {
+        let model = StandViewModel()
+        let originalThreshold = model.settings.value.brightnessModeThreshold
+        defer { model.settings.value.brightnessModeThreshold = originalThreshold }
+
+        let brightness = model.displayBrightness
+        model.settings.value.brightnessModeThreshold = brightness - 0.1
+        XCTAssertEqual(model.environmentDisplayMode, .sleeping)
+
+        model.settings.value.brightnessModeThreshold = brightness + 0.1
+        XCTAssertEqual(model.environmentDisplayMode, .stand)
+    }
+
+    func testSoundSensitivityUsesAnIntuitiveLowToHighScale() {
+        XCTAssertEqual(SoundSensitivityPolicy.level(for: -20), 0, accuracy: 0.000_001)
+        XCTAssertEqual(SoundSensitivityPolicy.level(for: -35), 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(SoundSensitivityPolicy.level(for: -50), 1, accuracy: 0.000_001)
+        XCTAssertEqual(SoundSensitivityPolicy.threshold(for: 0), -20, accuracy: 0.000_001)
+        XCTAssertEqual(SoundSensitivityPolicy.threshold(for: 0.5), -35, accuracy: 0.000_001)
+        XCTAssertEqual(SoundSensitivityPolicy.threshold(for: 1), -50, accuracy: 0.000_001)
+        XCTAssertEqual(SoundSensitivityPolicy.label(for: -45), "높음")
+        XCTAssertEqual(SoundSensitivityPolicy.label(for: -36), "보통")
+        XCTAssertEqual(SoundSensitivityPolicy.label(for: -25), "낮음")
     }
 
     func testWeatherResponseDecodesAndMapsKoreanCondition() throws {
@@ -930,6 +1077,87 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertGreaterThan(result?.confidence ?? 0, 0.55)
     }
 
+    func testSleepSoundClassifierRecognizesSpeechLikeVariationAsSleepTalk() {
+        var classifier = SleepSoundClassifier(releaseDuration: 0.2)
+        var result: SleepSoundClassification?
+
+        for index in 0..<12 {
+            let rmsDB: Float = index.isMultiple(of: 2) ? -30 : -24
+            result = classifier.analyze(
+                features: SleepSoundFeatures(
+                    rmsDB: rmsDB,
+                    peakDB: rmsDB + 9,
+                    zeroCrossingRate: 0.11,
+                    lowFrequencyRatio: 0.42,
+                    duration: 0.1
+                ),
+                detection: AudioDetection(
+                    clapDetected: false,
+                    soundBegan: index == 0,
+                    isAboveSoundThreshold: true
+                )
+            )
+        }
+        for _ in 0..<2 {
+            result = classifier.analyze(
+                features: silentSleepSoundFeatures,
+                detection: silentAudioDetection
+            ) ?? result
+        }
+
+        XCTAssertEqual(result?.kind, .sleepTalk)
+        XCTAssertGreaterThanOrEqual(result?.confidence ?? 0, 0.60)
+        XCTAssertTrue(result.map(SleepSoundRecordingPolicy.shouldKeep) ?? false)
+        XCTAssertFalse(result.map(SleepSoundWakePolicy.shouldWake) ?? true)
+    }
+
+    func testSteadyBackgroundSoundIsNotSavedAsSleepTalk() {
+        var classifier = SleepSoundClassifier(releaseDuration: 0.2)
+        var result: SleepSoundClassification?
+
+        for index in 0..<12 {
+            result = classifier.analyze(
+                features: SleepSoundFeatures(
+                    rmsDB: -27,
+                    peakDB: -18,
+                    zeroCrossingRate: 0.11,
+                    lowFrequencyRatio: 0.42,
+                    duration: 0.1
+                ),
+                detection: AudioDetection(
+                    clapDetected: false,
+                    soundBegan: index == 0,
+                    isAboveSoundThreshold: true
+                )
+            )
+        }
+        for _ in 0..<2 {
+            result = classifier.analyze(
+                features: silentSleepSoundFeatures,
+                detection: silentAudioDetection
+            ) ?? result
+        }
+
+        XCTAssertEqual(result?.kind, .other)
+        XCTAssertFalse(result.map(SleepSoundRecordingPolicy.shouldKeep) ?? true)
+    }
+
+    func testOnlySnoreAndSleepTalkCandidatesAreKeptWhileMovementWakes() {
+        let snore = SleepSoundClassification(kind: .snore, confidence: 0.7, duration: 1)
+        let sleepTalk = SleepSoundClassification(kind: .sleepTalk, confidence: 0.7, duration: 1)
+        let movement = SleepSoundClassification(kind: .movement, confidence: 0.7, duration: 0.4)
+        let other = SleepSoundClassification(kind: .other, confidence: 0.99, duration: 2)
+
+        XCTAssertTrue(SleepSoundRecordingPolicy.shouldKeep(snore))
+        XCTAssertTrue(SleepSoundRecordingPolicy.shouldKeep(sleepTalk))
+        XCTAssertFalse(SleepSoundRecordingPolicy.shouldKeep(movement))
+        XCTAssertFalse(SleepSoundRecordingPolicy.shouldKeep(other))
+        XCTAssertFalse(SleepSoundWakePolicy.shouldWake(snore))
+        XCTAssertFalse(SleepSoundWakePolicy.shouldWake(sleepTalk))
+        XCTAssertTrue(SleepSoundWakePolicy.shouldWake(movement))
+        XCTAssertFalse(SleepSoundWakePolicy.shouldWake(other))
+    }
+
     func testClipRecorderCreatesReadableM4AWithBoundaryPadding() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -968,14 +1196,23 @@ final class AudioAnalysisTests: XCTestCase {
             ),
             now: 1.1
         )
+        recorder.approveCurrentClip()
+        XCTAssertNil(savedURL, "승인 뒤에도 1.4초 후행 여백이 끝나기 전에는 파일을 닫지 않습니다.")
+        let bufferDuration = 1_024.0 / format.sampleRate
+        var now = 1.1
+        while now + bufferDuration < 2.5 {
+            now += bufferDuration
+            recorder.process(
+                buffer: try makeBuffer(format: format),
+                detection: silentAudioDetection,
+                now: now
+            )
+            XCTAssertNil(savedURL)
+        }
         recorder.process(
             buffer: try makeBuffer(format: format),
-            detection: AudioDetection(
-                clapDetected: false,
-                soundBegan: false,
-                isAboveSoundThreshold: false
-            ),
-            now: 3
+            detection: silentAudioDetection,
+            now: 2.5 + bufferDuration
         )
 
         wait(for: [saved], timeout: 1)
@@ -984,7 +1221,8 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
 
         let file = try AVAudioFile(forReading: url)
-        XCTAssertGreaterThan(file.length, 0)
+        let recordedDuration = Double(file.length) / file.processingFormat.sampleRate
+        XCTAssertGreaterThanOrEqual(recordedDuration, 1.35)
     }
 
     func testClipRecorderRollsContinuousSoundIntoANewFileAtMaximumDuration() throws {
@@ -1028,11 +1266,14 @@ final class AudioAnalysisTests: XCTestCase {
         recorder.process(buffer: try makeBuffer(format: format), detection: began, now: 1)
         recorder.process(buffer: try makeBuffer(format: format), detection: continuing, now: 1.1)
         recorder.process(buffer: try makeBuffer(format: format), detection: continuing, now: 1.12)
+        XCTAssertTrue(savedURLs.isEmpty, "분류 전 90초 분할 파일은 목록에 공개하지 않아야 합니다.")
+        recorder.approveCurrentClip()
         recorder.process(buffer: try makeBuffer(format: format), detection: silence, now: 1.3)
 
         wait(for: [savedTwice], timeout: 1)
         XCTAssertEqual(Set(savedURLs).count, 2)
         for url in savedURLs {
+            XCTAssertEqual(url.deletingLastPathComponent(), directory)
             let file = try AVAudioFile(forReading: url)
             XCTAssertGreaterThan(file.length, 0)
         }
@@ -1068,6 +1309,386 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertTrue(savedURLs.isEmpty)
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         XCTAssertTrue(files.isEmpty)
+    }
+
+    func testClipRecorderDiscardsEveryPendingRolloverBeforeClassification() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        var savedURLs: [URL] = []
+        let recorder = ClipSegmentRecorder(
+            directory: directory,
+            onRecordingChanged: { _ in },
+            onSaved: { savedURLs.append($0) },
+            postRollDuration: 10,
+            maximumClipDuration: 0.05
+        )
+        let format = try XCTUnwrap(
+            AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)
+        )
+        let began = AudioDetection(
+            clapDetected: false,
+            soundBegan: true,
+            isAboveSoundThreshold: true
+        )
+        let continuing = AudioDetection(
+            clapDetected: false,
+            soundBegan: false,
+            isAboveSoundThreshold: true
+        )
+
+        recorder.process(buffer: try makeBuffer(format: format), detection: began, now: 1)
+        recorder.process(buffer: try makeBuffer(format: format), detection: continuing, now: 1.1)
+        recorder.process(buffer: try makeBuffer(format: format), detection: continuing, now: 1.2)
+
+        XCTAssertTrue(savedURLs.isEmpty)
+        XCTAssertFalse(
+            try FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil
+            ).isEmpty
+        )
+
+        recorder.discardCurrentClip()
+
+        XCTAssertTrue(savedURLs.isEmpty)
+        XCTAssertTrue(
+            try FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil
+            ).isEmpty
+        )
+    }
+
+    @MainActor
+    func testClipRecorderNeverExposesOrRecoversUnapprovedStagingAudio() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let format = try XCTUnwrap(
+            AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)
+        )
+        let stagingDirectory = directory.appendingPathComponent(".Pending", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: stagingDirectory,
+            withIntermediateDirectories: true
+        )
+        let staleURL = stagingDirectory.appendingPathComponent("stale.m4a")
+        try writeAudioFile(at: staleURL, format: format, bufferCount: 1)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staleURL.path))
+        let initialLibrary = RecordingLibrary(directory: directory)
+        XCTAssertTrue(initialLibrary.clips.isEmpty)
+
+        _ = ClipSegmentRecorder(
+            directory: directory,
+            onRecordingChanged: { _ in },
+            onSaved: { _ in }
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stagingDirectory.path))
+        let recoveredLibrary = RecordingLibrary(directory: directory)
+        XCTAssertTrue(recoveredLibrary.clips.isEmpty)
+    }
+
+    func testApprovedClipRemainsApprovedWhenARejectedEventFollows() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        var savedURLs: [URL] = []
+        let recorder = ClipSegmentRecorder(
+            directory: directory,
+            onRecordingChanged: { _ in },
+            onSaved: { savedURLs.append($0) }
+        )
+        let format = try XCTUnwrap(
+            AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)
+        )
+        recorder.process(
+            buffer: try makeBuffer(format: format),
+            detection: AudioDetection(
+                clapDetected: false,
+                soundBegan: true,
+                isAboveSoundThreshold: true
+            ),
+            now: 1
+        )
+        recorder.approveCurrentClip()
+        recorder.rejectCurrentClip()
+        recorder.process(
+            buffer: try makeBuffer(format: format),
+            detection: silentAudioDetection,
+            now: 3
+        )
+
+        XCTAssertEqual(savedURLs.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: savedURLs[0].path))
+    }
+
+    func testLegacySleepGroupingUsesSeparateNinetyMinuteEstimateFromPreviousClipEnd() {
+        let start = Date(timeIntervalSinceReferenceDate: 10_000)
+        let first = RecordingClip(
+            url: URL(fileURLWithPath: "/tmp/legacy-first.m4a"),
+            createdAt: start,
+            duration: 120
+        )
+        let exactBoundary = RecordingClip(
+            url: URL(fileURLWithPath: "/tmp/legacy-boundary.m4a"),
+            createdAt: start.addingTimeInterval(120 + 90 * 60),
+            duration: 60
+        )
+        let justOutsideBoundary = RecordingClip(
+            url: URL(fileURLWithPath: "/tmp/legacy-new-sleep.m4a"),
+            createdAt: exactBoundary.createdAt.addingTimeInterval(60 + 90 * 60 + 0.001),
+            duration: 30
+        )
+
+        let groups = SleepSessionGroupingPolicy.inferredGroups(
+            from: [justOutsideBoundary, first, exactBoundary]
+        )
+
+        XCTAssertEqual(SleepSessionGroupingPolicy.legacyRecordingGap, 90 * 60)
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertEqual(groups[0].clips.map(\.url), [first.url, exactBoundary.url])
+        XCTAssertEqual(groups[1].clips.map(\.url), [justOutsideBoundary.url])
+        XCTAssertTrue(groups.allSatisfy(\.isInferred))
+    }
+
+    @MainActor
+    func testSleepModeSessionsResumeThroughThirtyMinutesButSplitAfterward() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let firstStart = Date(timeIntervalSinceReferenceDate: 20_000)
+        let firstEnd = firstStart.addingTimeInterval(2 * 60 * 60)
+        let firstLibrary = RecordingLibrary(directory: directory)
+        let firstSessionID = firstLibrary.beginSleepSession(at: firstStart)
+        firstLibrary.endSleepSession(id: firstSessionID, at: firstEnd)
+
+        // Manifest를 다시 읽어도 실제 잠자기 모드 종료 시각을 기준으로 이어야 한다.
+        let reloadedLibrary = RecordingLibrary(directory: directory)
+        let exactBoundaryID = reloadedLibrary.beginSleepSession(
+            at: firstEnd.addingTimeInterval(30 * 60)
+        )
+        XCTAssertEqual(SleepSessionGroupingPolicy.sleepModeResumeGap, 30 * 60)
+        XCTAssertEqual(exactBoundaryID, firstSessionID)
+
+        let resumedEnd = firstEnd.addingTimeInterval(45 * 60)
+        reloadedLibrary.endSleepSession(id: exactBoundaryID, at: resumedEnd)
+        let nextSessionID = reloadedLibrary.beginSleepSession(
+            at: resumedEnd.addingTimeInterval(30 * 60 + 0.001)
+        )
+        XCTAssertNotEqual(nextSessionID, firstSessionID)
+    }
+
+    @MainActor
+    func testDeletingAllRecordingsKeepsTheCurrentSleepModeSessionOpen() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let format = try XCTUnwrap(
+            AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)
+        )
+        let library = RecordingLibrary(directory: directory)
+        let sessionStart = try XCTUnwrap(
+            Calendar.current.date(
+                from: DateComponents(year: 2026, month: 8, day: 8, hour: 1)
+            )
+        )
+        let sessionID = library.beginSleepSession(at: sessionStart)
+        let firstURL = directory.appendingPathComponent("sleep-sound-20260808-010100-000.m4a")
+        try writeAudioFile(at: firstURL, format: format, bufferCount: 1)
+        library.add(firstURL, sessionID: sessionID)
+        XCTAssertEqual(library.recordingSessions.first?.isInferred, false)
+
+        library.deleteAll()
+        XCTAssertTrue(library.clips.isEmpty)
+
+        let laterURL = directory.appendingPathComponent("sleep-sound-20260808-010500-000.m4a")
+        try writeAudioFile(at: laterURL, format: format, bufferCount: 1)
+        library.add(laterURL)
+
+        let session = try XCTUnwrap(library.recordingSessions.first)
+        XCTAssertEqual(session.id, "session-\(sessionID.uuidString)")
+        XCTAssertFalse(session.isInferred)
+        XCTAssertEqual(session.clips.map(\.url), [laterURL])
+    }
+
+    @MainActor
+    func testDeletingRecordingsDoesNotBreakThirtyMinuteSleepModeResumeWindow() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let library = RecordingLibrary(directory: directory)
+        let firstEnd = Date(timeIntervalSinceReferenceDate: 40_000)
+        let firstID = library.beginSleepSession(at: firstEnd.addingTimeInterval(-2 * 60 * 60))
+        library.endSleepSession(id: firstID, at: firstEnd)
+
+        library.deleteAll(at: firstEnd.addingTimeInterval(60))
+        let resumedID = library.beginSleepSession(
+            at: firstEnd.addingTimeInterval(SleepSessionGroupingPolicy.sleepModeResumeGap)
+        )
+        XCTAssertEqual(resumedID, firstID)
+
+        let resumedEnd = firstEnd.addingTimeInterval(45 * 60)
+        library.endSleepSession(id: resumedID, at: resumedEnd)
+        library.deleteAll(at: resumedEnd)
+        let nextID = library.beginSleepSession(
+            at: resumedEnd.addingTimeInterval(
+                SleepSessionGroupingPolicy.sleepModeResumeGap + 0.001
+            )
+        )
+        XCTAssertNotEqual(nextID, firstID)
+    }
+
+    @MainActor
+    func testDeletingAllAlsoRemovesAudioNotYetIndexedByTheLibrary() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let format = try XCTUnwrap(
+            AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)
+        )
+        let library = RecordingLibrary(directory: directory)
+        let lateCallbackURL = directory.appendingPathComponent(
+            "sleep-sound-20260808-021500-000.m4a"
+        )
+        try writeAudioFile(at: lateCallbackURL, format: format, bufferCount: 1)
+        let pendingDirectory = directory.appendingPathComponent(".Pending", isDirectory: true)
+        try FileManager.default.createDirectory(at: pendingDirectory, withIntermediateDirectories: true)
+        let pendingURL = pendingDirectory.appendingPathComponent("pending.m4a")
+        try writeAudioFile(at: pendingURL, format: format, bufferCount: 1)
+
+        XCTAssertTrue(library.clips.isEmpty)
+        library.deleteAll()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: lateCallbackURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pendingURL.path))
+
+        library.add(lateCallbackURL)
+        XCTAssertTrue(library.clips.isEmpty)
+    }
+
+    @MainActor
+    func testAbnormalRecoveryNeverUsesTheLastRecordingTimeAsModeExit() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let format = try XCTUnwrap(
+            AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)
+        )
+        let sessionStart = try XCTUnwrap(
+            Calendar.current.date(
+                from: DateComponents(year: 2026, month: 8, day: 8, hour: 1)
+            )
+        )
+        let firstLibrary = RecordingLibrary(directory: directory)
+        let firstSessionID = firstLibrary.beginSleepSession(at: sessionStart)
+        let muchLaterClipURL = directory.appendingPathComponent(
+            "sleep-sound-20260808-060000-000.m4a"
+        )
+        try writeAudioFile(at: muchLaterClipURL, format: format, bufferCount: 1)
+        firstLibrary.add(muchLaterClipURL, sessionID: firstSessionID)
+
+        let recoveredLibrary = RecordingLibrary(directory: directory)
+        let nextSessionID = recoveredLibrary.beginSleepSession(
+            at: sessionStart.addingTimeInterval(30 * 60 + 0.001)
+        )
+
+        XCTAssertNotEqual(nextSessionID, firstSessionID)
+    }
+
+    @MainActor
+    func testReloadBeforeSavedCallbackStillAssociatesClipWithExactModeSession() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let format = try XCTUnwrap(
+            AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)
+        )
+        let library = RecordingLibrary(directory: directory)
+        let sessionStart = try XCTUnwrap(
+            Calendar.current.date(
+                from: DateComponents(year: 2026, month: 8, day: 8, hour: 1)
+            )
+        )
+        let sessionID = library.beginSleepSession(at: sessionStart)
+        let movedBeforeCallbackURL = directory.appendingPathComponent(
+            "sleep-sound-20260808-011500-000.m4a"
+        )
+        try writeAudioFile(at: movedBeforeCallbackURL, format: format, bufferCount: 1)
+
+        library.reload()
+        library.add(movedBeforeCallbackURL)
+
+        let session = try XCTUnwrap(library.recordingSessions.first)
+        XCTAssertEqual(session.id, "session-\(sessionID.uuidString)")
+        XCTAssertFalse(session.isInferred)
+        XCTAssertEqual(session.clips.map(\.url), [movedBeforeCallbackURL])
+    }
+
+    func testSleepSessionTimelineMarkerClampsToSessionBounds() {
+        let start = Date(timeIntervalSinceReferenceDate: 30_000)
+        let end = start.addingTimeInterval(100)
+        let before = RecordingClip(
+            url: URL(fileURLWithPath: "/tmp/before.m4a"),
+            createdAt: start.addingTimeInterval(-10),
+            duration: 1
+        )
+        let middle = RecordingClip(
+            url: URL(fileURLWithPath: "/tmp/middle.m4a"),
+            createdAt: start.addingTimeInterval(50),
+            duration: 1
+        )
+        let after = RecordingClip(
+            url: URL(fileURLWithPath: "/tmp/after.m4a"),
+            createdAt: end.addingTimeInterval(10),
+            duration: 1
+        )
+
+        XCTAssertEqual(
+            SleepSessionGroupingPolicy.markerFraction(
+                for: before,
+                sessionStart: start,
+                sessionEnd: end
+            ),
+            0
+        )
+        XCTAssertEqual(
+            SleepSessionGroupingPolicy.markerFraction(
+                for: middle,
+                sessionStart: start,
+                sessionEnd: end
+            ),
+            0.5,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            SleepSessionGroupingPolicy.markerFraction(
+                for: after,
+                sessionStart: start,
+                sessionEnd: end
+            ),
+            1
+        )
     }
 
     @MainActor

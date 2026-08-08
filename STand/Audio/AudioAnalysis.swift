@@ -17,6 +17,7 @@ struct AudioDetection: Equatable {
 
 enum SleepSoundKind: String, Equatable {
     case snore
+    case sleepTalk
     case movement
     case other
 }
@@ -35,6 +36,25 @@ struct SleepSoundClassification: Equatable {
     let duration: TimeInterval
 }
 
+enum SleepSoundRecordingPolicy {
+    static func shouldKeep(_ classification: SleepSoundClassification) -> Bool {
+        switch classification.kind {
+        case .snore:
+            classification.confidence >= 0.58
+        case .sleepTalk:
+            classification.confidence >= 0.60
+        case .movement, .other:
+            false
+        }
+    }
+}
+
+enum SleepSoundWakePolicy {
+    static func shouldWake(_ classification: SleepSoundClassification) -> Bool {
+        classification.kind == .movement && classification.confidence >= 0.55
+    }
+}
+
 struct SleepSoundClassifier {
     private let releaseDuration: TimeInterval
     private var isCollecting = false
@@ -43,6 +63,8 @@ struct SleepSoundClassifier {
     private var weightedCrestDB: Double = 0
     private var weightedZeroCrossingRate: Double = 0
     private var weightedLowFrequencyRatio: Double = 0
+    private var minimumRMSDB: Float = .infinity
+    private var maximumRMSDB: Float = -.infinity
 
     init(releaseDuration: TimeInterval = 0.18) {
         self.releaseDuration = releaseDuration
@@ -64,6 +86,8 @@ struct SleepSoundClassifier {
             weightedCrestDB += crestDB * features.duration
             weightedZeroCrossingRate += features.zeroCrossingRate * features.duration
             weightedLowFrequencyRatio += features.lowFrequencyRatio * features.duration
+            minimumRMSDB = min(minimumRMSDB, features.rmsDB)
+            maximumRMSDB = max(maximumRMSDB, features.rmsDB)
             return nil
         }
 
@@ -81,6 +105,8 @@ struct SleepSoundClassifier {
         weightedCrestDB = 0
         weightedZeroCrossingRate = 0
         weightedLowFrequencyRatio = 0
+        minimumRMSDB = .infinity
+        maximumRMSDB = -.infinity
     }
 
     private func classifyCurrentSound() -> SleepSoundClassification {
@@ -107,6 +133,27 @@ struct SleepSoundClassifier {
         }
         if duration >= 0.45, lowFrequencyRatio >= 0.45, snoreScore >= 0.58 {
             return SleepSoundClassification(kind: .snore, confidence: snoreScore, duration: soundDuration)
+        }
+
+        let rmsRange = Double(maximumRMSDB - minimumRMSDB)
+        let sleepTalkScore = min(1, max(0,
+            min(1, max(0, (duration - 0.55) / 1.45)) * 0.35
+            + min(1, max(0, 1 - abs(zeroCrossingRate - 0.11) / 0.11)) * 0.25
+            + min(1, max(0, 1 - abs(lowFrequencyRatio - 0.43) / 0.32)) * 0.25
+            + min(1, max(0, (18 - crestDB) / 10)) * 0.15
+        ))
+        let isSpeechLike = duration >= 0.70
+            && duration <= 30
+            && crestDB <= 18
+            && (0.025...0.24).contains(zeroCrossingRate)
+            && (0.18...0.72).contains(lowFrequencyRatio)
+            && rmsRange >= 3.5
+        if isSpeechLike, sleepTalkScore >= 0.60 {
+            return SleepSoundClassification(
+                kind: .sleepTalk,
+                confidence: sleepTalkScore,
+                duration: soundDuration
+            )
         }
         return SleepSoundClassification(
             kind: .other,

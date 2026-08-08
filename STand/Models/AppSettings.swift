@@ -232,26 +232,26 @@ struct StandScreenLayout: Codable, Equatable {
 
     static let portrait = StandScreenLayout(
         clock: .init(x: 0, y: 0),
-        weatherIcon: .init(x: -0.22, y: -0.24),
-        weatherTemperature: .init(x: 0, y: -0.24),
-        weatherCondition: .init(x: 0.22, y: -0.24),
+        weatherIcon: .init(x: 0, y: -0.22811053984575841, scale: 0.86922719107523572),
+        weatherTemperature: .init(x: 0, y: -0.22811053984575841, scale: 0.86922719107523572),
+        weatherCondition: .init(x: 0, y: -0.22811053984575841, scale: 0.86922719107523572),
         date: .init(x: 0, y: 0.10),
         status: .init(x: 0, y: 0.15),
         brightnessRule: .init(x: 0, y: 0.21),
-        battery: .init(x: 0, y: 0.15),
-        weatherGroupIDs: [0, 1, 2]
+        battery: .init(x: 0, y: 0.20698371893744649),
+        weatherGroupIDs: [1, 1, 1]
     )
 
     static let landscape = StandScreenLayout(
-        clock: .init(x: 0, y: 0),
-        weatherIcon: .init(x: -0.27, y: -0.27),
-        weatherTemperature: .init(x: 0, y: -0.27),
-        weatherCondition: .init(x: 0.27, y: -0.27),
-        date: .init(x: 0, y: 0.18),
-        status: .init(x: 0, y: 0.25),
+        clock: .init(x: 0, y: 0.044502617801047181, scale: 1.2810187063251741),
+        weatherIcon: .init(x: 0, y: -0.26890924956369971, scale: 0.68640335461830571),
+        weatherTemperature: .init(x: 0, y: -0.26890924956369971, scale: 0.68640335461830571),
+        weatherCondition: .init(x: 0, y: -0.26890924956369971, scale: 0.68640335461830571),
+        date: .init(x: -0.17822222222222225, y: -0.10184991273996505),
+        status: .init(x: 0, y: 0.36518324607329838),
         brightnessRule: .init(x: 0, y: 0.32),
-        battery: .init(x: 0, y: 0.18),
-        weatherGroupIDs: [0, 1, 2]
+        battery: .init(x: 0, y: 0.27773123909249542),
+        weatherGroupIDs: [1, 1, 1]
     )
 }
 
@@ -272,7 +272,7 @@ struct AppSettings: Codable, Equatable {
     var soundThresholdDB: Float = -36
     var recordingEnabled = true
     var orientationPreference: OrientationPreference = .automatic
-    var torchEnabled = false
+    var torchEnabled = true
     var torchIntensity = 0.25
     var wakeOnSleepSound = false
     var multiStimulusWakeEnabled = true
@@ -296,7 +296,7 @@ struct AppSettings: Codable, Equatable {
         soundThresholdDB: Float = -36,
         recordingEnabled: Bool = true,
         orientationPreference: OrientationPreference = .automatic,
-        torchEnabled: Bool = false,
+        torchEnabled: Bool = true,
         torchIntensity: Double = 0.25,
         wakeOnSleepSound: Bool = false,
         multiStimulusWakeEnabled: Bool = true
@@ -400,7 +400,7 @@ struct AppSettings: Codable, Equatable {
             OrientationPreference.self,
             forKey: .orientationPreference
         ) ?? .automatic
-        torchEnabled = try container.decodeIfPresent(Bool.self, forKey: .torchEnabled) ?? false
+        torchEnabled = try container.decodeIfPresent(Bool.self, forKey: .torchEnabled) ?? true
         torchIntensity = try container.decodeIfPresent(Double.self, forKey: .torchIntensity) ?? 0.25
         wakeOnSleepSound = try container.decodeIfPresent(Bool.self, forKey: .wakeOnSleepSound) ?? false
         multiStimulusWakeEnabled = try container.decodeIfPresent(
