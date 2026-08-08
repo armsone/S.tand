@@ -68,6 +68,8 @@ private enum ScreenAdjustmentAxis {
 
 enum StandControlLayoutMetrics {
     static let itemHeight: CGFloat = 60
+    static let hiddenControlLabelHeight: CGFloat = 40
+    static let hiddenControlRevealHeight = hiddenControlLabelHeight * 2
     static let rowSpacing: CGFloat = 6
     static let editorToolbarHeight: CGFloat = 46
     static let tileOpacity = 1.0
@@ -808,7 +810,22 @@ struct RootView: View {
     @ViewBuilder
     private func bottomControls(isPortrait: Bool, availableWidth: CGFloat) -> some View {
         if model.isNightSessionActive, !model.controlsVisible {
-            tapToControlText
+            Button {
+                model.revealControls()
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } label: {
+                tapToControlText
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(
+                maxWidth: .infinity,
+                minHeight: StandControlLayoutMetrics.hiddenControlRevealHeight
+            )
+            .contentShape(Rectangle())
+            .accessibilityLabel("하단 기능 버튼 열기")
+            .accessibilityHint("두 번 누르면 플래시, 밝기 기준, 녹음 및 설정 버튼이 나타납니다")
         } else {
             WrappingControlLayout {
                 ForEach(visibleControlOrder(isPortrait: isPortrait)) { kind in

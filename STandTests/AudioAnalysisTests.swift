@@ -619,6 +619,14 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(StandControlLayoutMetrics.tileOpacity, 1)
     }
 
+    func testHiddenControlRevealTargetIsTwiceTheVisualLabelHeight() {
+        XCTAssertEqual(
+            StandControlLayoutMetrics.hiddenControlRevealHeight,
+            StandControlLayoutMetrics.hiddenControlLabelHeight * 2
+        )
+        XCTAssertEqual(StandControlLayoutMetrics.hiddenControlRevealHeight, 80)
+    }
+
     func testBottomControlTypographyAndThreeColumnSliderMetrics() {
         XCTAssertEqual(StandControlLayoutMetrics.titleFontSize, 10.5)
         XCTAssertEqual(StandControlLayoutMetrics.statusFontSize, 8.5)
