@@ -13,6 +13,52 @@ struct WakeMotionPolicy {
     }
 }
 
+struct DevicePosturePolicy {
+    static let faceDownEnterThreshold = 0.82
+    static let faceDownExitThreshold = 0.62
+
+    static func isFaceDown(gravityZ: Double, currentlyFaceDown: Bool) -> Bool {
+        if currentlyFaceDown {
+            return gravityZ > faceDownExitThreshold
+        }
+        return gravityZ >= faceDownEnterThreshold
+    }
+}
+
+final class DevicePostureMonitor {
+    var onFaceDownChanged: ((Bool) -> Void)?
+
+    private let manager = CMMotionManager()
+    private let queue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "com.armsone.stand.device-posture"
+        queue.qualityOfService = .utility
+        queue.maxConcurrentOperationCount = 1
+        return queue
+    }()
+    private var isFaceDown = false
+
+    func start() {
+        guard manager.isDeviceMotionAvailable, !manager.isDeviceMotionActive else { return }
+        manager.deviceMotionUpdateInterval = 0.25
+        manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: queue) { [weak self] motion, _ in
+            guard let self, let motion else { return }
+            let nextValue = DevicePosturePolicy.isFaceDown(
+                gravityZ: motion.gravity.z,
+                currentlyFaceDown: isFaceDown
+            )
+            guard nextValue != isFaceDown else { return }
+            isFaceDown = nextValue
+            DispatchQueue.main.async { self.onFaceDownChanged?(nextValue) }
+        }
+    }
+
+    func stop() {
+        manager.stopDeviceMotionUpdates()
+        isFaceDown = false
+    }
+}
+
 final class WakeMotionMonitor {
     var onMovement: (() -> Void)?
 

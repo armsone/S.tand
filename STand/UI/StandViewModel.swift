@@ -206,6 +206,7 @@ final class StandViewModel: ObservableObject {
     @Published private(set) var environmentDisplayMode: EnvironmentDisplayMode = .stand
     @Published private(set) var ambientCameraState: AmbientCameraState = .disabled
     @Published private(set) var lastAmbientBrightnessReading: AmbientBrightnessReading?
+    @Published private(set) var isFaceDown = false
     @Published var controlsVisible = true
 
     var experienceMode: StandExperienceMode {
@@ -233,11 +234,13 @@ final class StandViewModel: ObservableObject {
     private var batterySubscriptions: Set<AnyCancellable> = []
     private let torch = TorchController()
     private let motionMonitor = WakeMotionMonitor()
+    private let postureMonitor = DevicePostureMonitor()
     private let ambientCamera = AmbientCameraBrightnessService()
     private var activeLampMaximumIntensity = 1.0
     private var isMovementTriggeredLamp = false
     private var monitoringPausedForPlayback = false
     private var brightnessBeforeSession: CGFloat?
+    private var brightnessBeforeFaceDown: CGFloat?
     private var activeRecordingSessionID: UUID?
 
     init() {
@@ -277,6 +280,9 @@ final class StandViewModel: ObservableObject {
             else { return }
             self.wakeForSleepMovement()
         }
+        postureMonitor.onFaceDownChanged = { [weak self] isFaceDown in
+            self?.applyFaceDownState(isFaceDown)
+        }
         orientationPreference = settings.value.orientationPreference
         OrientationController.shared.setPreference(settings.value.orientationPreference)
         ambientCameraState = settings.value.cameraAmbientSensingEnabled
@@ -314,6 +320,7 @@ final class StandViewModel: ObservableObject {
             .sink { [weak self] notification in
                 guard let screen = notification.object as? UIScreen else { return }
                 guard let self else { return }
+                guard !isFaceDown else { return }
                 let newBrightness = Double(screen.brightness)
                 displayBrightness = newBrightness
                 refreshEnvironmentDisplayMode(performTransition: true)
@@ -339,6 +346,7 @@ final class StandViewModel: ObservableObject {
         UIApplication.shared.isIdleTimerDisabled = true
         audio.configure(settings: settings.value)
         syncSleepCareMonitoring()
+        postureMonitor.start()
         weather.refreshIfNeeded()
         controlsTask?.cancel()
         controlsVisible = false
@@ -351,6 +359,8 @@ final class StandViewModel: ObservableObject {
         isNightSessionActive = false
         audio.stop()
         motionMonitor.stop()
+        postureMonitor.stop()
+        applyFaceDownState(false)
         library.endSleepSession(id: activeRecordingSessionID)
         activeRecordingSessionID = nil
         turnOffLamp(animated: true)
@@ -376,6 +386,7 @@ final class StandViewModel: ObservableObject {
         UIApplication.shared.isIdleTimerDisabled = true
         OrientationController.shared.reapply()
         guard isNightSessionActive else { return }
+        postureMonitor.start()
         syncSleepCareMonitoring()
         weather.refreshIfNeeded()
         controlsTask?.cancel()
@@ -389,6 +400,9 @@ final class StandViewModel: ObservableObject {
         automaticDimmingPaused = false
         UIApplication.shared.isIdleTimerDisabled = false
         restoreScreenBrightness()
+        postureMonitor.stop()
+        isFaceDown = false
+        brightnessBeforeFaceDown = nil
         movementTorchSyncTask?.cancel()
         movementTorchSyncTask = nil
         torch.turnOff()
@@ -753,6 +767,28 @@ final class StandViewModel: ObservableObject {
         guard let brightnessBeforeSession else { return }
         UIScreen.main.brightness = brightnessBeforeSession
         self.brightnessBeforeSession = nil
+    }
+
+    private func applyFaceDownState(_ faceDown: Bool) {
+        guard faceDown != isFaceDown else { return }
+
+        if faceDown {
+            guard isNightSessionActive else { return }
+            brightnessBeforeFaceDown = UIScreen.main.brightness
+            isFaceDown = true
+            UIScreen.main.brightness = 0
+            return
+        }
+
+        isFaceDown = false
+        if let brightnessBeforeFaceDown {
+            UIScreen.main.brightness = brightnessBeforeFaceDown
+            displayBrightness = Double(brightnessBeforeFaceDown)
+        }
+        self.brightnessBeforeFaceDown = nil
+        if isNightSessionActive {
+            refreshEnvironmentDisplayMode(performTransition: true)
+        }
     }
 
     func toggleManualDimmingHold() {

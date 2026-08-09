@@ -19,6 +19,25 @@ struct STandBrandIcon: View {
     }
 }
 
+enum DatePanelMetrics {
+    static func width(isPortrait: Bool) -> CGFloat {
+        isPortrait ? 200 : 240
+    }
+}
+
+private struct StandDatePanel: View {
+    let date: Date
+    let isPortrait: Bool
+
+    var body: some View {
+        Text(date, format: .dateTime.month().day().weekday(.wide))
+            .font(.system(.subheadline, design: .rounded, weight: .medium))
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .frame(width: DatePanelMetrics.width(isPortrait: isPortrait))
+    }
+}
+
 struct HoldDurationAdjustment {
     static func value(startingAt startingValue: Double, translation: CGFloat) -> Double {
         let rawValue = startingValue + Double(translation / 300) * 295
@@ -401,6 +420,14 @@ struct RootView: View {
                     }
                     .transition(.opacity)
                     .zIndex(20)
+                }
+
+                if model.isFaceDown {
+                    Color.black
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                        .zIndex(100)
                 }
             }
             .onAppear {
@@ -1322,8 +1349,7 @@ private struct DashboardCanvas: View {
                 )
                 .panelTransform(layout.clock, canvasSize: canvasSize)
 
-                Text(context.date, format: .dateTime.month().day().weekday(.wide))
-                    .font(.system(.subheadline, design: .rounded, weight: .medium))
+                StandDatePanel(date: context.date, isPortrait: isPortrait)
                     .panelTransform(layout.date, canvasSize: canvasSize)
 
                 Text(statusText)
@@ -1908,8 +1934,7 @@ private struct ScreenEditorView: View {
                     transform: $layout.date,
                     canvasSize: proxy.size
                 ) {
-                    Text(Date.now, format: .dateTime.month().day().weekday(.wide))
-                        .font(.subheadline.weight(.medium))
+                    StandDatePanel(date: .now, isPortrait: isPortrait)
                         .padding(.horizontal, 12).padding(.vertical, 8)
                         .background(.white.opacity(0.08), in: Capsule())
                 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import WidgetKit
 
 final class OrientationController {
     static let shared = OrientationController()
@@ -55,6 +56,20 @@ final class OrientationController {
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
+    private static let circularGlyphReloadKey = "didReloadCircularWidgetGlyphV3"
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        let defaults = UserDefaults.standard
+        if !defaults.bool(forKey: Self.circularGlyphReloadKey) {
+            WidgetCenter.shared.reloadTimelines(ofKind: "com.armsone.stand.launch.v2")
+            defaults.set(true, forKey: Self.circularGlyphReloadKey)
+        }
+        return true
+    }
+
     func application(
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?

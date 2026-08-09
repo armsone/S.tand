@@ -39,7 +39,6 @@ struct STandLaunchWidgetView: View {
                 .renderingMode(.template)
                 .scaledToFit()
                 .foregroundStyle(.white)
-                .padding(3)
                 .widgetAccentable()
                 .unredacted()
         }

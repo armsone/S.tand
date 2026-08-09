@@ -1154,6 +1154,14 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
+    func testFaceDownPostureUsesHysteresisToAvoidFlicker() {
+        XCTAssertFalse(DevicePosturePolicy.isFaceDown(gravityZ: 0.81, currentlyFaceDown: false))
+        XCTAssertTrue(DevicePosturePolicy.isFaceDown(gravityZ: 0.82, currentlyFaceDown: false))
+        XCTAssertTrue(DevicePosturePolicy.isFaceDown(gravityZ: 0.7, currentlyFaceDown: true))
+        XCTAssertFalse(DevicePosturePolicy.isFaceDown(gravityZ: 0.62, currentlyFaceDown: true))
+        XCTAssertFalse(DevicePosturePolicy.isFaceDown(gravityZ: -1, currentlyFaceDown: false))
+    }
+
     func testScreenTapBrightensWhileFadingAndDimsWhileHolding() {
         XCTAssertEqual(ScreenTapPolicy.action(for: .fading), .brighten)
         XCTAssertEqual(ScreenTapPolicy.action(for: .off), .brighten)
