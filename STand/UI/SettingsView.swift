@@ -887,14 +887,7 @@ private struct SettingsHero: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(accent.opacity(0.16))
-                Image(systemName: "lamp.table.fill")
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(accent)
-            }
-            .frame(width: 58, height: 58)
+            STandBrandIcon(size: 58)
 
             VStack(alignment: .leading, spacing: 5) {
                 Text("S.tand")

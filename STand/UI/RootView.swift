@@ -2,6 +2,23 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+struct STandBrandIcon: View {
+    let size: CGFloat
+
+    var body: some View {
+        Image("STandBrandIcon")
+            .resizable()
+            .scaledToFill()
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.23, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: size * 0.23, style: .continuous)
+                    .stroke(.white.opacity(0.12), lineWidth: 0.7)
+            }
+            .accessibilityHidden(true)
+    }
+}
+
 struct HoldDurationAdjustment {
     static func value(startingAt startingValue: Double, translation: CGFloat) -> Double {
         let rawValue = startingValue + Double(translation / 300) * 295
@@ -472,10 +489,15 @@ struct RootView: View {
     }
 
     private func topBar(isPortrait: Bool) -> some View {
-        HStack(spacing: 16) {
-            Text("S.tand")
-                .font(.system(.headline, design: .rounded, weight: .semibold))
-                .tracking(0.8)
+        HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                STandBrandIcon(size: 28)
+
+                Text("S.tand")
+                    .font(.system(.headline, design: .rounded, weight: .semibold))
+                    .tracking(0.8)
+            }
+            .accessibilityElement(children: .combine)
 
             if model.isNightSessionActive {
                 AudioStatusPill(

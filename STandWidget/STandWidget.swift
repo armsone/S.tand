@@ -33,7 +33,7 @@ struct STandLaunchWidgetView: View {
 
             // Lock Screen accessory widgets are rendered in vibrant mode.
             // This dedicated asset has a transparent canvas and preserves the
-            // app icon's lamp/waveform as a WidgetKit-safe template glyph.
+            // app icon's desk-object silhouette as a WidgetKit-safe template glyph.
             Image("STandWidgetGlyph")
                 .resizable()
                 .renderingMode(.template)
