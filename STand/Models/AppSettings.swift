@@ -127,6 +127,22 @@ enum StandDisplayTheme: String, Codable, CaseIterable {
     }
 }
 
+enum StandModePreference: String, Codable, CaseIterable, Identifiable {
+    case automatic
+    case object
+    case mate
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .automatic: "자동"
+        case .object: "오브제 유지"
+        case .mate: "매이트 유지"
+        }
+    }
+}
+
 struct PanelTransform: Codable, Equatable {
     var x: Double
     var y: Double
@@ -239,19 +255,27 @@ struct StandScreenLayout: Codable, Equatable {
         status: .init(x: 0, y: 0.15),
         brightnessRule: .init(x: 0, y: 0.21),
         battery: .init(x: 0, y: 0.20698371893744649),
-        weatherGroupIDs: [1, 1, 1]
+        weatherGroupIDs: [1, 1, 1],
+        controlOrder: [
+            .flashlight, .brightness, .stopDetection, .orientation,
+            .recordings, .aiShot, .settings
+        ]
     )
 
     static let landscape = StandScreenLayout(
-        clock: .init(x: 0, y: 0.044502617801047181, scale: 1.2810187063251741),
-        weatherIcon: .init(x: 0, y: -0.26890924956369971, scale: 0.68640335461830571),
-        weatherTemperature: .init(x: 0, y: -0.26890924956369971, scale: 0.68640335461830571),
-        weatherCondition: .init(x: 0, y: -0.26890924956369971, scale: 0.68640335461830571),
-        date: .init(x: -0.17822222222222225, y: -0.10184991273996505),
-        status: .init(x: 0, y: 0.36518324607329838),
+        clock: .init(x: 0, y: 0.07155322862129146, scale: 1.2810187063251741),
+        weatherIcon: .init(x: 0, y: -0.25582024432809763, scale: 0.68640335461830571),
+        weatherTemperature: .init(x: 0, y: -0.25582024432809763, scale: 0.68640335461830571),
+        weatherCondition: .init(x: 0, y: -0.25582024432809763, scale: 0.68640335461830571),
+        date: .init(x: -0.17600000000000007, y: -0.08265270506108202),
+        status: .init(x: 0, y: 0.4646596858638743),
         brightnessRule: .init(x: 0, y: 0.32),
         battery: .init(x: 0, y: 0.27773123909249542),
-        weatherGroupIDs: [1, 1, 1]
+        weatherGroupIDs: [1, 1, 1],
+        controlOrder: [
+            .flashlight, .stopDetection, .orientation, .brightness,
+            .recordings, .aiShot, .settings
+        ]
     )
 }
 
@@ -276,6 +300,8 @@ struct AppSettings: Codable, Equatable {
     var torchIntensity = 0.25
     var wakeOnSleepSound = false
     var multiStimulusWakeEnabled = true
+    var modePreference = StandModePreference.automatic
+    var cameraAmbientSensingEnabled = false
 
     static let recommended = AppSettings()
 
@@ -299,7 +325,9 @@ struct AppSettings: Codable, Equatable {
         torchEnabled: Bool = true,
         torchIntensity: Double = 0.25,
         wakeOnSleepSound: Bool = false,
-        multiStimulusWakeEnabled: Bool = true
+        multiStimulusWakeEnabled: Bool = true,
+        modePreference: StandModePreference = .automatic,
+        cameraAmbientSensingEnabled: Bool = false
     ) {
         self.lampIntensity = lampIntensity
         self.silhouetteIntensity = silhouetteIntensity
@@ -321,6 +349,8 @@ struct AppSettings: Codable, Equatable {
         self.torchIntensity = torchIntensity
         self.wakeOnSleepSound = wakeOnSleepSound
         self.multiStimulusWakeEnabled = multiStimulusWakeEnabled
+        self.modePreference = modePreference
+        self.cameraAmbientSensingEnabled = cameraAmbientSensingEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -344,6 +374,8 @@ struct AppSettings: Codable, Equatable {
         case torchIntensity
         case wakeOnSleepSound
         case multiStimulusWakeEnabled
+        case modePreference
+        case cameraAmbientSensingEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -407,6 +439,14 @@ struct AppSettings: Codable, Equatable {
             Bool.self,
             forKey: .multiStimulusWakeEnabled
         ) ?? true
+        modePreference = try container.decodeIfPresent(
+            StandModePreference.self,
+            forKey: .modePreference
+        ) ?? .automatic
+        cameraAmbientSensingEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .cameraAmbientSensingEnabled
+        ) ?? false
     }
 }
 

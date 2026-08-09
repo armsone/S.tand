@@ -13,6 +13,7 @@ struct RecordingsView: View {
     @State private var confirmsMergeAndDelete = false
     @State private var selectedClipURLs: Set<URL> = []
     @State private var expandedSessionIDs: Set<String> = []
+    @State private var showsSelectionTools = false
     @State private var showsMergedRecordings = false
     @State private var isMerging = false
     @State private var mergeErrorMessage: String?
@@ -37,7 +38,7 @@ struct RecordingsView: View {
                     ContentUnavailableView(
                         "저장된 수면 소리가 없습니다",
                         systemImage: "waveform.badge.mic",
-                        description: Text("잠자기 모드에서 코골이와 잠꼬대 후보가 감지되면 필요한 구간만 저장합니다.")
+                        description: Text("매이트 모드에서 코골이와 잠꼬대 후보가 감지되면 필요한 구간만 저장합니다.")
                     )
                     .foregroundStyle(.white.opacity(0.82))
                 } else {
@@ -100,7 +101,7 @@ struct RecordingsView: View {
             }
             .navigationTitle("수면 소리")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.black.opacity(0.84), for: .navigationBar)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
@@ -215,7 +216,7 @@ struct RecordingsView: View {
             .frame(width: 54, height: 54)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("나의 수면 기록")
+                Text("기록 요약")
                     .font(.title3.weight(.bold))
                 Text("잠자리 \(library.recordingSessions.count)회 · 원본 \(library.mergeableClips.count)개")
                     .font(.subheadline)
@@ -238,96 +239,115 @@ struct RecordingsView: View {
     }
 
     private var todayMergeCard: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 5) {
-                Label("오늘 녹음", systemImage: "calendar")
-                    .font(.headline)
-                    .foregroundStyle(.white.opacity(0.9))
-                Text("\(todayClips.count)개 · \(todayClips.reduce(0) { $0 + $1.duration }.durationText)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.52))
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) {
+                todaySummary
+                Spacer(minLength: 8)
+                todayMergeButton
             }
-
-            Spacer(minLength: 8)
-
-            Button(action: mergeTodayRecordings) {
-                Group {
-                    if isMerging {
-                        ProgressView()
-                    } else {
-                        Label("오늘 소리 한데 묶기", systemImage: "waveform.path.badge.plus")
-                            .lineLimit(2)
-                            .multilineTextAlignment(.center)
-                    }
-                }
-                .font(.subheadline.weight(.semibold))
-                .frame(minWidth: 132, minHeight: 46)
-                .padding(.horizontal, 8)
-                .background(accent.opacity(todayClips.count >= 2 ? 0.18 : 0.07), in: RoundedRectangle(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 12) {
+                todaySummary
+                todayMergeButton
             }
-            .buttonStyle(.plain)
-            .disabled(playbackDisabled || isMerging || todayClips.count < 2)
-            .accessibilityHint("오늘 녹음된 원본을 시간순으로 합치고 원본은 그대로 보관합니다")
         }
         .padding(16)
         .background { RecordingPanelSurface(accent: accent, cornerRadius: 22) }
     }
 
+    private var todaySummary: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label("오늘", systemImage: "calendar")
+                .font(.headline)
+            Text("\(todayClips.count)개 · \(todayClips.reduce(0) { $0 + $1.duration }.durationText)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.white.opacity(0.68))
+        }
+    }
+
+    private var todayMergeButton: some View {
+        Button(action: mergeTodayRecordings) {
+            Group {
+                if isMerging {
+                    ProgressView()
+                } else {
+                    Label("오늘 소리 합치기", systemImage: "waveform.path.badge.plus")
+                }
+            }
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil, minHeight: 46)
+            .padding(.horizontal, 14)
+            .background(accent.opacity(todayClips.count >= 2 ? 0.24 : 0.09), in: RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .disabled(playbackDisabled || isMerging || todayClips.count < 2)
+        .opacity(playbackDisabled || isMerging || todayClips.count < 2 ? 0.46 : 1)
+        .accessibilityHint("오늘 원본을 시간순으로 합치며 원본은 그대로 둡니다")
+    }
+
     private var selectionCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("녹음 선택", systemImage: "checkmark.square")
-                    .font(.headline)
-                Spacer()
-                Text("\(selectedClipURLs.count)개 선택")
-                    .font(.caption.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(selectedClipURLs.isEmpty ? .white.opacity(0.42) : accent)
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) { showsSelectionTools.toggle() }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.square.fill")
+                        .font(.title3)
+                        .foregroundStyle(accent)
+                        .frame(width: 42, height: 42)
+                        .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("녹음 고르기")
+                            .font(.headline)
+                        Text(selectedClipURLs.isEmpty ? "합치거나 지울 소리를 선택합니다" : "\(selectedClipURLs.count)개 선택됨")
+                            .font(.caption)
+                            .foregroundStyle(selectedClipURLs.isEmpty ? .white.opacity(0.66) : accent)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.bold))
+                        .rotationEffect(.degrees(showsSelectionTools ? 180 : 0))
+                        .foregroundStyle(.white.opacity(0.64))
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
 
-            LazyVGrid(
-                columns: [
-                    GridItem(
-                        .adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 132 : 96),
-                        spacing: 8
-                    )
-                ],
-                spacing: 8
-            ) {
-                RecordingActionTile(title: "전체 선택", systemImage: "checkmark.square.fill", accent: accent) {
-                    selectedClipURLs = RecordingSelectionPolicy.all(in: library.mergeableClips)
-                }
-                .disabled(isMerging)
-                RecordingActionTile(title: "오늘 선택", systemImage: "calendar.badge.checkmark", accent: accent) {
-                    selectedClipURLs = RecordingSelectionPolicy.today(in: library.mergeableClips)
-                }
-                .disabled(isMerging || todayClips.isEmpty)
-                RecordingActionTile(title: "선택 해제", systemImage: "xmark.square", accent: accent) {
-                    selectedClipURLs.removeAll()
-                }
-                .disabled(isMerging || selectedClipURLs.isEmpty)
-
-                RecordingActionTile(title: "합치기", systemImage: "waveform.path.badge.plus", accent: accent) {
-                    mergeSelectedRecordings(deleteSources: false)
-                }
-                .disabled(playbackDisabled || isMerging || selectedClips.count < 2)
-                RecordingActionTile(title: "합치고 지우기", systemImage: "waveform.path.badge.minus", accent: accent) {
-                    confirmsMergeAndDelete = true
-                }
-                .disabled(playbackDisabled || isMerging || selectedClips.count < 2)
-                RecordingActionTile(
-                    title: "선택 삭제",
-                    systemImage: "trash",
-                    accent: accent,
-                    isDestructive: true
+            if showsSelectionTools {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 140 : 108), spacing: 8)],
+                    spacing: 8
                 ) {
-                    confirmsDeleteSelected = true
+                    RecordingActionTile(title: "모두 고르기", systemImage: "checkmark.square.fill", accent: accent) {
+                        selectedClipURLs = RecordingSelectionPolicy.all(in: library.mergeableClips)
+                    }
+                    .disabled(isMerging)
+                    RecordingActionTile(title: "오늘만 고르기", systemImage: "calendar.badge.checkmark", accent: accent) {
+                        selectedClipURLs = RecordingSelectionPolicy.today(in: library.mergeableClips)
+                    }
+                    .disabled(isMerging || todayClips.isEmpty)
+                    RecordingActionTile(title: "선택 풀기", systemImage: "xmark.square", accent: accent) {
+                        selectedClipURLs.removeAll()
+                    }
+                    .disabled(isMerging || selectedClipURLs.isEmpty)
                 }
-                .disabled(isMerging || selectedClips.isEmpty)
-            }
 
-            Text("합치기는 시간순으로 0.5초 간격을 두며, 기본적으로 원본을 보관합니다.")
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.42))
+                Text("소리를 고르면 화면 아래에서 합치거나 삭제할 수 있습니다.")
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.68))
+
+                Button {
+                    confirmsMergeAndDelete = true
+                } label: {
+                    Label("합친 뒤 원본 지우기", systemImage: "waveform.path.badge.minus")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.red.opacity(0.86))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 13))
+                }
+                .buttonStyle(.plain)
+                .disabled(playbackDisabled || isMerging || selectedClips.count < 2)
+                .opacity(playbackDisabled || isMerging || selectedClips.count < 2 ? 0.4 : 1)
+            }
         }
         .padding(16)
         .background { RecordingPanelSurface(accent: accent, cornerRadius: 22) }
@@ -541,17 +561,21 @@ private struct RecordingBackground: View {
 
     var body: some View {
         ZStack {
-            Color.black
-            RadialGradient(
-                colors: [accent.opacity(0.18), accent.opacity(0.035), .clear],
-                center: .topLeading,
-                startRadius: 20,
-                endRadius: 620
-            )
+            Color(red: 0.115, green: 0.085, blue: 0.078)
             LinearGradient(
-                colors: [.clear, Color.black.opacity(0.36)],
-                startPoint: .top,
-                endPoint: .bottom
+                colors: [
+                    accent.opacity(0.18),
+                    Color(red: 0.16, green: 0.115, blue: 0.10),
+                    Color(red: 0.085, green: 0.075, blue: 0.075)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            RadialGradient(
+                colors: [accent.opacity(0.22), accent.opacity(0.045), .clear],
+                center: .topTrailing,
+                startRadius: 20,
+                endRadius: 640
             )
         }
         .ignoresSafeArea()
@@ -566,7 +590,7 @@ private struct RecordingPanelSurface: View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .fill(
                 LinearGradient(
-                    colors: [.white.opacity(0.095), .white.opacity(0.045)],
+                    colors: [.white.opacity(0.18), .white.opacity(0.09)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
@@ -575,7 +599,7 @@ private struct RecordingPanelSurface: View {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(
                         LinearGradient(
-                            colors: [accent.opacity(0.2), .white.opacity(0.07)],
+                            colors: [accent.opacity(0.34), .white.opacity(0.15)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
@@ -591,10 +615,10 @@ private struct RecordingNoticeCard: View {
     var body: some View {
         Label(text, systemImage: "info.circle.fill")
             .font(.footnote)
-            .foregroundStyle(.white.opacity(0.58))
+            .foregroundStyle(.white.opacity(0.74))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
-            .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 16))
+            .background(.white.opacity(0.11), in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -646,7 +670,7 @@ private struct RecordingSelectionDock: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
-        .background(.black.opacity(0.92))
+        .background(.ultraThinMaterial)
         .overlay(alignment: .top) {
             Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
         }
@@ -671,9 +695,9 @@ private struct RecordingActionTile: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
             }
-            .foregroundStyle(isDestructive ? Color.red.opacity(0.88) : Color.white.opacity(0.76))
+            .foregroundStyle(isDestructive ? Color.red.opacity(0.92) : Color.white.opacity(0.90))
             .frame(maxWidth: .infinity, minHeight: 54)
-            .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 13))
+            .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
             .opacity(isEnabled ? 1 : 0.34)
         }
         .buttonStyle(.plain)
@@ -696,7 +720,7 @@ private struct SleepSessionTimelineHeader: View {
                         if session.isInferred {
                             Text("시간 추정")
                                 .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.45))
+                                .foregroundStyle(.white.opacity(0.65))
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 3)
                                 .background(.white.opacity(0.07), in: Capsule())
@@ -704,7 +728,7 @@ private struct SleepSessionTimelineHeader: View {
                     }
                     Text("\(timeRangeText) · \(session.clips.count)개 · \(session.totalDuration.durationText)")
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.48))
+                        .foregroundStyle(.white.opacity(0.68))
                 }
 
                 Spacer(minLength: 8)
@@ -721,7 +745,7 @@ private struct SleepSessionTimelineHeader: View {
                 Image(systemName: "chevron.down")
                     .font(.caption.weight(.bold))
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
-                    .foregroundStyle(.white.opacity(0.48))
+                    .foregroundStyle(.white.opacity(0.64))
             }
 
             SessionTimelineBar(session: session, accent: accent)
@@ -806,7 +830,7 @@ private struct SessionTimelineBar: View {
                 Text(session.endedAt.formatted(date: .omitted, time: .shortened))
             }
             .font(.system(size: 9, weight: .medium, design: .monospaced))
-            .foregroundStyle(.white.opacity(0.34))
+            .foregroundStyle(.white.opacity(0.56))
         }
     }
 
@@ -848,7 +872,7 @@ private struct RecordingRow: View {
                 Button(action: toggleSelection) {
                     Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                         .font(.title3)
-                        .foregroundStyle(isSelected ? accent : .white.opacity(0.38))
+                    .foregroundStyle(isSelected ? accent : .white.opacity(0.58))
                         .frame(width: 40, height: 44)
                 }
                 .buttonStyle(.plain)
@@ -884,7 +908,7 @@ private struct RecordingRow: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.headline)
-                    .foregroundStyle(.white.opacity(0.52))
+                    .foregroundStyle(.white.opacity(0.70))
                     .frame(width: 42, height: 44)
             }
             .accessibilityLabel("녹음 작업")
@@ -893,7 +917,7 @@ private struct RecordingRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background(
-            isActive ? accent.opacity(0.105) : .white.opacity(0.035),
+            isActive ? accent.opacity(0.18) : .white.opacity(0.08),
             in: RoundedRectangle(cornerRadius: 15)
         )
     }
@@ -902,14 +926,14 @@ private struct RecordingRow: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(rowTitle)
                 .font(.body.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.84))
+                .foregroundStyle(.white.opacity(0.94))
                 .lineLimit(1)
             HStack(spacing: 6) {
                 Text(clip.duration.durationText)
                 if clip.isMerged { Text("합본") }
             }
             .font(.caption.monospacedDigit())
-            .foregroundStyle(.white.opacity(0.42))
+            .foregroundStyle(.white.opacity(0.64))
         }
     }
 

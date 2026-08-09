@@ -69,7 +69,7 @@ struct SettingsView: View {
             }
             .navigationTitle("설정")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.black.opacity(0.84), for: .navigationBar)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
@@ -114,10 +114,27 @@ struct SettingsView: View {
     private var quickControls: some View {
         StandSettingsCard(
             title: "바로 제어",
-            subtitle: "홈으로 돌아가지 않고 지금 상태를 바꿉니다",
+            subtitle: "자주 쓰는 기능을 바로 실행합니다",
             systemImage: "switch.2",
             accent: accent
         ) {
+            VStack(alignment: .leading, spacing: 8) {
+                Picker(
+                    "S.tand 모드",
+                    selection: Binding(
+                        get: { store.value.modePreference },
+                        set: { model.setModePreference($0) }
+                    )
+                ) {
+                    ForEach(StandModePreference.allCases) { preference in
+                        Text(preference.title).tag(preference)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+            .padding(12)
+            .background(.white.opacity(0.095), in: RoundedRectangle(cornerRadius: 15))
+
             LazyVGrid(
                 columns: Array(
                     repeating: GridItem(.flexible(), spacing: 8),
@@ -126,8 +143,8 @@ struct SettingsView: View {
                 spacing: 8
             ) {
                 SettingsActionTile(
-                    title: runtime.isNightSessionActive ? "감지 종료" : "감지 시작",
-                    status: runtime.isNightSessionActive ? "작동 중" : "멈춤",
+                    title: runtime.isNightSessionActive ? "자동 돌봄 끄기" : "자동 돌봄 시작",
+                    status: runtime.isNightSessionActive ? model.experienceMode.title : "꺼짐",
                     systemImage: runtime.isNightSessionActive ? "stop.circle.fill" : "moon.stars.fill",
                     isActive: runtime.isNightSessionActive,
                     accent: accent
@@ -150,10 +167,10 @@ struct SettingsView: View {
                 }
 
                 SettingsActionTile(
-                    title: "플래시 연동",
+                    title: "플래시",
                     status: store.value.torchEnabled
-                        ? "터치·뒤척임 100%"
-                        : "터치 0% · 뒤척임 10%",
+                        ? "강하게"
+                        : "은은하게",
                     systemImage: store.value.torchEnabled ? "flashlight.on.fill" : "flashlight.off.fill",
                     isActive: store.value.torchEnabled,
                     accent: accent
@@ -165,8 +182,8 @@ struct SettingsView: View {
                 }
 
                 SettingsActionTile(
-                    title: "화면 편집",
-                    status: "패널·버튼",
+                    title: "화면 꾸미기",
+                    status: "위치·크기",
                     systemImage: "rectangle.3.group",
                     isActive: false,
                     accent: accent,
@@ -186,7 +203,7 @@ struct SettingsView: View {
 
                 SettingsActionTile(
                     title: "AiShot",
-                    status: "앱 열기",
+                    status: "열기",
                     systemImage: "camera.aperture",
                     isActive: false,
                     accent: accent
@@ -201,7 +218,7 @@ struct SettingsView: View {
     private var screenAndClockCard: some View {
         StandSettingsCard(
             title: "화면과 시계",
-            subtitle: "홈의 모양과 조작 방식을 함께 설정합니다",
+            subtitle: "테마, 글꼴과 화면 배치를 바꿉니다",
             systemImage: "clock.fill",
             accent: accent
         ) {
@@ -220,7 +237,7 @@ struct SettingsView: View {
             }
             .pickerStyle(.segmented)
 
-            SettingsFieldLabel("시간 표시")
+            SettingsFieldLabel("시간 형식")
             Picker(
                 "시간 표시",
                 selection: Binding(
@@ -272,7 +289,7 @@ struct SettingsView: View {
 
             HStack(spacing: 8) {
                 SettingsInlineButton(
-                    title: "현재 화면 편집",
+                    title: "화면 배치",
                     systemImage: "move.3d",
                     accent: accent,
                     action: onEditScreen
@@ -282,7 +299,7 @@ struct SettingsView: View {
                     ControlOrderSettingsView(store: store, accent: accent)
                 } label: {
                     SettingsInlineButtonLabel(
-                        title: "버튼 순서",
+                        title: "버튼 배치",
                         systemImage: "arrow.up.arrow.down",
                         accent: accent
                     )
@@ -291,15 +308,15 @@ struct SettingsView: View {
             }
 
             SettingsHelpText(
-                "홈을 길게 눌러도 화면 편집으로 들어갑니다. 편집한 세로·가로 배치와 버튼 순서는 각각 따로 저장됩니다."
+                "홈 화면을 길게 누르면 정보 패널만 편집합니다. 하단 기능 버튼을 길게 누르면 버튼 순서만 바꿀 수 있으며, 세로와 가로는 따로 저장됩니다."
             )
         }
     }
 
     private var lightingCard: some View {
         StandSettingsCard(
-            title: "조명과 잠자기",
-            subtitle: "밝기와 자연스럽게 어두워지는 흐름을 조절합니다",
+            title: "빛과 모드",
+            subtitle: "주변 밝기에 맞춰 오브제와 매이트를 전환합니다",
             systemImage: "sun.and.horizon.fill",
             accent: accent
         ) {
@@ -310,7 +327,7 @@ struct SettingsView: View {
             )
 
             SettingsSliderRow(
-                title: "스탠드 최대 밝기",
+                title: "오브제 최대 밝기",
                 valueText: "\(Int((store.value.lampIntensity * 100).rounded()))%",
                 value: $store.value.lampIntensity,
                 range: 0.15...1,
@@ -318,7 +335,7 @@ struct SettingsView: View {
             )
 
             SettingsSliderRow(
-                title: "잠자기 모드 밝기",
+                title: "매이트 모드 밝기",
                 valueText: silhouettePercentText,
                 value: $store.value.silhouetteIntensity,
                 range: 0.005...0.2,
@@ -333,6 +350,47 @@ struct SettingsView: View {
                 isOn: $store.value.automaticDimmingEnabled,
                 accent: accent
             )
+
+            SettingsToggleRow(
+                title: "카메라 밝기 보조",
+                subtitle: cameraAmbientStatusText,
+                systemImage: runtime.ambientCameraState == .measuring
+                    ? "camera.metering.center.weighted"
+                    : "camera.fill",
+                isOn: Binding(
+                    get: { store.value.cameraAmbientSensingEnabled },
+                    set: { model.setAmbientCameraSensingEnabled($0) }
+                ),
+                accent: accent
+            )
+
+            if store.value.cameraAmbientSensingEnabled {
+                HStack(spacing: 8) {
+                    SettingsInlineButton(
+                        title: runtime.ambientCameraState == .measuring ? "확인 중" : "지금 확인",
+                        systemImage: "camera.metering.center.weighted",
+                        accent: accent
+                    ) {
+                        model.measureAmbientBrightness()
+                    }
+                    .disabled(runtime.ambientCameraState == .measuring)
+
+                    if runtime.ambientCameraState == .denied {
+                        SettingsInlineButton(
+                            title: "카메라 권한",
+                            systemImage: "gear",
+                            accent: accent
+                        ) {
+                            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                            openURL(url)
+                        }
+                    }
+                }
+
+                SettingsHelpText(
+                    "판단이 애매할 때 약 1초 동안 밝기만 계산합니다. 사진과 영상은 저장하거나 전송하지 않습니다."
+                )
+            }
 
             if store.value.automaticDimmingEnabled {
                 SettingsSliderRow(
@@ -355,25 +413,25 @@ struct SettingsView: View {
             }
 
             SettingsToggleRow(
-                title: "뒤척임 플래시 100% 연동",
+                title: "화들짝 플래시",
                 subtitle: store.value.torchEnabled
-                    ? "연동함 · 터치와 뒤척임 모두 100%"
-                    : "연동 해제 · 터치 0%, 뒤척임 10%",
+                    ? "강하게 · 터치와 뒤척임에 100%"
+                    : "은은하게 · 터치는 끄고 뒤척임에 10%",
                 systemImage: "flashlight.on.fill",
                 isOn: $store.value.torchEnabled,
                 accent: accent
             )
 
             SettingsHelpText(
-                "기준선이 현재 밝기보다 왼쪽이면 시간이 지난 뒤 잠자기 모드로 들어가고, 오른쪽이면 스탠드 모드를 유지합니다. 기준 타일을 탭하면 현재 밝기 가까이에서 두 모드를 바꿉니다."
+                "자동은 어두워지면 1분 안에 매이트로 전환합니다. 밝아질 때는 잠깐 켜진 조명인지 조금 더 확인합니다."
             )
         }
     }
 
     private var detectionCard: some View {
         StandSettingsCard(
-            title: "감지와 녹음",
-            subtitle: "마이크 상태와 소리 반응을 한곳에서 확인합니다",
+            title: "소리 감지",
+            subtitle: "매이트에서 뒤척임을 살피고 필요한 소리만 저장합니다",
             systemImage: "waveform.badge.mic",
             accent: accent
         ) {
@@ -388,16 +446,16 @@ struct SettingsView: View {
             }
 
             SettingsToggleRow(
-                title: "소리·움직임에 다시 점등",
-                subtitle: "박수, 핑거스냅, 뒤척임과 기기 움직임",
+                title: "다시 밝혀주기",
+                subtitle: "박수, 핑거스냅, 뒤척임과 기기 움직임에 반응",
                 systemImage: "ear.badge.waveform",
                 isOn: $store.value.multiStimulusWakeEnabled,
                 accent: accent
             )
 
             SettingsToggleRow(
-                title: "소리 구간 자동 저장",
-                subtitle: "소리가 날 때만 부드럽게 나누어 녹음",
+                title: "코골이·잠꼬대 저장",
+                subtitle: "후보 소리가 날 때 필요한 구간만 저장",
                 systemImage: "record.circle",
                 isOn: $store.value.recordingEnabled,
                 accent: accent
@@ -413,12 +471,12 @@ struct SettingsView: View {
                 range: 0...1,
                 step: 0.02,
                 accent: accent,
-                leadingLabel: "큰 소리",
-                trailingLabel: "작은 소리"
+                leadingLabel: "큰 소리만",
+                trailingLabel: "작은 소리도"
             )
 
             SettingsInlineButton(
-                title: library.clips.isEmpty ? "수면 소리 보기" : "수면 소리 \(library.clips.count)개 보기",
+                title: library.clips.isEmpty ? "수면 소리 열기" : "녹음 \(library.clips.count)개 보기",
                 systemImage: "play.circle.fill",
                 accent: accent
             ) {
@@ -427,7 +485,7 @@ struct SettingsView: View {
             }
 
             SettingsHelpText(
-                "민감도가 높을수록 더 작은 소리에도 반응합니다. 녹음은 이 iPhone에서 처리하며 의료 진단 기능이 아닙니다."
+                "민감도를 높이면 더 작은 소리에도 반응합니다. 녹음은 이 iPhone 안에서만 처리됩니다."
             )
         }
     }
@@ -571,7 +629,7 @@ struct SettingsView: View {
     private var lampActionStatus: String {
         guard runtime.isNightSessionActive else { return "감지도 시작" }
         return switch runtime.lampPhase {
-        case .off: "잠자기"
+        case .off: "매이트"
         case .holding: "밝은 화면"
         case .fading: "감광 중"
         }
@@ -615,6 +673,21 @@ struct SettingsView: View {
         case .available: "현재 위치"
         case .locationDenied: "위치 권한 필요"
         case .failed: "날씨를 불러오지 못함"
+        }
+    }
+
+    private var cameraAmbientStatusText: String {
+        switch runtime.ambientCameraState {
+        case .disabled: return "사용 안 함"
+        case .permissionNeeded: return "처음 켤 때 사용 이유를 설명하고 권한을 요청합니다"
+        case .denied: return "카메라 권한이 꺼져 있어 다른 신호만 사용합니다"
+        case .measuring: return "약 1초 동안 평균 밝기만 확인 중"
+        case .ready:
+            if let reading = runtime.lastAmbientBrightnessReading {
+                return "최근 확인 · \(reading.isDark ? "어두움" : "밝음") · 사진 저장 안 함"
+            }
+            return "판단이 애매할 때만 잠깐 확인"
+        case .unavailable: return "이 기기에서는 사용할 수 없어 다른 신호만 사용합니다"
         }
     }
 
@@ -679,6 +752,8 @@ private final class SettingsRuntimeState: ObservableObject {
     @Published private(set) var batteryStatus: DeviceBatteryStatus
     @Published private(set) var batteryProtectionActive: Bool
     @Published private(set) var displayBrightness: Double
+    @Published private(set) var ambientCameraState: AmbientCameraState
+    @Published private(set) var lastAmbientBrightnessReading: AmbientBrightnessReading?
 
     init(model: StandViewModel) {
         isNightSessionActive = model.isNightSessionActive
@@ -687,6 +762,8 @@ private final class SettingsRuntimeState: ObservableObject {
         batteryStatus = model.batteryStatus
         batteryProtectionActive = model.batteryProtectionActive
         displayBrightness = model.displayBrightness
+        ambientCameraState = model.ambientCameraState
+        lastAmbientBrightnessReading = model.lastAmbientBrightnessReading
 
         model.$isNightSessionActive
             .removeDuplicates()
@@ -706,6 +783,12 @@ private final class SettingsRuntimeState: ObservableObject {
         model.$displayBrightness
             .removeDuplicates()
             .assign(to: &$displayBrightness)
+        model.$ambientCameraState
+            .removeDuplicates()
+            .assign(to: &$ambientCameraState)
+        model.$lastAmbientBrightnessReading
+            .removeDuplicates()
+            .assign(to: &$lastAmbientBrightnessReading)
     }
 }
 
@@ -744,7 +827,7 @@ private struct SettingsAudioStatusView: View {
 
     private var statusTitle: String {
         if !isNightSessionActive { return "감지 멈춤" }
-        if environmentDisplayMode == .stand { return "스탠드 모드" }
+        if environmentDisplayMode == .stand { return "오브제 모드" }
         return switch audio.state {
         case .stopped: "마이크 대기"
         case .starting: "마이크 준비 중"
@@ -755,7 +838,7 @@ private struct SettingsAudioStatusView: View {
 
     private var statusDetail: String {
         if isNightSessionActive, environmentDisplayMode == .stand {
-            return "소리와 뒤척임 감시는 잠자기 모드에서만 작동합니다."
+            return "소리와 뒤척임 감시는 매이트 모드에서만 작동합니다."
         }
         switch audio.state {
         case .failed(let message): return message
@@ -775,17 +858,21 @@ private struct StandSettingsBackground: View {
 
     var body: some View {
         ZStack {
-            Color.black
+            Color(red: 0.115, green: 0.085, blue: 0.078)
             LinearGradient(
-                colors: [Color.white.opacity(0.025), Color.clear, Color.black.opacity(0.72)],
-                startPoint: .top,
-                endPoint: .bottom
+                colors: [
+                    accent.opacity(0.20),
+                    Color(red: 0.16, green: 0.115, blue: 0.10),
+                    Color(red: 0.085, green: 0.075, blue: 0.075)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
             RadialGradient(
-                colors: [accent.opacity(0.30), accent.opacity(0.08), .clear],
-                center: .topLeading,
-                startRadius: 4,
-                endRadius: 560
+                colors: [accent.opacity(0.24), accent.opacity(0.06), .clear],
+                center: .topTrailing,
+                startRadius: 20,
+                endRadius: 640
             )
             .blendMode(.screen)
         }
@@ -812,7 +899,7 @@ private struct SettingsHero: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("S.tand")
                     .font(.system(size: 24, weight: .bold, design: .rounded))
-                Text("엄마처럼 조용히 돌보는 잠자리 설정")
+                Text("낮에는 오브제, 밤에는 매이트")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.56))
                     .lineLimit(2)
@@ -822,20 +909,17 @@ private struct SettingsHero: View {
 
             VStack(alignment: .trailing, spacing: 5) {
                 StatusPill(
-                    title: isNightSessionActive ? "감지 중" : "감지 멈춤",
+                    title: isNightSessionActive ? environmentText : "S.tand 멈춤",
                     systemImage: isNightSessionActive ? "waveform" : "waveform.slash",
                     active: isNightSessionActive,
                     accent: accent
                 )
-                Text(environmentText)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.46))
             }
         }
         .padding(16)
         .background(
             LinearGradient(
-                colors: [.white.opacity(0.11), accent.opacity(0.055)],
+                colors: [.white.opacity(0.18), accent.opacity(0.10)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             ),
@@ -843,14 +927,14 @@ private struct SettingsHero: View {
         )
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(.white.opacity(0.10), lineWidth: 1)
+                .stroke(.white.opacity(0.18), lineWidth: 1)
         }
     }
 
     private var environmentText: String {
         switch environmentDisplayMode {
-        case .sleeping: "잠자기 모드"
-        case .stand: "스탠드 모드"
+        case .sleeping: "매이트 모드"
+        case .stand: "오브제 모드"
         }
     }
 }
@@ -908,22 +992,18 @@ private struct StandSettingsCard<Content: View>: View {
                     Text(title)
                         .font(.headline)
                     Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.48))
-                        .lineLimit(2)
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.68))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
             }
             .padding(15)
 
             Rectangle()
-                .fill(Color.clear)
-                .frame(height: 3)
-                .overlay(alignment: .center) {
-                    Rectangle()
-                        .fill(.black.opacity(0.34))
-                        .frame(height: 1)
-                }
+                .fill(.white.opacity(0.10))
+                .frame(height: 1)
+                .padding(.horizontal, 15)
 
             VStack(alignment: .leading, spacing: 14) {
                 content
@@ -933,7 +1013,7 @@ private struct StandSettingsCard<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             LinearGradient(
-                colors: [.white.opacity(0.085), .white.opacity(0.045)],
+                colors: [.white.opacity(0.16), .white.opacity(0.085)],
                 startPoint: .top,
                 endPoint: .bottom
             ),
@@ -941,7 +1021,7 @@ private struct StandSettingsCard<Content: View>: View {
         )
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(.white.opacity(0.09), lineWidth: 1)
+                .stroke(.white.opacity(0.16), lineWidth: 1)
         }
     }
 }
@@ -961,23 +1041,25 @@ private struct SettingsActionTile: View {
                     .font(.system(size: 19, weight: .semibold))
                     .foregroundStyle(isActive ? accent : .white.opacity(0.78))
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-                Text(status)
-                    .font(.system(size: 9.5, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.46))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                if !status.isEmpty {
+                    Text(status)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.64))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                }
             }
             .foregroundStyle(.white.opacity(0.84))
-            .frame(maxWidth: .infinity, minHeight: 78)
+            .frame(maxWidth: .infinity, minHeight: 84)
             .padding(.horizontal, 4)
             .background(
                 LinearGradient(
                     colors: [
-                        isActive ? accent.opacity(0.18) : .white.opacity(0.075),
-                        .white.opacity(0.035)
+                        isActive ? accent.opacity(0.24) : .white.opacity(0.13),
+                        .white.opacity(0.075)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
@@ -986,7 +1068,7 @@ private struct SettingsActionTile: View {
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .stroke(isActive ? accent.opacity(0.30) : .white.opacity(0.08), lineWidth: 1)
+                    .stroke(isActive ? accent.opacity(0.40) : .white.opacity(0.14), lineWidth: 1)
             }
         }
         .buttonStyle(.plain)
@@ -1003,8 +1085,8 @@ private struct SettingsFieldLabel: View {
 
     var body: some View {
         Text(title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.white.opacity(0.54))
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white.opacity(0.76))
             .padding(.top, 1)
     }
 }
@@ -1028,9 +1110,9 @@ private struct SettingsToggleRow: View {
                     Text(title)
                         .font(.subheadline.weight(.semibold))
                     Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.46))
-                        .lineLimit(2)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.64))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -1072,7 +1154,7 @@ private struct SettingsSliderRow: View {
                     Text(trailingLabel ?? "")
                 }
                 .font(.caption2)
-                .foregroundStyle(.white.opacity(0.38))
+                .foregroundStyle(.white.opacity(0.58))
             }
         }
     }
@@ -1096,7 +1178,7 @@ private struct SettingsNavigationRow: View {
             Spacer()
             Text(value)
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.48))
+                .foregroundStyle(.white.opacity(0.66))
                 .lineLimit(1)
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.bold))
@@ -1122,7 +1204,7 @@ private struct SettingsInfoRow: View {
             Spacer()
             Text(value)
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.white.opacity(0.54))
+                .foregroundStyle(.white.opacity(0.68))
                 .multilineTextAlignment(.trailing)
         }
     }
@@ -1135,10 +1217,10 @@ private struct SettingsInlineButtonLabel: View {
 
     var body: some View {
         Label(title, systemImage: systemImage)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.white.opacity(0.82))
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white.opacity(0.92))
             .frame(maxWidth: .infinity, minHeight: 44)
-            .background(accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 13))
+            .background(accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 13))
             .overlay {
                 RoundedRectangle(cornerRadius: 13)
                     .stroke(accent.opacity(0.18), lineWidth: 1)
@@ -1170,7 +1252,7 @@ private struct SettingsHelpText: View {
     var body: some View {
         Text(text)
             .font(.footnote)
-            .foregroundStyle(.white.opacity(0.48))
+            .foregroundStyle(.white.opacity(0.68))
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -1187,13 +1269,13 @@ private struct SettingsBrightnessRuleControl: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("잠자기", systemImage: "moon.fill")
+                Label("매이트", systemImage: "moon.fill")
                     .foregroundStyle(threshold < currentBrightness ? accent : .white.opacity(0.42))
                 Spacer()
                 Text("밝기 기준")
                     .foregroundStyle(.white.opacity(0.48))
                 Spacer()
-                Label("스탠드", systemImage: "sun.max.fill")
+                Label("오브제", systemImage: "sun.max.fill")
                     .foregroundStyle(threshold >= currentBrightness ? accent : .white.opacity(0.42))
             }
             .font(.caption.weight(.semibold))
@@ -1238,7 +1320,7 @@ private struct SettingsBrightnessRuleControl: View {
                 .foregroundStyle(.white.opacity(0.54))
         }
         .padding(12)
-        .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 15))
+        .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 15))
         .contentShape(RoundedRectangle(cornerRadius: 15))
         .coordinateSpace(name: coordinateSpaceName)
         .onPreferenceChange(BrightnessRuleTrackFramePreferenceKey.self) { trackFrame = $0 }
@@ -1246,7 +1328,7 @@ private struct SettingsBrightnessRuleControl: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("밝기 기준")
         .accessibilityValue("현재 \(Int(currentBrightness * 100))퍼센트, 기준 \(Int(threshold * 100))퍼센트, \(modeText)")
-        .accessibilityHint("좌우로 밀어 조절하거나 탭하여 잠자기와 스탠드를 전환합니다")
+        .accessibilityHint("좌우로 밀어 조절하거나 탭하여 매이트와 오브제를 전환합니다")
         .accessibilityAdjustableAction { direction in
             switch direction {
             case .increment: threshold = min(1, threshold + 0.05)
@@ -1257,7 +1339,7 @@ private struct SettingsBrightnessRuleControl: View {
     }
 
     private var modeText: String {
-        threshold < currentBrightness ? "잠자기 모드" : "스탠드 모드"
+        threshold < currentBrightness ? "매이트 모드" : "오브제 모드"
     }
 
     private var interactionGesture: some Gesture {

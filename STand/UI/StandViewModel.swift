@@ -60,6 +60,90 @@ enum EnvironmentDisplayMode: Equatable {
     }
 }
 
+enum StandExperienceMode: String, Equatable {
+    case object
+    case mate
+    case startled
+
+    var title: String {
+        switch self {
+        case .object: "오브제 모드"
+        case .mate: "매이트 모드"
+        case .startled: "화들짝 모드"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .object: "lamp.table.fill"
+        case .mate: "moon.stars.fill"
+        case .startled: "bolt.fill"
+        }
+    }
+}
+
+enum AmbientCameraState: Equatable {
+    case disabled
+    case permissionNeeded
+    case denied
+    case measuring
+    case ready
+    case unavailable
+}
+
+struct AmbientBrightnessReading: Equatable {
+    let value: Double
+    let measuredAt: Date
+    let cameraPosition: AVCaptureDevice.Position
+
+    var isDark: Bool { value < AutomaticModeTransitionPolicy.cameraDarkThreshold }
+}
+
+enum AutomaticModeTransitionPolicy {
+    static let cameraDarkThreshold = 0.16
+    static let objectToMateDelay: TimeInterval = 20
+    static let mateToObjectDelay: TimeInterval = 35
+    static let maximumDecisionDelay: TimeInterval = 60
+
+    static func target(
+        preference: StandModePreference,
+        screenBrightness: Double,
+        threshold: Double,
+        cameraReading: AmbientBrightnessReading?,
+        now: Date = Date()
+    ) -> EnvironmentDisplayMode {
+        switch preference {
+        case .object:
+            return .stand
+        case .mate:
+            return .sleeping
+        case .automatic:
+            if let cameraReading,
+               now.timeIntervalSince(cameraReading.measuredAt) < 90 {
+                return cameraReading.isDark ? .sleeping : .stand
+            }
+            return EnvironmentDisplayMode.resolve(
+                brightness: screenBrightness,
+                threshold: threshold
+            )
+        }
+    }
+
+    static func confirmationDelay(
+        from current: EnvironmentDisplayMode,
+        to target: EnvironmentDisplayMode,
+        hasCameraReading: Bool
+    ) -> TimeInterval {
+        guard current != target else { return 0 }
+        if hasCameraReading { return 4 }
+        return switch (current, target) {
+        case (.stand, .sleeping): objectToMateDelay
+        case (.sleeping, .stand): mateToObjectDelay
+        default: maximumDecisionDelay
+        }
+    }
+}
+
 enum StandAutomaticDimmingPolicy {
     static func shouldFade(
         automaticDimmingEnabled: Bool,
@@ -94,6 +178,7 @@ enum LampTorchLightingPolicy {
         isMovementTriggered: Bool,
         environmentDisplayMode: EnvironmentDisplayMode
     ) -> Double {
+        guard environmentDisplayMode == .sleeping else { return 0 }
         if isMovementTriggered {
             return SleepMovementLightingPolicy.torchLevel(
                 torchEnabled: torchEnabled,
@@ -119,7 +204,14 @@ final class StandViewModel: ObservableObject {
     @Published private(set) var automaticDimmingPaused = false
     @Published private(set) var manualDimmingHoldActive = false
     @Published private(set) var environmentDisplayMode: EnvironmentDisplayMode = .stand
+    @Published private(set) var ambientCameraState: AmbientCameraState = .disabled
+    @Published private(set) var lastAmbientBrightnessReading: AmbientBrightnessReading?
     @Published var controlsVisible = true
+
+    var experienceMode: StandExperienceMode {
+        if isMovementTriggeredLamp, lampPhase != .off { return .startled }
+        return environmentDisplayMode == .stand ? .object : .mate
+    }
 
     var isDisplayDark: Bool {
         isNightSessionActive && lampPhase == .off && !controlsVisible
@@ -133,11 +225,15 @@ final class StandViewModel: ObservableObject {
     private var lampTask: Task<Void, Never>?
     private var movementTorchSyncTask: Task<Void, Never>?
     private var controlsTask: Task<Void, Never>?
+    private var modeTransitionTask: Task<Void, Never>?
+    private var ambientSamplingTask: Task<Void, Never>?
+    private var pendingModeTarget: EnvironmentDisplayMode?
     private var settingsSubscription: AnyCancellable?
     private var screenBrightnessSubscription: AnyCancellable?
     private var batterySubscriptions: Set<AnyCancellable> = []
     private let torch = TorchController()
     private let motionMonitor = WakeMotionMonitor()
+    private let ambientCamera = AmbientCameraBrightnessService()
     private var activeLampMaximumIntensity = 1.0
     private var isMovementTriggeredLamp = false
     private var monitoringPausedForPlayback = false
@@ -183,6 +279,9 @@ final class StandViewModel: ObservableObject {
         }
         orientationPreference = settings.value.orientationPreference
         OrientationController.shared.setPreference(settings.value.orientationPreference)
+        ambientCameraState = settings.value.cameraAmbientSensingEnabled
+            ? ambientCamera.currentState
+            : .disabled
 
         settingsSubscription = settings.$value
             .dropFirst()
@@ -194,8 +293,19 @@ final class StandViewModel: ObservableObject {
                 syncTorch(using: value)
                 refreshEnvironmentDisplayMode(
                     threshold: value.brightnessModeThreshold,
+                    preference: value.modePreference,
                     performTransition: isNightSessionActive
                 )
+                if !value.cameraAmbientSensingEnabled {
+                    ambientCamera.cancel()
+                    ambientSamplingTask?.cancel()
+                    ambientSamplingTask = nil
+                    ambientCameraState = .disabled
+                    lastAmbientBrightnessReading = nil
+                } else if ambientCameraState == .disabled {
+                    ambientCameraState = ambientCamera.currentState
+                    startAmbientSamplingIfNeeded()
+                }
             }
 
         screenBrightnessSubscription = NotificationCenter.default
@@ -224,7 +334,7 @@ final class StandViewModel: ObservableObject {
         batteryProtectionActive = false
         isNightSessionActive = true
         rememberScreenBrightnessIfNeeded()
-        refreshEnvironmentDisplayMode(performTransition: false)
+        refreshEnvironmentDisplayMode(performTransition: true)
         monitoringPausedForPlayback = false
         UIApplication.shared.isIdleTimerDisabled = true
         audio.configure(settings: settings.value)
@@ -233,6 +343,7 @@ final class StandViewModel: ObservableObject {
         controlsTask?.cancel()
         controlsVisible = false
         activateLamp()
+        startAmbientSamplingIfNeeded()
     }
 
     func stopNightSession() {
@@ -245,6 +356,11 @@ final class StandViewModel: ObservableObject {
         turnOffLamp(animated: true)
         controlsTask?.cancel()
         controlsVisible = true
+        modeTransitionTask?.cancel()
+        pendingModeTarget = nil
+        ambientSamplingTask?.cancel()
+        ambientSamplingTask = nil
+        ambientCamera.cancel()
     }
 
     func appDidBecomeActive() {
@@ -265,6 +381,7 @@ final class StandViewModel: ObservableObject {
         controlsTask?.cancel()
         controlsVisible = false
         activateLamp()
+        startAmbientSamplingIfNeeded()
     }
 
     func appWillResignActive() {
@@ -275,6 +392,12 @@ final class StandViewModel: ObservableObject {
         movementTorchSyncTask?.cancel()
         movementTorchSyncTask = nil
         torch.turnOff()
+        ambientCamera.cancel()
+        ambientSamplingTask?.cancel()
+        ambientSamplingTask = nil
+        ambientCameraState = settings.value.cameraAmbientSensingEnabled
+            ? ambientCamera.currentState
+            : .disabled
         guard isNightSessionActive else { return }
         audio.stop()
         motionMonitor.stop()
@@ -447,21 +570,61 @@ final class StandViewModel: ObservableObject {
         monitoringPausedForPlayback = false
         guard isNightSessionActive else { return }
         syncSleepCareMonitoring()
+        startAmbientSamplingIfNeeded()
     }
 
     private func refreshEnvironmentDisplayMode(
         threshold: Double? = nil,
+        preference: StandModePreference? = nil,
         performTransition: Bool
     ) {
-        let newMode = EnvironmentDisplayMode.resolve(
-            brightness: displayBrightness,
-            threshold: threshold ?? settings.value.brightnessModeThreshold
+        let resolvedPreference = preference ?? settings.value.modePreference
+        let newMode = AutomaticModeTransitionPolicy.target(
+            preference: resolvedPreference,
+            screenBrightness: displayBrightness,
+            threshold: threshold ?? settings.value.brightnessModeThreshold,
+            cameraReading: lastAmbientBrightnessReading
         )
+        guard newMode != environmentDisplayMode else {
+            modeTransitionTask?.cancel()
+            modeTransitionTask = nil
+            pendingModeTarget = nil
+            return
+        }
+
+        let isForced = resolvedPreference != .automatic
+        guard performTransition, isNightSessionActive, !isForced else {
+            applyEnvironmentDisplayMode(newMode, performTransition: performTransition)
+            return
+        }
+
+        if settings.value.cameraAmbientSensingEnabled {
+            measureAmbientBrightnessIfNeeded()
+        }
+
+        guard pendingModeTarget != newMode else { return }
+        modeTransitionTask?.cancel()
+        pendingModeTarget = newMode
+        let delay = AutomaticModeTransitionPolicy.confirmationDelay(
+            from: environmentDisplayMode,
+            to: newMode,
+            hasCameraReading: lastAmbientBrightnessReading != nil
+        )
+        modeTransitionTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, !Task.isCancelled, self.pendingModeTarget == newMode else { return }
+            self.pendingModeTarget = nil
+            self.applyEnvironmentDisplayMode(newMode, performTransition: true)
+        }
+    }
+
+    private func applyEnvironmentDisplayMode(
+        _ newMode: EnvironmentDisplayMode,
+        performTransition: Bool
+    ) {
         let changed = newMode != environmentDisplayMode
         environmentDisplayMode = newMode
-        if isNightSessionActive {
-            syncRecordingSessionForDisplayMode()
-        }
+        if isNightSessionActive { syncRecordingSessionForDisplayMode() }
         guard performTransition, changed, isNightSessionActive else { return }
         syncSleepCareMonitoring()
         switch newMode {
@@ -469,6 +632,81 @@ final class StandViewModel: ObservableObject {
             if lampPhase == .holding { activateLamp() }
         case .stand:
             activateLamp()
+        }
+    }
+
+    func setModePreference(_ preference: StandModePreference) {
+        settings.value.modePreference = preference
+        refreshEnvironmentDisplayMode(performTransition: true)
+        startAmbientSamplingIfNeeded()
+    }
+
+    func setAmbientCameraSensingEnabled(_ enabled: Bool) {
+        settings.value.cameraAmbientSensingEnabled = enabled
+        guard enabled else {
+            ambientCamera.cancel()
+            ambientCameraState = .disabled
+            lastAmbientBrightnessReading = nil
+            ambientSamplingTask?.cancel()
+            ambientSamplingTask = nil
+            return
+        }
+        ambientCamera.requestPermission { [weak self] state in
+            guard let self else { return }
+            self.ambientCameraState = state
+            if state == .ready {
+                self.measureAmbientBrightness()
+                self.startAmbientSamplingIfNeeded()
+            }
+        }
+    }
+
+    func measureAmbientBrightness() {
+        guard settings.value.cameraAmbientSensingEnabled else {
+            ambientCameraState = .disabled
+            return
+        }
+        guard experienceMode != .startled else { return }
+        torch.turnOff()
+        ambientCameraState = .measuring
+        ambientCamera.measureOnce { [weak self] result, state in
+            guard let self else { return }
+            self.ambientCameraState = state
+            guard let result else { return }
+            self.lastAmbientBrightnessReading = result
+            self.modeTransitionTask?.cancel()
+            self.pendingModeTarget = nil
+            self.refreshEnvironmentDisplayMode(performTransition: true)
+            self.syncTorch()
+        }
+    }
+
+    private func measureAmbientBrightnessIfNeeded() {
+        if let lastAmbientBrightnessReading,
+           Date().timeIntervalSince(lastAmbientBrightnessReading.measuredAt) < 45 {
+            return
+        }
+        measureAmbientBrightness()
+    }
+
+    private func startAmbientSamplingIfNeeded() {
+        ambientSamplingTask?.cancel()
+        guard isNightSessionActive,
+              settings.value.modePreference == .automatic,
+              settings.value.cameraAmbientSensingEnabled
+        else {
+            ambientSamplingTask = nil
+            return
+        }
+        ambientSamplingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard let self, !Task.isCancelled else { return }
+                if self.ambientCameraState != .measuring,
+                   self.experienceMode != .startled {
+                    self.measureAmbientBrightness()
+                }
+            }
         }
     }
 
@@ -641,6 +879,9 @@ final class StandViewModel: ObservableObject {
         turnOffLamp(animated: true)
         controlsTask?.cancel()
         controlsVisible = true
+        ambientSamplingTask?.cancel()
+        ambientSamplingTask = nil
+        ambientCamera.cancel()
     }
 
     private func scheduleControlsHide() {
@@ -653,6 +894,212 @@ final class StandViewModel: ObservableObject {
                 self?.controlsVisible = false
             }
         }
+    }
+}
+
+private final class AmbientCameraBrightnessService: NSObject,
+    AVCaptureVideoDataOutputSampleBufferDelegate,
+    @unchecked Sendable {
+    private let queue = DispatchQueue(label: "com.armsone.stand.ambient-camera")
+    private var session: AVCaptureSession?
+    private var activeDevice: AVCaptureDevice?
+    private var completion: ((AmbientBrightnessReading?, AmbientCameraState) -> Void)?
+    private var samples: [Double] = []
+    private var receivedFrameCount = 0
+    private var timeoutWorkItem: DispatchWorkItem?
+
+    var currentState: AmbientCameraState {
+        #if targetEnvironment(simulator)
+        return .unavailable
+        #else
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: .ready
+        case .notDetermined: .permissionNeeded
+        case .denied, .restricted: .denied
+        @unknown default: .unavailable
+        }
+        #endif
+    }
+
+    func requestPermission(completion: @escaping (AmbientCameraState) -> Void) {
+        #if targetEnvironment(simulator)
+        completion(.unavailable)
+        #else
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            completion(.ready)
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async { completion(granted ? .ready : .denied) }
+            }
+        case .denied, .restricted:
+            completion(.denied)
+        @unknown default:
+            completion(.unavailable)
+        }
+        #endif
+    }
+
+    func measureOnce(
+        completion: @escaping (AmbientBrightnessReading?, AmbientCameraState) -> Void
+    ) {
+        #if targetEnvironment(simulator)
+        completion(nil, .unavailable)
+        #else
+        guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else {
+            completion(nil, currentState)
+            return
+        }
+        queue.async { [weak self] in
+            self?.startMeasurement(completion: completion)
+        }
+        #endif
+    }
+
+    func cancel() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.finish(reading: nil, state: self.currentState)
+        }
+    }
+
+    private func startMeasurement(
+        completion: @escaping (AmbientBrightnessReading?, AmbientCameraState) -> Void
+    ) {
+        finish(reading: nil, state: currentState, notify: false)
+        self.completion = completion
+        samples = []
+        receivedFrameCount = 0
+
+        let position = preferredCameraPosition()
+        guard let device = AVCaptureDevice.default(
+            .builtInWideAngleCamera,
+            for: .video,
+            position: position
+        ) else {
+            finish(reading: nil, state: .unavailable)
+            return
+        }
+
+        do {
+            let session = AVCaptureSession()
+            session.beginConfiguration()
+            session.sessionPreset = .vga640x480
+            let input = try AVCaptureDeviceInput(device: device)
+            guard session.canAddInput(input) else { throw AmbientCameraError.configuration }
+            session.addInput(input)
+
+            let output = AVCaptureVideoDataOutput()
+            output.alwaysDiscardsLateVideoFrames = true
+            output.videoSettings = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            ]
+            guard session.canAddOutput(output) else { throw AmbientCameraError.configuration }
+            session.addOutput(output)
+            output.setSampleBufferDelegate(self, queue: queue)
+            session.commitConfiguration()
+
+            self.session = session
+            activeDevice = device
+            session.startRunning()
+
+            let timeout = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                if let reading = self.makeReading() {
+                    self.finish(reading: reading, state: .ready)
+                } else {
+                    self.finish(reading: nil, state: .unavailable)
+                }
+            }
+            timeoutWorkItem = timeout
+            queue.asyncAfter(deadline: .now() + 3, execute: timeout)
+        } catch {
+            finish(reading: nil, state: .unavailable)
+        }
+    }
+
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        receivedFrameCount += 1
+        guard receivedFrameCount >= 8,
+              let buffer = CMSampleBufferGetImageBuffer(sampleBuffer)
+        else { return }
+
+        if activeDevice?.isAdjustingExposure == true, receivedFrameCount < 20 { return }
+        samples.append(sceneBrightness(pixelBuffer: buffer))
+        guard samples.count >= 5, let reading = makeReading() else { return }
+        finish(reading: reading, state: .ready)
+    }
+
+    private func preferredCameraPosition() -> AVCaptureDevice.Position {
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        return UIDevice.current.orientation == .faceDown ? .back : .front
+    }
+
+    private func sceneBrightness(pixelBuffer: CVPixelBuffer) -> Double {
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return 0 }
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let pointer = base.assumingMemoryBound(to: UInt8.self)
+        let step = 16
+        var total = 0.0
+        var count = 0
+        for y in stride(from: 0, to: height, by: step) {
+            let row = pointer.advanced(by: y * bytesPerRow)
+            for x in stride(from: 0, to: width, by: step) {
+                let pixel = row.advanced(by: x * 4)
+                let blue = Double(pixel[0])
+                let green = Double(pixel[1])
+                let red = Double(pixel[2])
+                total += (0.0722 * blue + 0.7152 * green + 0.2126 * red) / 255
+                count += 1
+            }
+        }
+        let luminance = count > 0 ? total / Double(count) : 0
+        guard let device = activeDevice else { return luminance }
+        let isoFactor = max(0.5, Double(device.iso) / 100)
+        let exposureSeconds = max(1.0 / 4_000, CMTimeGetSeconds(device.exposureDuration))
+        let exposureFactor = max(0.25, exposureSeconds * 60)
+        let compensation = sqrt(isoFactor * exposureFactor)
+        return min(1, max(0, luminance / max(0.5, compensation)))
+    }
+
+    private func makeReading() -> AmbientBrightnessReading? {
+        guard !samples.isEmpty, let device = activeDevice else { return nil }
+        let sorted = samples.sorted()
+        return AmbientBrightnessReading(
+            value: sorted[sorted.count / 2],
+            measuredAt: Date(),
+            cameraPosition: device.position
+        )
+    }
+
+    private func finish(
+        reading: AmbientBrightnessReading?,
+        state: AmbientCameraState,
+        notify: Bool = true
+    ) {
+        timeoutWorkItem?.cancel()
+        timeoutWorkItem = nil
+        session?.stopRunning()
+        session = nil
+        activeDevice = nil
+        samples = []
+        receivedFrameCount = 0
+        let callback = completion
+        completion = nil
+        guard notify, let callback else { return }
+        DispatchQueue.main.async { callback(reading, state) }
+    }
+
+    private enum AmbientCameraError: Error {
+        case configuration
     }
 }
 

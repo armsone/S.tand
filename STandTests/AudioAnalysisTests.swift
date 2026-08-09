@@ -78,6 +78,110 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(settings.portraitLayout, .portrait)
         XCTAssertEqual(settings.landscapeLayout, .landscape)
         XCTAssertEqual(settings.brightnessModeThreshold, 0.35)
+        XCTAssertEqual(settings.modePreference, .automatic)
+        XCTAssertFalse(settings.cameraAmbientSensingEnabled)
+    }
+
+    func testNewExperienceModeNamesMatchProductLanguage() {
+        XCTAssertEqual(StandExperienceMode.object.title, "오브제 모드")
+        XCTAssertEqual(StandExperienceMode.mate.title, "매이트 모드")
+        XCTAssertEqual(StandExperienceMode.startled.title, "화들짝 모드")
+        XCTAssertEqual(StandModePreference.object.title, "오브제 유지")
+        XCTAssertEqual(StandModePreference.mate.title, "매이트 유지")
+    }
+
+    func testForcedModesIgnoreBrightnessSignals() {
+        XCTAssertEqual(
+            AutomaticModeTransitionPolicy.target(
+                preference: .object,
+                screenBrightness: 1,
+                threshold: 0,
+                cameraReading: nil
+            ),
+            .stand
+        )
+        XCTAssertEqual(
+            AutomaticModeTransitionPolicy.target(
+                preference: .mate,
+                screenBrightness: 0,
+                threshold: 1,
+                cameraReading: nil
+            ),
+            .sleeping
+        )
+    }
+
+    func testFreshCameraReadingOverridesAmbiguousScreenProxy() {
+        let now = Date(timeIntervalSinceReferenceDate: 10_000)
+        let dark = AmbientBrightnessReading(
+            value: 0.05,
+            measuredAt: now.addingTimeInterval(-10),
+            cameraPosition: .front
+        )
+        XCTAssertEqual(
+            AutomaticModeTransitionPolicy.target(
+                preference: .automatic,
+                screenBrightness: 0.1,
+                threshold: 0.9,
+                cameraReading: dark,
+                now: now
+            ),
+            .sleeping
+        )
+
+        let stale = AmbientBrightnessReading(
+            value: 0.05,
+            measuredAt: now.addingTimeInterval(-91),
+            cameraPosition: .back
+        )
+        XCTAssertEqual(
+            AutomaticModeTransitionPolicy.target(
+                preference: .automatic,
+                screenBrightness: 0.1,
+                threshold: 0.9,
+                cameraReading: stale,
+                now: now
+            ),
+            .stand
+        )
+    }
+
+    func testAutomaticModeAlwaysDecidesWithinOneMinute() {
+        XCTAssertLessThanOrEqual(
+            AutomaticModeTransitionPolicy.confirmationDelay(
+                from: .stand,
+                to: .sleeping,
+                hasCameraReading: false
+            ),
+            60
+        )
+        XCTAssertLessThanOrEqual(
+            AutomaticModeTransitionPolicy.confirmationDelay(
+                from: .sleeping,
+                to: .stand,
+                hasCameraReading: false
+            ),
+            60
+        )
+        XCTAssertEqual(
+            AutomaticModeTransitionPolicy.confirmationDelay(
+                from: .stand,
+                to: .sleeping,
+                hasCameraReading: true
+            ),
+            4
+        )
+    }
+
+    func testObjectModeNeverTurnsOnRearTorch() {
+        XCTAssertEqual(
+            LampTorchLightingPolicy.maximumLevel(
+                torchEnabled: true,
+                isMovementTriggered: false,
+                environmentDisplayMode: .stand
+            ),
+            0
+        )
     }
 
     func testRecommendedAndLegacyClockFontUseFifthTenadaChoice() {
@@ -103,30 +207,38 @@ final class AudioAnalysisTests: XCTestCase {
             portrait.battery,
             PanelTransform(x: 0, y: 0.20698371893744649, scale: 1)
         )
+        XCTAssertEqual(
+            portrait.controlOrder,
+            [.flashlight, .brightness, .stopDetection, .orientation, .recordings, .aiShot, .settings]
+        )
 
         let landscape = AppSettings.recommended.landscapeLayout
         XCTAssertEqual(
             landscape.clock,
-            PanelTransform(x: 0, y: 0.044502617801047181, scale: 1.2810187063251741)
+            PanelTransform(x: 0, y: 0.07155322862129146, scale: 1.2810187063251741)
         )
         XCTAssertEqual(
             landscape.weatherIcon,
-            PanelTransform(x: 0, y: -0.26890924956369971, scale: 0.68640335461830571)
+            PanelTransform(x: 0, y: -0.25582024432809763, scale: 0.68640335461830571)
         )
         XCTAssertEqual(landscape.weatherIcon, landscape.weatherTemperature)
         XCTAssertEqual(landscape.weatherIcon, landscape.weatherCondition)
         XCTAssertEqual(landscape.weatherGroupIDs, [1, 1, 1])
         XCTAssertEqual(
             landscape.date,
-            PanelTransform(x: -0.17822222222222225, y: -0.10184991273996505, scale: 1)
+            PanelTransform(x: -0.17600000000000007, y: -0.08265270506108202, scale: 1)
         )
         XCTAssertEqual(
             landscape.status,
-            PanelTransform(x: 0, y: 0.36518324607329838, scale: 1)
+            PanelTransform(x: 0, y: 0.4646596858638743, scale: 1)
         )
         XCTAssertEqual(
             landscape.battery,
             PanelTransform(x: 0, y: 0.27773123909249542, scale: 1)
+        )
+        XCTAssertEqual(
+            landscape.controlOrder,
+            [.flashlight, .stopDetection, .orientation, .brightness, .recordings, .aiShot, .settings]
         )
     }
 
@@ -163,6 +275,35 @@ final class AudioAnalysisTests: XCTestCase {
             decoded.controlOrder,
             [.settings, .flashlight, .brightness, .stopDetection, .orientation, .recordings, .aiShot]
         )
+    }
+
+    func testPanelEditorResetPreservesBottomButtonOrder() {
+        var customized = StandScreenLayout.portrait
+        customized.clock = PanelTransform(x: 0.18, y: -0.12, scale: 1.4)
+        customized.controlOrder = [
+            .settings, .aiShot, .recordings, .orientation,
+            .stopDetection, .brightness, .flashlight
+        ]
+
+        let reset = HomeEditorResetPolicy.panels(in: customized, isPortrait: true)
+
+        XCTAssertEqual(reset.clock, StandScreenLayout.portrait.clock)
+        XCTAssertEqual(reset.weatherGroupIDs, StandScreenLayout.portrait.weatherGroupIDs)
+        XCTAssertEqual(reset.controlOrder, customized.controlOrder)
+    }
+
+    func testButtonEditorResetPreservesScreenPanels() {
+        var customized = StandScreenLayout.landscape
+        customized.clock = PanelTransform(x: -0.16, y: 0.08, scale: 1.25)
+        customized.date = PanelTransform(x: 0.22, y: 0.18, scale: 0.8)
+        customized.controlOrder = Array(StandControlKind.defaultOrder.reversed())
+
+        let reset = HomeEditorResetPolicy.controls(in: customized)
+
+        XCTAssertEqual(reset.clock, customized.clock)
+        XCTAssertEqual(reset.date, customized.date)
+        XCTAssertEqual(reset.weatherGroupIDs, customized.weatherGroupIDs)
+        XCTAssertEqual(reset.controlOrder, StandControlKind.defaultOrder)
     }
 
     func testBottomControlWrappingAndEditorBoundaryUseSameThreeRowPlan() {

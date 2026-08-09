@@ -66,6 +66,25 @@ private enum ScreenAdjustmentAxis {
     case horizontal
 }
 
+enum HomeEditorMode: Equatable {
+    case panels
+    case controls
+}
+
+enum HomeEditorResetPolicy {
+    static func panels(in layout: StandScreenLayout, isPortrait: Bool) -> StandScreenLayout {
+        var reset = isPortrait ? StandScreenLayout.portrait : .landscape
+        reset.controlOrder = layout.controlOrder
+        return reset
+    }
+
+    static func controls(in layout: StandScreenLayout) -> StandScreenLayout {
+        var reset = layout
+        reset.controlOrder = StandControlKind.defaultOrder
+        return reset
+    }
+}
+
 enum StandControlLayoutMetrics {
     static let itemHeight: CGFloat = 60
     static let hiddenControlLabelHeight: CGFloat = 40
@@ -257,6 +276,7 @@ struct RootView: View {
     @State private var clockScaleFeedback: Double?
     @State private var clockScaleFeedbackTask: Task<Void, Never>?
     @State private var isEditingScreen = false
+    @State private var editorMode = HomeEditorMode.panels
     @State private var editingLayout = StandScreenLayout.portrait
     @State private var editingIsPortrait = true
     @State private var currentIsPortrait = true
@@ -327,24 +347,41 @@ struct RootView: View {
                 }
 
                 if isEditingScreen {
-                    ScreenEditorView(
-                        layout: $editingLayout,
-                        isPortrait: editingIsPortrait,
-                        weather: weather,
-                        clockFont: Binding(
-                            get: { settings.value.clockFont },
-                            set: { settings.value.clockFont = $0 }
-                        ),
-                        hourMode: Binding(
-                            get: { settings.value.clockHourMode },
-                            set: { settings.value.clockHourMode = $0 }
-                        ),
-                        batteryText: silhouetteBatteryText,
-                        onReset: {
-                            editingLayout = editingIsPortrait ? .portrait : .landscape
-                        },
-                        onSave: saveScreenLayout
-                    )
+                    Group {
+                        switch editorMode {
+                        case .panels:
+                            ScreenEditorView(
+                                layout: $editingLayout,
+                                isPortrait: editingIsPortrait,
+                                weather: weather,
+                                clockFont: Binding(
+                                    get: { settings.value.clockFont },
+                                    set: { settings.value.clockFont = $0 }
+                                ),
+                                hourMode: Binding(
+                                    get: { settings.value.clockHourMode },
+                                    set: { settings.value.clockHourMode = $0 }
+                                ),
+                                batteryText: silhouetteBatteryText,
+                                onReset: {
+                                    editingLayout = HomeEditorResetPolicy.panels(
+                                        in: editingLayout,
+                                        isPortrait: editingIsPortrait
+                                    )
+                                },
+                                onSave: saveScreenLayout
+                            )
+                        case .controls:
+                            ControlOrderEditorView(
+                                order: $editingLayout.controlOrder,
+                                isPortrait: editingIsPortrait,
+                                onReset: {
+                                    editingLayout = HomeEditorResetPolicy.controls(in: editingLayout)
+                                },
+                                onSave: saveScreenLayout
+                            )
+                        }
+                    }
                     .transition(.opacity)
                     .zIndex(20)
                 }
@@ -377,7 +414,7 @@ struct RootView: View {
             model.resumeMonitoringAfterPlayback()
             if beginsScreenEditingAfterSheetDismiss {
                 beginsScreenEditingAfterSheetDismiss = false
-                enterScreenEditing(isPortrait: currentIsPortrait)
+                enterScreenEditing(isPortrait: currentIsPortrait, mode: .panels)
             }
         }) { sheet in
             switch sheet {
@@ -453,7 +490,7 @@ struct RootView: View {
             if model.isNightSessionActive, !isPortrait {
                 Label(
                     model.environmentDisplayMode == .stand
-                        ? "스탠드 모드 · 감시 멈춤"
+                        ? "오브제 모드 · 조용히 대기"
                         : (audio.isWritingClip ? "수면 소리 저장 중" : "기기에서 소리 분석 중"),
                     systemImage: model.environmentDisplayMode == .stand
                         ? "sun.max.fill"
@@ -484,17 +521,17 @@ struct RootView: View {
                     .font(.system(size: 34, weight: .light))
                     .foregroundStyle(.orange.opacity(0.8))
 
-                Text("오늘 밤도 편안하게")
+                Text("S.tand가 곁에 있을게요")
                     .font(.system(.title2, design: .rounded, weight: .semibold))
 
-                Text("취침을 시작하면 자동 잠금을 막고 박수와 수면 소리를 감지합니다.")
+                Text("시작하면 오브제와 매이트 모드를 오가며 시간·날씨와 잠자리를 돌봅니다.")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.58))
 
                 Button {
                     model.startNightSession()
                 } label: {
-                    Label("취침 시작", systemImage: "bed.double.fill")
+                    Label("S.tand 시작", systemImage: "lamp.table.fill")
                         .font(.headline)
                         .padding(.horizontal, 24)
                         .padding(.vertical, 13)
@@ -543,26 +580,27 @@ struct RootView: View {
     }
 
     private var dashboardStatusText: String {
-        if EnvironmentDisplayMode.resolve(
-            brightness: model.displayBrightness,
-            threshold: settings.value.brightnessModeThreshold
-        ) == .sleeping {
+        if model.experienceMode == .startled {
+            return "현재 상태 · 화들짝 모드"
+        }
+        if model.environmentDisplayMode == .sleeping {
             return switch model.lampPhase {
-            case .off: "현재 상태 · 잠자기 모드"
-            case .holding: "현재 상태 · 잠자기 전환 대기"
-            case .fading: "현재 상태 · 잠자기 감광 중"
+            case .off: "현재 상태 · 매이트 모드"
+            case .holding: "현재 상태 · 매이트 전환 대기"
+            case .fading: "현재 상태 · 매이트 감광 중"
             }
         }
         return switch model.lampPhase {
-        case .off: "현재 상태 · 잠자기 모드"
-        case .holding: "현재 상태 · 스탠드 모드"
-        case .fading: "현재 상태 · 스탠드 감광 중"
+        case .off: "현재 상태 · 매이트 모드"
+        case .holding: "현재 상태 · 오브제 모드"
+        case .fading: "현재 상태 · 오브제 감광 중"
         }
     }
 
-    private func enterScreenEditing(isPortrait: Bool) {
+    private func enterScreenEditing(isPortrait: Bool, mode: HomeEditorMode) {
         editingIsPortrait = isPortrait
         editingLayout = isPortrait ? settings.value.portraitLayout : settings.value.landscapeLayout
+        editorMode = mode
         model.revealControls()
         withAnimation(.easeOut(duration: 0.25)) { isEditingScreen = true }
     }
@@ -660,7 +698,7 @@ struct RootView: View {
                 switch result {
                 case .first(true):
                     guard !isEditingScreen else { return }
-                    enterScreenEditing(isPortrait: currentIsPortrait)
+                    enterScreenEditing(isPortrait: currentIsPortrait, mode: .panels)
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 case .second(let tapResult):
                     switch tapResult {
@@ -839,6 +877,18 @@ struct RootView: View {
                 }
             }
             .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .highPriorityGesture(
+                LongPressGesture(minimumDuration: 0.8, maximumDistance: 12)
+                    .onEnded { completed in
+                        guard completed else { return }
+                        enterScreenEditing(isPortrait: isPortrait, mode: .controls)
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }
+            )
+            .accessibilityAction(named: "버튼 순서 편집") {
+                enterScreenEditing(isPortrait: isPortrait, mode: .controls)
+            }
             .animation(.easeOut(duration: 0.3), value: model.controlsVisible)
         }
     }
@@ -868,17 +918,22 @@ struct RootView: View {
         case .brightness:
             CompactBrightnessRuleControl(
                 currentBrightness: model.displayBrightness,
+                currentMode: model.environmentDisplayMode,
                 width: width,
                 threshold: Binding(
                     get: { settings.value.brightnessModeThreshold },
                     set: { settings.value.brightnessModeThreshold = $0 }
+                ),
+                modePreference: Binding(
+                    get: { settings.value.modePreference },
+                    set: { model.setModePreference($0) }
                 )
             )
         case .stopDetection:
             ControlButton(
-                title: "감지 종료",
+                title: "자동 돌봄 끄기",
                 systemImage: "stop.circle.fill",
-                hint: "소리 감지와 자동 녹음을 종료합니다",
+                hint: "자동 모드 전환과 소리·움직임 감지, 수면 녹음을 종료합니다",
                 width: width
             ) {
                 model.stopNightSession()
@@ -950,6 +1005,14 @@ struct RootView: View {
                     .background(.ultraThinMaterial, in: Capsule())
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
+            if model.ambientCameraState == .measuring {
+                Label("주변 밝기 확인 중 · 이미지는 저장하지 않아요", systemImage: "camera.metering.center.weighted")
+                    .font(.caption.weight(.medium))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
             Spacer()
         }
         .padding(.top, 12)
@@ -958,7 +1021,7 @@ struct RootView: View {
     private var batteryProtectionBanner: some View {
         Label(
             model.batteryStatus.isCharging
-                ? "충전이 연결되었습니다. 취침 시작을 눌러 다시 시작하세요."
+                ? "충전이 연결되었습니다. S.tand 시작을 눌러 다시 시작하세요."
                 : "배터리가 20% 이하라 보호를 위해 감지와 불빛을 중지했습니다.",
             systemImage: model.batteryStatus.isCharging ? "battery.100percent.bolt" : "battery.25percent"
         )
@@ -1554,8 +1617,10 @@ private struct WeatherPieceContent: View {
 
 private struct CompactBrightnessRuleControl: View {
     let currentBrightness: Double
+    let currentMode: EnvironmentDisplayMode
     let width: CGFloat
     @Binding var threshold: Double
+    @Binding var modePreference: StandModePreference
     @State private var trackFrame = CGRect.zero
     @State private var interactionPhase: BrightnessRuleGesturePhase = .undecided
 
@@ -1564,10 +1629,10 @@ private struct CompactBrightnessRuleControl: View {
     var body: some View {
         VStack(spacing: 3) {
             HStack {
-                Label("잠자기", systemImage: "moon.fill")
+                Label("매이트", systemImage: "moon.fill")
                     .foregroundStyle(threshold < currentBrightness ? Color.orange : Color.white.opacity(0.42))
                 Spacer()
-                Label("스탠드", systemImage: "sun.max.fill")
+                Label("오브제", systemImage: "sun.max.fill")
                     .foregroundStyle(threshold >= currentBrightness ? Color.orange : Color.white.opacity(0.42))
             }
             .font(.system(size: StandControlLayoutMetrics.titleFontSize, weight: .semibold))
@@ -1613,7 +1678,7 @@ private struct CompactBrightnessRuleControl: View {
             }
             .frame(height: 20)
 
-            Text("현재 \(Int((currentBrightness * 100).rounded())) · 기준 \(Int((threshold * 100).rounded()))")
+            Text("\(preferenceText) · 현재 \(Int((currentBrightness * 100).rounded())) · 기준 \(Int((threshold * 100).rounded()))")
                 .font(
                     .system(
                         size: StandControlLayoutMetrics.statusFontSize,
@@ -1637,8 +1702,8 @@ private struct CompactBrightnessRuleControl: View {
         .onPreferenceChange(BrightnessRuleTrackFramePreferenceKey.self) { trackFrame = $0 }
         .highPriorityGesture(interactionGesture)
         .opacity(StandControlLayoutMetrics.tileOpacity)
-        .accessibilityLabel("밝기 기준, 현재 \(Int(currentBrightness * 100))퍼센트, 기준 \(Int(threshold * 100))퍼센트")
-        .accessibilityHint("좌우로 밀어 기준을 조절하거나 탭하여 잠자기와 스탠드 모드를 전환합니다")
+        .accessibilityLabel("모드와 밝기 기준, \(preferenceText), 현재 \(Int(currentBrightness * 100))퍼센트, 기준 \(Int(threshold * 100))퍼센트")
+        .accessibilityHint("레일을 좌우로 밀면 자동 기준을 조절하고, 타일을 탭하면 매이트와 오브제 모드를 강제로 전환합니다")
         .accessibilityAdjustableAction { direction in
             switch direction {
             case .increment: threshold = min(1, threshold + 0.05)
@@ -1682,6 +1747,7 @@ private struct CompactBrightnessRuleControl: View {
         }
 
         guard interactionPhase == .draggingTrack else { return }
+        if modePreference != .automatic { modePreference = .automatic }
         threshold = BrightnessThresholdPolicy.value(
             locationX: currentLocation.x - trackFrame.minX,
             width: trackFrame.width
@@ -1703,12 +1769,17 @@ private struct CompactBrightnessRuleControl: View {
 
     private func toggleMode() {
         withAnimation(.easeInOut(duration: 0.24)) {
-            threshold = BrightnessThresholdPolicy.valueAfterTap(
-                currentBrightness: currentBrightness,
-                threshold: threshold
-            )
+            modePreference = currentMode == .stand ? .mate : .object
         }
         UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    private var preferenceText: String {
+        switch modePreference {
+        case .automatic: "자동"
+        case .object: "오브제 고정"
+        case .mate: "매이트 고정"
+        }
     }
 }
 
@@ -1777,9 +1848,6 @@ private struct ScreenEditorView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let bottomHorizontalPadding = StandControlLayoutMetrics.rowSpacing
-            let bottomAvailableWidth = max(0, proxy.size.width - bottomHorizontalPadding * 2)
-
             ZStack {
                 Color.black.opacity(0.32).ignoresSafeArea()
 
@@ -1828,7 +1896,7 @@ private struct ScreenEditorView: View {
                     transform: $layout.status,
                     canvasSize: proxy.size
                 ) {
-                    Text("현재 상태 · 스탠드 모드")
+                    Text("현재 상태 · 오브제 모드")
                         .font(.caption.weight(.medium))
                         .lineLimit(1)
                         .minimumScaleFactor(0.58)
@@ -1863,25 +1931,26 @@ private struct ScreenEditorView: View {
                 } else {
                     VStack {
                         Spacer()
-                        EditorControlOrderView(
-                            order: $layout.controlOrder,
-                            availableWidth: bottomAvailableWidth,
-                            isPortrait: isPortrait
+                        Label(
+                            "패널을 끌어 이동 · 왼쪽 위 손잡이로 크기 조절",
+                            systemImage: "hand.draw.fill"
                         )
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(.ultraThinMaterial, in: Capsule())
                     }
-                    .padding(.horizontal, bottomHorizontalPadding)
-                    .padding(
-                        .bottom,
-                        StandControlLayoutMetrics.bottomPadding(isPortrait: isPortrait)
-                    )
-                    .zIndex(5)
+                    .padding(.bottom, isPortrait ? 24 : 12)
+                    .allowsHitTesting(false)
+                    .zIndex(3)
                 }
 
                 VStack {
                     HStack {
                         Button("초기화", action: onReset)
                         Spacer()
-                        Text(isPortrait ? "세로 화면 편집" : "가로 화면 편집")
+                        Text(isPortrait ? "세로 패널 편집" : "가로 패널 편집")
                             .font(.headline)
                         Spacer()
                         Button("저장", action: onSave)
@@ -2030,12 +2099,74 @@ private struct ScreenEditorView: View {
     }
 }
 
+private struct ControlOrderEditorView: View {
+    @Binding var order: [StandControlKind]
+    let isPortrait: Bool
+    let onReset: () -> Void
+    let onSave: () -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            let horizontalPadding: CGFloat = isPortrait ? 14 : 32
+            let availableWidth = max(0, proxy.size.width - horizontalPadding * 2)
+
+            ZStack {
+                Color.black.opacity(0.32).ignoresSafeArea()
+
+                VStack(spacing: 16) {
+                    Spacer(minLength: StandControlLayoutMetrics.editorToolbarHeight + 36)
+
+                    VStack(spacing: 6) {
+                        Image(systemName: "rectangle.3.group.fill")
+                            .font(.system(size: 25, weight: .semibold))
+                            .foregroundStyle(.orange)
+                        Text("버튼을 길게 눌러 원하는 자리로 옮기세요")
+                            .font(.subheadline.weight(.semibold))
+                        Text("이 순서는 홈 화면의 하단 기능 버튼에 적용됩니다.")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.62))
+                    }
+                    .multilineTextAlignment(.center)
+
+                    EditorControlOrderView(
+                        order: $order,
+                        availableWidth: availableWidth,
+                        isPortrait: isPortrait
+                    )
+
+                    Spacer(minLength: 24)
+                }
+                .padding(.horizontal, horizontalPadding)
+
+                VStack {
+                    HStack {
+                        Button("초기화", action: onReset)
+                        Spacer()
+                        Text(isPortrait ? "세로 버튼 편집" : "가로 버튼 편집")
+                            .font(.headline)
+                        Spacer()
+                        Button("저장", action: onSave)
+                            .fontWeight(.semibold)
+                    }
+                    .padding(.horizontal, 20)
+                    .frame(height: StandControlLayoutMetrics.editorToolbarHeight)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    Spacer()
+                }
+                .padding(isPortrait ? 18 : 14)
+                .zIndex(10)
+            }
+            .foregroundStyle(.white.opacity(0.90))
+        }
+    }
+}
+
 extension StandControlKind {
     var editorTitle: String {
         switch self {
         case .flashlight: "플래시"
         case .brightness: "밝기 기준"
-        case .stopDetection: "감지 종료"
+        case .stopDetection: "자동 돌봄 끄기"
         case .orientation: "화면 방향"
         case .recordings: "수면 소리"
         case .aiShot: "AiShot"
@@ -2573,7 +2704,7 @@ private struct NightClock: View {
             return "현재 상태 · 밝은 환경으로 판단해 자동 감광 보류 중"
         }
         return switch phase {
-        case .off: "잠자기 모드 · 박수 또는 화면 탭을 기다리는 중"
+        case .off: "매이트 모드 · 뒤척임 또는 화면 탭을 기다리는 중"
         case .holding: "현재 상태 · 조명 켜짐 · 탭하면 자연스럽게 어두워짐"
         case .fading: "현재 상태 · 화면 조명이 서서히 어두워지는 중"
         }
@@ -2750,7 +2881,7 @@ private struct AudioStatusPill: View {
 
     private var statusText: String {
         if monitoringSuspended {
-            return compact ? "스탠드" : "감시 멈춤"
+            return compact ? "오브제" : "오브제 모드"
         }
         if audio.microphoneAccess == .denied {
             return compact ? "감지 안 됨" : "소리 감지 안 됨"
