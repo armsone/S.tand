@@ -160,6 +160,17 @@ enum SleepCareMonitoringPolicy {
     ) -> Bool {
         isNightSessionActive && environmentDisplayMode == .sleeping
     }
+
+    static func shouldCaptureAudio(
+        isNightSessionActive: Bool,
+        environmentDisplayMode: EnvironmentDisplayMode,
+        isSuspended: Bool
+    ) -> Bool {
+        shouldMonitor(
+            isNightSessionActive: isNightSessionActive,
+            environmentDisplayMode: environmentDisplayMode
+        ) && !isSuspended
+    }
 }
 
 enum SleepMovementLightingPolicy {
@@ -207,6 +218,7 @@ final class StandViewModel: ObservableObject {
     @Published private(set) var ambientCameraState: AmbientCameraState = .disabled
     @Published private(set) var lastAmbientBrightnessReading: AmbientBrightnessReading?
     @Published private(set) var isFaceDown = false
+    @Published private(set) var sharedInternetRadioDraft: InternetRadioConfiguration?
     @Published var controlsVisible = true
 
     var experienceMode: StandExperienceMode {
@@ -221,6 +233,7 @@ final class StandViewModel: ObservableObject {
     let settings: SettingsStore
     let library: RecordingLibrary
     let audio: AudioCaptureService
+    let radio: InternetRadioPlayer
     let weather: WeatherService
 
     private var lampTask: Task<Void, Never>?
@@ -238,7 +251,13 @@ final class StandViewModel: ObservableObject {
     private let ambientCamera = AmbientCameraBrightnessService()
     private var activeLampMaximumIntensity = 1.0
     private var isMovementTriggeredLamp = false
-    private var monitoringPausedForPlayback = false
+    private enum MonitoringSuspensionReason: Hashable {
+        case recordingPlayback
+        case internetRadio
+    }
+
+    private var monitoringSuspensions: Set<MonitoringSuspensionReason> = []
+    private var appIsActive = true
     private var brightnessBeforeSession: CGFloat?
     private var brightnessBeforeFaceDown: CGFloat?
     private var activeRecordingSessionID: UUID?
@@ -251,6 +270,7 @@ final class StandViewModel: ObservableObject {
         self.library = library
         weather = WeatherService()
         audio = AudioCaptureService(recordingsDirectory: library.directory)
+        radio = InternetRadioPlayer()
 
         audio.onClap = { [weak self] in
             guard let self,
@@ -273,6 +293,11 @@ final class StandViewModel: ObservableObject {
             self.library.add(url)
         }
         audio.configure(settings: settings.value)
+        radio.onPlaybackBecameInactive = { [weak self] in
+            guard let self else { return }
+            self.monitoringSuspensions.remove(.internetRadio)
+            self.syncSleepCareMonitoring()
+        }
         motionMonitor.onMovement = { [weak self] in
             guard let self,
                   self.environmentDisplayMode == .sleeping,
@@ -294,6 +319,9 @@ final class StandViewModel: ObservableObject {
             .sink { [weak self] value in
                 guard let self else { return }
                 audio.configure(settings: value)
+                if value.internetRadio == nil, radio.state.isActive {
+                    stopInternetRadioPlayback()
+                }
                 orientationPreference = value.orientationPreference
                 OrientationController.shared.setPreference(value.orientationPreference)
                 syncTorch(using: value)
@@ -342,7 +370,6 @@ final class StandViewModel: ObservableObject {
         isNightSessionActive = true
         rememberScreenBrightnessIfNeeded()
         refreshEnvironmentDisplayMode(performTransition: true)
-        monitoringPausedForPlayback = false
         UIApplication.shared.isIdleTimerDisabled = true
         audio.configure(settings: settings.value)
         syncSleepCareMonitoring()
@@ -357,6 +384,7 @@ final class StandViewModel: ObservableObject {
     func stopNightSession() {
         guard isNightSessionActive else { return }
         isNightSessionActive = false
+        stopInternetRadioPlayback()
         audio.stop()
         motionMonitor.stop()
         postureMonitor.stop()
@@ -375,6 +403,8 @@ final class StandViewModel: ObservableObject {
     }
 
     func appDidBecomeActive() {
+        appIsActive = true
+        importSharedInternetRadioIfNeeded()
         manualDimmingHoldActive = false
         rememberScreenBrightnessIfNeeded()
         displayBrightness = Double(UIScreen.main.brightness)
@@ -397,6 +427,8 @@ final class StandViewModel: ObservableObject {
     }
 
     func appWillResignActive() {
+        appIsActive = false
+        stopInternetRadioPlayback()
         manualDimmingHoldActive = false
         automaticDimmingPaused = false
         UIApplication.shared.isIdleTimerDisabled = false
@@ -591,17 +623,64 @@ final class StandViewModel: ObservableObject {
     }
 
     func pauseMonitoringForPlayback() {
-        guard isNightSessionActive else { return }
-        monitoringPausedForPlayback = true
+        monitoringSuspensions.insert(.recordingPlayback)
+        stopInternetRadioPlayback()
         audio.stop()
     }
 
     func resumeMonitoringAfterPlayback() {
-        guard monitoringPausedForPlayback else { return }
-        monitoringPausedForPlayback = false
+        guard monitoringSuspensions.remove(.recordingPlayback) != nil else { return }
         guard isNightSessionActive else { return }
         syncSleepCareMonitoring()
         startAmbientSamplingIfNeeded()
+    }
+
+    func toggleInternetRadioPlayback() {
+        if radio.state.isActive {
+            stopInternetRadioPlayback()
+        } else {
+            startInternetRadioPlayback()
+        }
+    }
+
+    func stopInternetRadioPlayback() {
+        radio.stop()
+    }
+
+    func saveInternetRadioConfiguration(_ configuration: InternetRadioConfiguration) {
+        stopInternetRadioPlayback()
+        sharedInternetRadioDraft = nil
+        SharedInternetRadioImportStore().clearPendingConfiguration()
+        var value = settings.value
+        value.internetRadio = configuration
+        settings.value = value
+    }
+
+    func removeInternetRadioConfiguration() {
+        stopInternetRadioPlayback()
+        var value = settings.value
+        value.internetRadio = nil
+        settings.value = value
+    }
+
+    func discardSharedInternetRadioDraft() {
+        sharedInternetRadioDraft = nil
+        SharedInternetRadioImportStore().clearPendingConfiguration()
+    }
+
+    private func importSharedInternetRadioIfNeeded() {
+        guard let configuration = SharedInternetRadioImportStore().pendingConfiguration() else { return }
+        sharedInternetRadioDraft = InternetRadioImportPolicy.draft(
+            shared: configuration,
+            existing: settings.value.internetRadio
+        )
+    }
+
+    private func startInternetRadioPlayback() {
+        guard let configuration = settings.value.internetRadio else { return }
+        monitoringSuspensions.insert(.internetRadio)
+        audio.stop()
+        radio.play(url: configuration.streamURL)
     }
 
     private func refreshEnvironmentDisplayMode(
@@ -764,7 +843,7 @@ final class StandViewModel: ObservableObject {
     }
 
     private func syncSleepCareMonitoring() {
-        guard SleepCareMonitoringPolicy.shouldMonitor(
+        guard appIsActive, SleepCareMonitoringPolicy.shouldMonitor(
             isNightSessionActive: isNightSessionActive,
             environmentDisplayMode: environmentDisplayMode
         ) else {
@@ -774,7 +853,11 @@ final class StandViewModel: ObservableObject {
         }
 
         motionMonitor.start()
-        guard !monitoringPausedForPlayback else {
+        guard SleepCareMonitoringPolicy.shouldCaptureAudio(
+            isNightSessionActive: isNightSessionActive,
+            environmentDisplayMode: environmentDisplayMode,
+            isSuspended: !monitoringSuspensions.isEmpty
+        ) else {
             audio.stop()
             return
         }
@@ -885,26 +968,6 @@ final class StandViewModel: ObservableObject {
         scheduleControlsHide()
     }
 
-    var orientationControlTitle: String {
-        switch orientationPreference {
-        case .automatic: "현재 방향 고정하기"
-        case .portrait, .landscape: "기기 회전 따르기"
-        }
-    }
-
-    var orientationControlImage: String {
-        orientationPreference == .automatic ? "lock.rotation" : "lock.open.fill"
-    }
-
-    func toggleOrientationLock() {
-        if orientationPreference == .automatic {
-            settings.value.orientationPreference = OrientationController.shared
-                .preferenceForCurrentOrientation()
-        } else {
-            settings.value.orientationPreference = .automatic
-        }
-    }
-
     private func startBatteryMonitoring() {
         UIDevice.current.isBatteryMonitoringEnabled = true
         batteryStatus = .current()
@@ -930,8 +993,10 @@ final class StandViewModel: ObservableObject {
     private func pauseForLowBattery() {
         batteryProtectionActive = true
         UIApplication.shared.isIdleTimerDisabled = false
-        guard isNightSessionActive else { return }
+        let wasNightSessionActive = isNightSessionActive
         isNightSessionActive = false
+        stopInternetRadioPlayback()
+        guard wasNightSessionActive else { return }
         audio.stop()
         motionMonitor.stop()
         finishStartleEvent()

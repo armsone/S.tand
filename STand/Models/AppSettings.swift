@@ -159,9 +159,7 @@ enum StandControlKind: String, Codable, CaseIterable, Identifiable {
     case flashlight
     case brightness
     case stopDetection
-    case orientation
     case recordings
-    case aiShot
     case settings
 
     var id: String { rawValue }
@@ -170,9 +168,7 @@ enum StandControlKind: String, Codable, CaseIterable, Identifiable {
         .flashlight,
         .brightness,
         .stopDetection,
-        .orientation,
         .recordings,
-        .aiShot,
         .settings
     ]
 
@@ -186,6 +182,12 @@ enum StandControlKind: String, Codable, CaseIterable, Identifiable {
 }
 
 struct StandScreenLayout: Codable, Equatable {
+    static let defaultRadioPanelTransform = PanelTransform(
+        x: 0.26,
+        y: 0.215,
+        scale: 0.75
+    )
+
     var clock: PanelTransform
     var weatherIcon: PanelTransform
     var weatherTemperature: PanelTransform
@@ -194,6 +196,7 @@ struct StandScreenLayout: Codable, Equatable {
     var status: PanelTransform
     var brightnessRule: PanelTransform
     var battery: PanelTransform
+    var radio: PanelTransform
     var weatherGroupIDs: [Int]
     var controlOrder: [StandControlKind]
 
@@ -206,6 +209,7 @@ struct StandScreenLayout: Codable, Equatable {
         status: PanelTransform,
         brightnessRule: PanelTransform,
         battery: PanelTransform = .init(x: 0, y: 0.18),
+        radio: PanelTransform = StandScreenLayout.defaultRadioPanelTransform,
         weatherGroupIDs: [Int],
         controlOrder: [StandControlKind] = StandControlKind.defaultOrder
     ) {
@@ -217,6 +221,7 @@ struct StandScreenLayout: Codable, Equatable {
         self.status = status
         self.brightnessRule = brightnessRule
         self.battery = battery
+        self.radio = radio
         self.weatherGroupIDs = weatherGroupIDs
         self.controlOrder = StandControlKind.normalizedOrder(controlOrder)
     }
@@ -224,7 +229,7 @@ struct StandScreenLayout: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case clock
         case weatherIcon, weatherTemperature, weatherCondition
-        case date, status, brightnessRule, battery, weatherGroupIDs, controlOrder
+        case date, status, brightnessRule, battery, radio, weatherGroupIDs, controlOrder
     }
 
     init(from decoder: Decoder) throws {
@@ -239,6 +244,8 @@ struct StandScreenLayout: Codable, Equatable {
         brightnessRule = try values.decode(PanelTransform.self, forKey: .brightnessRule)
         battery = try values.decodeIfPresent(PanelTransform.self, forKey: .battery)
             ?? .init(x: 0, y: 0.18)
+        radio = try values.decodeIfPresent(PanelTransform.self, forKey: .radio)
+            ?? StandScreenLayout.defaultRadioPanelTransform
         weatherGroupIDs = try values.decode([Int].self, forKey: .weatherGroupIDs)
         let rawControlOrder = try? values.decode([String].self, forKey: .controlOrder)
         controlOrder = StandControlKind.normalizedOrder(
@@ -257,8 +264,8 @@ struct StandScreenLayout: Codable, Equatable {
         battery: .init(x: 0, y: 0.20698371893744649),
         weatherGroupIDs: [1, 1, 1],
         controlOrder: [
-            .flashlight, .brightness, .stopDetection, .orientation,
-            .recordings, .aiShot, .settings
+            .flashlight, .brightness, .stopDetection,
+            .recordings, .settings
         ]
     )
 
@@ -273,8 +280,8 @@ struct StandScreenLayout: Codable, Equatable {
         battery: .init(x: 0, y: 0.27773123909249542),
         weatherGroupIDs: [1, 1, 1],
         controlOrder: [
-            .flashlight, .stopDetection, .orientation, .brightness,
-            .recordings, .aiShot, .settings
+            .flashlight, .stopDetection, .brightness,
+            .recordings, .settings
         ]
     )
 }
@@ -302,6 +309,7 @@ struct AppSettings: Codable, Equatable {
     var multiStimulusWakeEnabled = true
     var modePreference = StandModePreference.automatic
     var cameraAmbientSensingEnabled = false
+    var internetRadio: InternetRadioConfiguration?
 
     static let recommended = AppSettings()
 
@@ -327,7 +335,8 @@ struct AppSettings: Codable, Equatable {
         wakeOnSleepSound: Bool = false,
         multiStimulusWakeEnabled: Bool = true,
         modePreference: StandModePreference = .automatic,
-        cameraAmbientSensingEnabled: Bool = false
+        cameraAmbientSensingEnabled: Bool = false,
+        internetRadio: InternetRadioConfiguration? = nil
     ) {
         self.lampIntensity = lampIntensity
         self.silhouetteIntensity = silhouetteIntensity
@@ -351,6 +360,7 @@ struct AppSettings: Codable, Equatable {
         self.multiStimulusWakeEnabled = multiStimulusWakeEnabled
         self.modePreference = modePreference
         self.cameraAmbientSensingEnabled = cameraAmbientSensingEnabled
+        self.internetRadio = internetRadio
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -376,6 +386,7 @@ struct AppSettings: Codable, Equatable {
         case multiStimulusWakeEnabled
         case modePreference
         case cameraAmbientSensingEnabled
+        case internetRadio
     }
 
     init(from decoder: Decoder) throws {
@@ -447,6 +458,10 @@ struct AppSettings: Codable, Equatable {
             Bool.self,
             forKey: .cameraAmbientSensingEnabled
         ) ?? false
+        internetRadio = try? container.decode(
+            InternetRadioConfiguration.self,
+            forKey: .internetRadio
+        )
     }
 }
 

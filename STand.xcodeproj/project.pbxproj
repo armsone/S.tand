@@ -43,8 +43,14 @@
 		B00000000000000000000026 /* Paperlogy-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000026 /* Paperlogy-OFL.txt */; };
 		B00000000000000000000027 /* NEXONLv1Gothic-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000027 /* NEXONLv1Gothic-LICENSE.txt */; };
 		B00000000000000000000028 /* Poppins-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000028 /* Poppins-OFL.txt */; };
+		B00000000000000000000029 /* InternetRadioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000029 /* InternetRadioPlayer.swift */; };
 		B0000000000000000000002A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002A /* Assets.xcassets */; };
+		B0000000000000000000002B /* InternetRadioConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002B /* InternetRadioConfiguration.swift */; };
 		B00000000000000000000101 /* AudioAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000101 /* AudioAnalysisTests.swift */; };
+		D90000000000000000000001 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000001 /* ShareViewController.swift */; };
+		D90000000000000000000002 /* STandRadioShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* STandRadioShare.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		D90000000000000000000003 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000005 /* PrivacyInfo.xcprivacy */; };
+		D90000000000000000000004 /* InternetRadioConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002B /* InternetRadioConfiguration.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -62,6 +68,13 @@
 			remoteGlobalIDString = A10000000000000000000003;
 			remoteInfo = STandWidget;
 		};
+		D60000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D10000000000000000000001;
+			remoteInfo = STandRadioShare;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -72,6 +85,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				B0000000000000000000001F /* STandWidget.appex in Embed Foundation Extensions */,
+				D90000000000000000000002 /* STandRadioShare.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -92,36 +106,44 @@
 		F0000000000000000000000B /* Versions.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Versions.xcconfig; sourceTree = "<group>"; };
 		F0000000000000000000000C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F0000000000000000000000D /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		F00000000000000000000010 /* Pretendard-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Pretendard-Regular.otf; sourceTree = "<group>"; };
-		F00000000000000000000011 /* KakaoBigSans-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = KakaoBigSans-Regular.ttf; sourceTree = "<group>"; };
-		F00000000000000000000012 /* NanumGothic-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = NanumGothic-Regular.ttf; sourceTree = "<group>"; };
+		F00000000000000000000010 /* Pretendard-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Pretendard-Regular.otf"; sourceTree = "<group>"; };
+		F00000000000000000000011 /* KakaoBigSans-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "KakaoBigSans-Regular.ttf"; sourceTree = "<group>"; };
+		F00000000000000000000012 /* NanumGothic-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "NanumGothic-Regular.ttf"; sourceTree = "<group>"; };
 		F00000000000000000000013 /* Tenada.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Tenada.ttf; sourceTree = "<group>"; };
-		F00000000000000000000014 /* BlackHanSans-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = BlackHanSans-Regular.ttf; sourceTree = "<group>"; };
-		F00000000000000000000015 /* DoHyeon-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = DoHyeon-Regular.ttf; sourceTree = "<group>"; };
-		F00000000000000000000016 /* Pretendard-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = Pretendard-LICENSE.txt; sourceTree = "<group>"; };
-		F00000000000000000000017 /* KakaoBigSans-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = KakaoBigSans-OFL.txt; sourceTree = "<group>"; };
-		F00000000000000000000018 /* NanumGothic-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = NanumGothic-OFL.txt; sourceTree = "<group>"; };
-		F00000000000000000000019 /* Tenada-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = Tenada-LICENSE.txt; sourceTree = "<group>"; };
-		F0000000000000000000001A /* BlackHanSans-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = BlackHanSans-OFL.txt; sourceTree = "<group>"; };
-		F0000000000000000000001B /* DoHyeon-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = DoHyeon-OFL.txt; sourceTree = "<group>"; };
+		F00000000000000000000014 /* BlackHanSans-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "BlackHanSans-Regular.ttf"; sourceTree = "<group>"; };
+		F00000000000000000000015 /* DoHyeon-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "DoHyeon-Regular.ttf"; sourceTree = "<group>"; };
+		F00000000000000000000016 /* Pretendard-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Pretendard-LICENSE.txt"; sourceTree = "<group>"; };
+		F00000000000000000000017 /* KakaoBigSans-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "KakaoBigSans-OFL.txt"; sourceTree = "<group>"; };
+		F00000000000000000000018 /* NanumGothic-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "NanumGothic-OFL.txt"; sourceTree = "<group>"; };
+		F00000000000000000000019 /* Tenada-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Tenada-LICENSE.txt"; sourceTree = "<group>"; };
+		F0000000000000000000001A /* BlackHanSans-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "BlackHanSans-OFL.txt"; sourceTree = "<group>"; };
+		F0000000000000000000001B /* DoHyeon-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "DoHyeon-OFL.txt"; sourceTree = "<group>"; };
 		F0000000000000000000001C /* WeatherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherService.swift; sourceTree = "<group>"; };
 		F0000000000000000000001D /* WakeMotionMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeMotionMonitor.swift; sourceTree = "<group>"; };
 		F0000000000000000000001E /* STandWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STandWidget.swift; sourceTree = "<group>"; };
 		F0000000000000000000001F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		F0000000000000000000002A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F00000000000000000000020 /* sample-snore-5s.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = "sample-snore-5s.m4a"; sourceTree = "<group>"; };
 		F00000000000000000000021 /* sample-snore-10s.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = "sample-snore-10s.m4a"; sourceTree = "<group>"; };
 		F00000000000000000000022 /* sample-snore-15s.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = "sample-snore-15s.m4a"; sourceTree = "<group>"; };
 		F00000000000000000000023 /* Paperlogy-7Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Paperlogy-7Bold.ttf"; sourceTree = "<group>"; };
-		F00000000000000000000024 /* NEXONLv1GothicRegular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "NEXONLv1GothicRegular.ttf"; sourceTree = "<group>"; };
+		F00000000000000000000024 /* NEXONLv1GothicRegular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = NEXONLv1GothicRegular.ttf; sourceTree = "<group>"; };
 		F00000000000000000000025 /* Poppins-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Poppins-Regular.ttf"; sourceTree = "<group>"; };
 		F00000000000000000000026 /* Paperlogy-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Paperlogy-OFL.txt"; sourceTree = "<group>"; };
 		F00000000000000000000027 /* NEXONLv1Gothic-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "NEXONLv1Gothic-LICENSE.txt"; sourceTree = "<group>"; };
 		F00000000000000000000028 /* Poppins-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Poppins-OFL.txt"; sourceTree = "<group>"; };
+		F00000000000000000000029 /* InternetRadioPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InternetRadioPlayer.swift; sourceTree = "<group>"; };
+		F0000000000000000000002A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F0000000000000000000002B /* InternetRadioConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InternetRadioConfiguration.swift; sourceTree = "<group>"; };
 		F00000000000000000000101 /* AudioAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAnalysisTests.swift; sourceTree = "<group>"; };
 		F00000000000000000000201 /* STand.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = STand.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000202 /* STandTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = STandTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000203 /* STandWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = STandWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		E10000000000000000000001 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		E10000000000000000000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		E10000000000000000000003 /* STandRadioShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = STandRadioShare.entitlements; sourceTree = "<group>"; };
+		E10000000000000000000004 /* STandRadioShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = STandRadioShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		E10000000000000000000005 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		E10000000000000000000006 /* STand.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = STand.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -146,6 +168,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -154,6 +183,7 @@
 			children = (
 				A20000000000000000000002 /* STand */,
 				A2000000000000000000000E /* STandWidget */,
+				D20000000000000000000001 /* STandRadioShare */,
 				A20000000000000000000009 /* STandTests */,
 				A2000000000000000000000A /* Configuration */,
 				A2000000000000000000000B /* Products */,
@@ -194,6 +224,7 @@
 			isa = PBXGroup;
 			children = (
 				F00000000000000000000002 /* AppSettings.swift */,
+				F0000000000000000000002B /* InternetRadioConfiguration.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -201,6 +232,7 @@
 		A20000000000000000000006 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				F00000000000000000000029 /* InternetRadioPlayer.swift */,
 				F00000000000000000000005 /* RecordingLibrary.swift */,
 				F0000000000000000000001C /* WeatherService.swift */,
 				F0000000000000000000001D /* WakeMotionMonitor.swift */,
@@ -228,8 +260,36 @@
 				A2000000000000000000000F /* SampleRecordings */,
 				F0000000000000000000000C /* Info.plist */,
 				F0000000000000000000000D /* PrivacyInfo.xcprivacy */,
+				E10000000000000000000006 /* STand.entitlements */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		A20000000000000000000009 /* STandTests */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000101 /* AudioAnalysisTests.swift */,
+			);
+			path = STandTests;
+			sourceTree = "<group>";
+		};
+		A2000000000000000000000A /* Configuration */ = {
+			isa = PBXGroup;
+			children = (
+				F0000000000000000000000B /* Versions.xcconfig */,
+			);
+			path = Configuration;
+			sourceTree = "<group>";
+		};
+		A2000000000000000000000B /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000201 /* STand.app */,
+				F00000000000000000000202 /* STandTests.xctest */,
+				F00000000000000000000203 /* STandWidget.appex */,
+				E10000000000000000000004 /* STandRadioShare.appex */,
+			);
+			name = Products;
 			sourceTree = "<group>";
 		};
 		A2000000000000000000000C /* Fonts */ = {
@@ -264,24 +324,6 @@
 			path = FontLicenses;
 			sourceTree = "<group>";
 		};
-		A2000000000000000000000F /* SampleRecordings */ = {
-			isa = PBXGroup;
-			children = (
-				F00000000000000000000020 /* sample-snore-5s.m4a */,
-				F00000000000000000000021 /* sample-snore-10s.m4a */,
-				F00000000000000000000022 /* sample-snore-15s.m4a */,
-			);
-			path = SampleRecordings;
-			sourceTree = "<group>";
-		};
-		A20000000000000000000009 /* STandTests */ = {
-			isa = PBXGroup;
-			children = (
-				F00000000000000000000101 /* AudioAnalysisTests.swift */,
-			);
-			path = STandTests;
-			sourceTree = "<group>";
-		};
 		A2000000000000000000000E /* STandWidget */ = {
 			isa = PBXGroup;
 			children = (
@@ -292,22 +334,25 @@
 			path = STandWidget;
 			sourceTree = "<group>";
 		};
-		A2000000000000000000000A /* Configuration */ = {
+		A2000000000000000000000F /* SampleRecordings */ = {
 			isa = PBXGroup;
 			children = (
-				F0000000000000000000000B /* Versions.xcconfig */,
+				F00000000000000000000020 /* sample-snore-5s.m4a */,
+				F00000000000000000000021 /* sample-snore-10s.m4a */,
+				F00000000000000000000022 /* sample-snore-15s.m4a */,
 			);
-			path = Configuration;
+			path = SampleRecordings;
 			sourceTree = "<group>";
 		};
-		A2000000000000000000000B /* Products */ = {
+		D20000000000000000000001 /* STandRadioShare */ = {
 			isa = PBXGroup;
 			children = (
-				F00000000000000000000201 /* STand.app */,
-				F00000000000000000000202 /* STandTests.xctest */,
-				F00000000000000000000203 /* STandWidget.appex */,
+				E10000000000000000000001 /* ShareViewController.swift */,
+				E10000000000000000000002 /* Info.plist */,
+				E10000000000000000000003 /* STandRadioShare.entitlements */,
+				E10000000000000000000005 /* PrivacyInfo.xcprivacy */,
 			);
-			name = Products;
+			path = STandRadioShare;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -326,6 +371,7 @@
 			);
 			dependencies = (
 				A60000000000000000000004 /* PBXTargetDependency */,
+				D60000000000000000000002 /* PBXTargetDependency */,
 			);
 			name = STand;
 			packageProductDependencies = (
@@ -373,6 +419,25 @@
 			productReference = F00000000000000000000203 /* STandWidget.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		D10000000000000000000001 /* STandRadioShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D80000000000000000000001 /* Build configuration list for PBXNativeTarget "STandRadioShare" */;
+			buildPhases = (
+				D40000000000000000000001 /* Sources */,
+				D30000000000000000000001 /* Frameworks */,
+				D50000000000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = STandRadioShare;
+			packageProductDependencies = (
+			);
+			productName = STandRadioShare;
+			productReference = E10000000000000000000004 /* STandRadioShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -385,6 +450,11 @@
 				TargetAttributes = {
 					A10000000000000000000001 = {
 						CreatedOnToolsVersion = 26.6;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
+								enabled = 1;
+							};
+						};
 					};
 					A10000000000000000000002 = {
 						CreatedOnToolsVersion = 26.6;
@@ -392,6 +462,14 @@
 					};
 					A10000000000000000000003 = {
 						CreatedOnToolsVersion = 26.6;
+					};
+					D10000000000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
+								enabled = 1;
+							};
+						};
 					};
 				};
 			};
@@ -413,6 +491,7 @@
 				A10000000000000000000001 /* STand */,
 				A10000000000000000000002 /* STandTests */,
 				A10000000000000000000003 /* STandWidget */,
+				D10000000000000000000001 /* STandRadioShare */,
 			);
 		};
 /* End PBXProject section */
@@ -463,6 +542,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D50000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D90000000000000000000003 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -481,6 +568,8 @@
 				B00000000000000000000009 /* RecordingsView.swift in Sources */,
 				B0000000000000000000001C /* WeatherService.swift in Sources */,
 				B0000000000000000000001D /* WakeMotionMonitor.swift in Sources */,
+				B00000000000000000000029 /* InternetRadioPlayer.swift in Sources */,
+				B0000000000000000000002B /* InternetRadioConfiguration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -500,6 +589,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D40000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D90000000000000000000001 /* ShareViewController.swift in Sources */,
+				D90000000000000000000004 /* InternetRadioConfiguration.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -513,6 +611,11 @@
 			target = A10000000000000000000003 /* STandWidget */;
 			targetProxy = A60000000000000000000003 /* PBXContainerItemProxy */;
 		};
+		D60000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D10000000000000000000001 /* STandRadioShare */;
+			targetProxy = D60000000000000000000001 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -522,6 +625,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = STand/Resources/STand.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = T7B4EPLHPK;
 				ENABLE_PREVIEWS = YES;
@@ -548,6 +652,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = STand/Resources/STand.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = T7B4EPLHPK;
 				ENABLE_PREVIEWS = YES;
@@ -765,6 +870,58 @@
 			};
 			name = Release;
 		};
+		D70000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = F0000000000000000000000B /* Versions.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = STandRadioShare/STandRadioShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = T7B4EPLHPK;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = STandRadioShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.armsone.stand.radio-share";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		D70000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = F0000000000000000000000B /* Versions.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = STandRadioShare/STandRadioShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = T7B4EPLHPK;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = STandRadioShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.armsone.stand.radio-share";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -800,6 +957,15 @@
 			buildConfigurations = (
 				A70000000000000000000007 /* Debug */,
 				A70000000000000000000008 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D80000000000000000000001 /* Build configuration list for PBXNativeTarget "STandRadioShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D70000000000000000000001 /* Debug */,
+				D70000000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

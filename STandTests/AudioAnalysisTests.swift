@@ -80,6 +80,113 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(settings.brightnessModeThreshold, 0.35)
         XCTAssertEqual(settings.modePreference, .automatic)
         XCTAssertFalse(settings.cameraAmbientSensingEnabled)
+        XCTAssertNil(settings.internetRadio)
+    }
+
+    func testInternetRadioConfigurationAcceptsOnlySafeHTTPSStreams() throws {
+        let configuration = try InternetRadioConfiguration(
+            displayName: "  나의 라디오  ",
+            urlString: "  https://radio.example.com/live.mp3  \n"
+        )
+
+        XCTAssertEqual(configuration.displayName, "나의 라디오")
+        XCTAssertEqual(configuration.urlString, "https://radio.example.com/live.mp3")
+        XCTAssertEqual(configuration.streamURL.host, "radio.example.com")
+
+        let unnamed = try InternetRadioConfiguration(
+            displayName: "  ",
+            urlString: "https://radio.example.com/stream"
+        )
+        XCTAssertEqual(unnamed.displayName, InternetRadioConfiguration.defaultDisplayName)
+
+        XCTAssertThrowsError(try InternetRadioConfiguration(displayName: "", urlString: ""))
+        XCTAssertThrowsError(
+            try InternetRadioConfiguration(
+                displayName: "테스트",
+                urlString: "http://radio.example.com/stream"
+            )
+        )
+        XCTAssertThrowsError(
+            try InternetRadioConfiguration(displayName: "테스트", urlString: "file:///tmp/radio")
+        )
+        XCTAssertThrowsError(
+            try InternetRadioConfiguration(displayName: "테스트", urlString: "https:///stream")
+        )
+        XCTAssertThrowsError(
+            try InternetRadioConfiguration(
+                displayName: "테스트",
+                urlString: "https://user:password@radio.example.com/stream"
+            )
+        )
+    }
+
+    func testInternetRadioSettingsRoundTripWithoutBundledPreset() throws {
+        XCTAssertNil(AppSettings.recommended.internetRadio)
+
+        let configuration = try InternetRadioConfiguration(
+            displayName: "개인 방송",
+            urlString: "https://stream.example.org/live.m3u8"
+        )
+        let original = AppSettings(internetRadio: configuration)
+        let decoded = try JSONDecoder().decode(
+            AppSettings.self,
+            from: JSONEncoder().encode(original)
+        )
+
+        XCTAssertEqual(decoded.internetRadio, configuration)
+    }
+
+    func testSharedInternetRadioImportIsLocalLatestWinsAndClearsExplicitly() throws {
+        let suiteName = "STandTests.radio-share.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SharedInternetRadioImportStore(defaults: defaults)
+        let first = try InternetRadioConfiguration(
+            displayName: "첫 주소",
+            urlString: "https://one.example.com/live"
+        )
+        let latest = try InternetRadioConfiguration(
+            displayName: "새 주소",
+            urlString: "https://two.example.com/live"
+        )
+
+        XCTAssertNil(store.pendingConfiguration())
+        XCTAssertTrue(store.save(first))
+        XCTAssertEqual(store.pendingConfiguration(), first)
+        XCTAssertTrue(store.save(latest))
+        XCTAssertEqual(store.pendingConfiguration(), latest)
+        XCTAssertEqual(store.pendingConfiguration(), latest)
+
+        store.clearPendingConfiguration()
+        XCTAssertNil(store.pendingConfiguration())
+    }
+
+    func testMalformedSharedInternetRadioImportIsDiscarded() throws {
+        let suiteName = "STandTests.invalid-radio-share.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SharedInternetRadioImportStore(defaults: defaults)
+        defaults.set(Data("not-json".utf8), forKey: SharedInternetRadioImportStore.pendingConfigurationKey)
+
+        XCTAssertNil(store.pendingConfiguration())
+        XCTAssertNil(defaults.data(forKey: SharedInternetRadioImportStore.pendingConfigurationKey))
+    }
+
+    func testSharedImportDraftPreservesExistingNameUntilConfirmed() throws {
+        let existing = try InternetRadioConfiguration(
+            displayName: "내 라디오",
+            urlString: "https://old.example.com/live"
+        )
+        let shared = try InternetRadioConfiguration(
+            displayName: "공유 페이지 제목",
+            urlString: "https://new.example.com/live"
+        )
+
+        let draft = InternetRadioImportPolicy.draft(shared: shared, existing: existing)
+
+        XCTAssertEqual(draft.displayName, existing.displayName)
+        XCTAssertEqual(draft.urlString, shared.urlString)
+        XCTAssertEqual(existing.urlString, "https://old.example.com/live")
     }
 
     func testNewExperienceModeNamesMatchProductLanguage() {
@@ -207,9 +314,10 @@ final class AudioAnalysisTests: XCTestCase {
             portrait.battery,
             PanelTransform(x: 0, y: 0.20698371893744649, scale: 1)
         )
+        XCTAssertEqual(portrait.radio, StandScreenLayout.defaultRadioPanelTransform)
         XCTAssertEqual(
             portrait.controlOrder,
-            [.flashlight, .brightness, .stopDetection, .orientation, .recordings, .aiShot, .settings]
+            [.flashlight, .brightness, .stopDetection, .recordings, .settings]
         )
 
         let landscape = AppSettings.recommended.landscapeLayout
@@ -236,17 +344,24 @@ final class AudioAnalysisTests: XCTestCase {
             landscape.battery,
             PanelTransform(x: 0, y: 0.27773123909249542, scale: 1)
         )
+        XCTAssertEqual(landscape.radio, StandScreenLayout.defaultRadioPanelTransform)
         XCTAssertEqual(
             landscape.controlOrder,
-            [.flashlight, .stopDetection, .orientation, .brightness, .recordings, .aiShot, .settings]
+            [.flashlight, .stopDetection, .brightness, .recordings, .settings]
         )
     }
 
     func testPortraitAndLandscapeControlOrdersRoundTripIndependently() throws {
         var portrait = StandScreenLayout.portrait
-        portrait.controlOrder = [.settings, .recordings, .orientation, .aiShot, .flashlight, .brightness, .stopDetection]
+        portrait.radio = PanelTransform(x: -0.18, y: 0.24, scale: 0.52)
+        portrait.controlOrder = [
+            .settings, .recordings, .flashlight, .brightness, .stopDetection
+        ]
         var landscape = StandScreenLayout.landscape
-        landscape.controlOrder = [.brightness, .flashlight, .stopDetection, .aiShot, .settings, .recordings, .orientation]
+        landscape.radio = PanelTransform(x: 0.31, y: -0.12, scale: 1.35)
+        landscape.controlOrder = [
+            .brightness, .flashlight, .stopDetection, .settings, .recordings
+        ]
 
         let decoded = try JSONDecoder().decode(
             AppSettings.self,
@@ -257,6 +372,8 @@ final class AudioAnalysisTests: XCTestCase {
 
         XCTAssertEqual(decoded.portraitLayout.controlOrder, portrait.controlOrder)
         XCTAssertEqual(decoded.landscapeLayout.controlOrder, landscape.controlOrder)
+        XCTAssertEqual(decoded.portraitLayout.radio, portrait.radio)
+        XCTAssertEqual(decoded.landscapeLayout.radio, landscape.radio)
     }
 
     func testControlOrderDecodeIgnoresUnknownsAndCompletesMissingKinds() throws {
@@ -264,7 +381,10 @@ final class AudioAnalysisTests: XCTestCase {
         var object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: encoded) as? [String: Any]
         )
-        object["controlOrder"] = ["settings", "futureControl", "settings", "flashlight"]
+        object["controlOrder"] = [
+            "settings", "radio", "orientation", "aiShot",
+            "futureControl", "settings", "flashlight"
+        ]
 
         let decoded = try JSONDecoder().decode(
             StandScreenLayout.self,
@@ -273,21 +393,56 @@ final class AudioAnalysisTests: XCTestCase {
 
         XCTAssertEqual(
             decoded.controlOrder,
-            [.settings, .flashlight, .brightness, .stopDetection, .orientation, .recordings, .aiShot]
+            [.settings, .flashlight, .brightness, .stopDetection, .recordings]
+        )
+    }
+
+    func testInternetRadioIsAStandalonePanelAndNeverABottomControl() throws {
+        XCTAssertFalse(StandControlKind.allCases.contains { $0.rawValue == "radio" })
+
+        let configuration = try InternetRadioConfiguration(
+            displayName: "패널 라디오",
+            urlString: "https://radio.example.com/live"
+        )
+        let configured = AppSettings(internetRadio: configuration)
+
+        XCTAssertEqual(configured.portraitLayout.controlOrder, StandScreenLayout.portrait.controlOrder)
+        XCTAssertEqual(configured.landscapeLayout.controlOrder, StandScreenLayout.landscape.controlOrder)
+        XCTAssertEqual(configured.portraitLayout.radio, StandScreenLayout.defaultRadioPanelTransform)
+        XCTAssertEqual(configured.landscapeLayout.radio, StandScreenLayout.defaultRadioPanelTransform)
+    }
+
+    func testRadioConfigurationDoesNotChangeBottomControlRows() {
+        XCTAssertEqual(
+            BottomControlLayoutPolicy.rows(
+                for: StandControlKind.defaultOrder,
+                availableWidth: 381,
+                isPortrait: true
+            ).count,
+            2
+        )
+        XCTAssertEqual(
+            BottomControlLayoutPolicy.rows(
+                for: StandControlKind.defaultOrder,
+                availableWidth: 840,
+                isPortrait: false
+            ).count,
+            1
         )
     }
 
     func testPanelEditorResetPreservesBottomButtonOrder() {
         var customized = StandScreenLayout.portrait
         customized.clock = PanelTransform(x: 0.18, y: -0.12, scale: 1.4)
+        customized.radio = PanelTransform(x: -0.22, y: 0.31, scale: 0.44)
         customized.controlOrder = [
-            .settings, .aiShot, .recordings, .orientation,
-            .stopDetection, .brightness, .flashlight
+            .settings, .recordings, .stopDetection, .brightness, .flashlight
         ]
 
         let reset = HomeEditorResetPolicy.panels(in: customized, isPortrait: true)
 
         XCTAssertEqual(reset.clock, StandScreenLayout.portrait.clock)
+        XCTAssertEqual(reset.radio, StandScreenLayout.portrait.radio)
         XCTAssertEqual(reset.weatherGroupIDs, StandScreenLayout.portrait.weatherGroupIDs)
         XCTAssertEqual(reset.controlOrder, customized.controlOrder)
     }
@@ -296,22 +451,20 @@ final class AudioAnalysisTests: XCTestCase {
         var customized = StandScreenLayout.landscape
         customized.clock = PanelTransform(x: -0.16, y: 0.08, scale: 1.25)
         customized.date = PanelTransform(x: 0.22, y: 0.18, scale: 0.8)
+        customized.radio = PanelTransform(x: 0.28, y: -0.19, scale: 1.6)
         customized.controlOrder = Array(StandControlKind.defaultOrder.reversed())
 
         let reset = HomeEditorResetPolicy.controls(in: customized)
 
         XCTAssertEqual(reset.clock, customized.clock)
         XCTAssertEqual(reset.date, customized.date)
+        XCTAssertEqual(reset.radio, customized.radio)
         XCTAssertEqual(reset.weatherGroupIDs, customized.weatherGroupIDs)
         XCTAssertEqual(reset.controlOrder, StandControlKind.defaultOrder)
     }
 
-    func testBottomControlWrappingAndEditorBoundaryUseSameThreeRowPlan() {
+    func testBottomControlWrappingAndEditorBoundaryStayIndependentFromRadioPanel() {
         let availableWidth: CGFloat = 353
-        let threeRowOrder: [StandControlKind] = [
-            .flashlight, .orientation, .recordings,
-            .brightness, .stopDetection, .aiShot, .settings
-        ]
 
         XCTAssertEqual(
             BottomControlLayoutPolicy.rows(
@@ -323,30 +476,30 @@ final class AudioAnalysisTests: XCTestCase {
         )
         XCTAssertEqual(
             BottomControlLayoutPolicy.rows(
-                for: threeRowOrder,
+                for: StandControlKind.defaultOrder,
                 availableWidth: availableWidth,
                 isPortrait: true
             ).count,
-            3
+            2
         )
         XCTAssertEqual(
             BottomControlLayoutPolicy.height(
-                for: threeRowOrder,
+                for: StandControlKind.defaultOrder,
                 availableWidth: availableWidth,
                 isPortrait: true
             ),
-            192
+            126
         )
 
         let region = PanelEditingPolicy.editingRegion(
             canvasSize: CGSize(width: 393, height: 852),
             safeAreaInsets: EdgeInsets(top: 59, leading: 0, bottom: 34, trailing: 0),
             isPortrait: true,
-            controlOrder: threeRowOrder,
+            controlOrder: StandControlKind.defaultOrder,
             bottomAvailableWidth: availableWidth
         )
-        XCTAssertEqual(region.insets.bottom, 250)
-        XCTAssertEqual(region.frame.maxY, 602)
+        XCTAssertEqual(region.insets.bottom, 184)
+        XCTAssertEqual(region.frame.maxY, 668)
     }
 
     func testOrientationPreferenceRoundTripsThroughSettingsEncoding() throws {
@@ -425,6 +578,7 @@ final class AudioAnalysisTests: XCTestCase {
         var portrait = StandScreenLayout.portrait
         portrait.clock = PanelTransform(x: 0.08, y: -0.04, scale: 1.15)
         portrait.date = PanelTransform(x: 0.15, y: -0.12, scale: 1.2)
+        portrait.radio = PanelTransform(x: -0.24, y: 0.21, scale: 0.48)
         portrait.weatherGroupIDs = [4, 4, 9]
 
         let settings = AppSettings(
@@ -456,6 +610,19 @@ final class AudioAnalysisTests: XCTestCase {
         let decoded = try JSONDecoder().decode(StandScreenLayout.self, from: legacyData)
 
         XCTAssertEqual(decoded.clock, PanelTransform(x: 0, y: 0, scale: 1))
+    }
+
+    func testLegacyScreenLayoutWithoutRadioUsesDefaultPanelPlacement() throws {
+        let encoded = try JSONEncoder().encode(StandScreenLayout.portrait)
+        var legacy = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        legacy.removeValue(forKey: "radio")
+
+        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+        let decoded = try JSONDecoder().decode(StandScreenLayout.self, from: legacyData)
+
+        XCTAssertEqual(decoded.radio, StandScreenLayout.defaultRadioPanelTransform)
     }
 
     func testDisplayThemeRoundTripsAndLegacySettingsUseColor() throws {
@@ -532,6 +699,34 @@ final class AudioAnalysisTests: XCTestCase {
         )
         XCTAssertEqual(PanelEditingPolicy.minimumPanelScale, 0.30)
         XCTAssertEqual(PanelEditingPolicy.maximumPanelScale, 2.00)
+    }
+
+    func testRadioPanelUsesTheSameThirtyToTwoHundredPercentResizeRange() {
+        let panelSize = CGSize(
+            width: InternetRadioPanelMetrics.width,
+            height: InternetRadioPanelMetrics.height
+        )
+        let minimum = PanelEditingPolicy.scaleFromTopLeadingDrag(
+            startScale: StandScreenLayout.defaultRadioPanelTransform.scale,
+            panelSize: panelSize,
+            translation: CGSize(width: 1_000, height: 1_000)
+        )
+        let maximum = PanelEditingPolicy.scaleFromTopLeadingDrag(
+            startScale: StandScreenLayout.defaultRadioPanelTransform.scale,
+            panelSize: panelSize,
+            translation: CGSize(width: -1_000, height: -1_000)
+        )
+
+        XCTAssertEqual(minimum, PanelEditingPolicy.minimumPanelScale)
+        XCTAssertEqual(maximum, PanelEditingPolicy.maximumPanelScale)
+
+        for scale in [0.30, 0.75, 2.00] {
+            let interactionSize = InternetRadioPanelMetrics.interactionSize(
+                renderedScale: scale
+            )
+            XCTAssertGreaterThanOrEqual(interactionSize.width * scale, 44 - 0.001)
+            XCTAssertGreaterThanOrEqual(interactionSize.height * scale, 44 - 0.001)
+        }
     }
 
     func testEditablePanelCenterStaysInsideProtectedControls() {
@@ -729,6 +924,33 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertLessThanOrEqual(bottomEdge, canvas.height - insets.bottom + 0.001)
     }
 
+    func testHiddenRadioPanelDoesNotLimitTheWholeDashboardScale() {
+        var layout = StandScreenLayout.portrait
+        layout.radio = PanelTransform(x: 0, y: 0.44, scale: 2)
+        let canvas = CGSize(width: 393, height: 852)
+        let insets = EdgeInsets(top: 123, leading: 14, bottom: 218, trailing: 14)
+
+        let withoutRadio = PanelEditingPolicy.maximumScreenScale(
+            layout: layout,
+            isPortrait: true,
+            canvasSize: canvas,
+            insets: insets,
+            includesRadio: false,
+            hardLimit: 1.35
+        )
+        let withRadio = PanelEditingPolicy.maximumScreenScale(
+            layout: layout,
+            isPortrait: true,
+            canvasSize: canvas,
+            insets: insets,
+            includesRadio: true,
+            hardLimit: 1.35
+        )
+
+        XCTAssertLessThanOrEqual(withoutRadio, 1.35)
+        XCTAssertLessThan(withRadio, withoutRadio)
+    }
+
     func testBrightnessThresholdTrackMapsAndClampsDragLocation() {
         XCTAssertEqual(BrightnessThresholdPolicy.value(locationX: 60, width: 240), 0.25)
         XCTAssertEqual(BrightnessThresholdPolicy.value(locationX: -20, width: 240), 0)
@@ -827,13 +1049,13 @@ final class AudioAnalysisTests: XCTestCase {
         )
         let nightRowWidth = buttonWidth * 2 + sliderWidth
             + StandControlLayoutMetrics.rowSpacing * 2
-        let secondaryRowWidth = buttonWidth * 4
-            + StandControlLayoutMetrics.rowSpacing * 3
+        let secondaryRowWidth = buttonWidth * 2
+            + StandControlLayoutMetrics.rowSpacing
 
         XCTAssertEqual(buttonWidth, 90.75)
         XCTAssertEqual(sliderWidth, 187.5)
         XCTAssertEqual(nightRowWidth, availableWidth)
-        XCTAssertEqual(secondaryRowWidth, availableWidth)
+        XCTAssertLessThan(secondaryRowWidth, availableWidth)
         XCTAssertEqual(screenWidth - availableWidth, StandControlLayoutMetrics.rowSpacing * 2)
 
         let landscapeAvailableWidth: CGFloat = 852 - StandControlLayoutMetrics.rowSpacing * 2
@@ -849,8 +1071,9 @@ final class AudioAnalysisTests: XCTestCase {
                 availableWidth: landscapeAvailableWidth,
                 isPortrait: false
             )
-        } + StandControlLayoutMetrics.rowSpacing * 6
-        XCTAssertEqual(landscapeRowWidth, landscapeAvailableWidth)
+        } + StandControlLayoutMetrics.rowSpacing
+            * CGFloat(StandControlKind.defaultOrder.count - 1)
+        XCTAssertLessThan(landscapeRowWidth, landscapeAvailableWidth)
     }
 
     func testStatusPanelUsesSingleLineWidthAndMatchingBoundaryHeight() {
@@ -910,6 +1133,20 @@ final class AudioAnalysisTests: XCTestCase {
             SleepCareMonitoringPolicy.shouldMonitor(
                 isNightSessionActive: false,
                 environmentDisplayMode: .sleeping
+            )
+        )
+        XCTAssertTrue(
+            SleepCareMonitoringPolicy.shouldCaptureAudio(
+                isNightSessionActive: true,
+                environmentDisplayMode: .sleeping,
+                isSuspended: false
+            )
+        )
+        XCTAssertFalse(
+            SleepCareMonitoringPolicy.shouldCaptureAudio(
+                isNightSessionActive: true,
+                environmentDisplayMode: .sleeping,
+                isSuspended: true
             )
         )
     }

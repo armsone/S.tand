@@ -77,6 +77,7 @@ struct BurnInProtection {
 
 private enum PresentedSheet: String, Identifiable {
     case recordings
+    case internetRadio
     case settings
 
     var id: String { rawValue }
@@ -293,11 +294,11 @@ private struct WrappingControlLayout: Layout {
 struct RootView: View {
     @ObservedObject private var model: StandViewModel
     @ObservedObject private var audio: AudioCaptureService
+    @ObservedObject private var radio: InternetRadioPlayer
     @ObservedObject private var library: RecordingLibrary
     @ObservedObject private var settings: SettingsStore
     @ObservedObject private var weather: WeatherService
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.openURL) private var openURL
     @State private var presentedSheet: PresentedSheet?
     @State private var beginsScreenEditingAfterSheetDismiss = false
     @State private var didInitialize = false
@@ -322,6 +323,7 @@ struct RootView: View {
     init(model: StandViewModel) {
         _model = ObservedObject(wrappedValue: model)
         _audio = ObservedObject(wrappedValue: model.audio)
+        _radio = ObservedObject(wrappedValue: model.radio)
         _library = ObservedObject(wrappedValue: model.library)
         _settings = ObservedObject(wrappedValue: model.settings)
         _weather = ObservedObject(wrappedValue: model.weather)
@@ -390,6 +392,7 @@ struct RootView: View {
                                 layout: $editingLayout,
                                 isPortrait: editingIsPortrait,
                                 weather: weather,
+                                radioConfiguration: settings.value.internetRadio,
                                 clockFont: Binding(
                                     get: { settings.value.clockFont },
                                     set: { settings.value.clockFont = $0 }
@@ -399,6 +402,9 @@ struct RootView: View {
                                     set: { settings.value.clockHourMode = $0 }
                                 ),
                                 batteryText: silhouetteBatteryText,
+                                onConfigureRadio: {
+                                    presentedSheet = .internetRadio
+                                },
                                 onReset: {
                                     editingLayout = HomeEditorResetPolicy.panels(
                                         in: editingLayout,
@@ -468,6 +474,22 @@ struct RootView: View {
                     playbackDisabled: false,
                     theme: settings.value.displayTheme
                 )
+            case .internetRadio:
+                InternetRadioConfigurationView(
+                    configuration: model.sharedInternetRadioDraft
+                        ?? settings.value.internetRadio,
+                    isSharedImport: model.sharedInternetRadioDraft != nil,
+                    allowsDeletion: model.sharedInternetRadioDraft == nil
+                        && settings.value.internetRadio != nil,
+                    onSave: { configuration in
+                        model.saveInternetRadioConfiguration(configuration)
+                    },
+                    onDelete: {
+                        model.removeInternetRadioConfiguration()
+                    },
+                    onCancel: model.discardSharedInternetRadioDraft
+                )
+                .id(internetRadioEditorIdentity)
             case .settings:
                 SettingsView(
                     model: model,
@@ -495,6 +517,10 @@ struct RootView: View {
                 break
             }
         }
+        .onChange(of: model.sharedInternetRadioDraft) { _, draft in
+            guard draft != nil else { return }
+            presentedSheet = .internetRadio
+        }
     }
 
     private func resetTransientInterface() {
@@ -516,7 +542,9 @@ struct RootView: View {
     }
 
     private func topBar(isPortrait: Bool) -> some View {
-        HStack(spacing: 12) {
+        let radioIsActive = radio.state.isActive
+
+        return HStack(spacing: 12) {
             HStack(spacing: 8) {
                 STandBrandIcon(size: 28)
 
@@ -530,7 +558,8 @@ struct RootView: View {
                 AudioStatusPill(
                     audio: audio,
                     compact: isPortrait,
-                    monitoringSuspended: model.environmentDisplayMode == .stand
+                    monitoringSuspended: model.environmentDisplayMode == .stand || radioIsActive,
+                    radioIsActive: radioIsActive
                 )
             }
 
@@ -538,10 +567,16 @@ struct RootView: View {
 
             if model.isNightSessionActive, !isPortrait {
                 Label(
-                    model.environmentDisplayMode == .stand
+                    radioIsActive
+                        ? (radio.state == .loading
+                            ? "라디오 연결 중 · 소리 감지 정지"
+                            : "라디오 재생 중 · 소리 감지 정지")
+                        : model.environmentDisplayMode == .stand
                         ? "오브제 모드 · 조용히 대기"
                         : (audio.isWritingClip ? "수면 소리 저장 중" : "기기에서 소리 분석 중"),
-                    systemImage: model.environmentDisplayMode == .stand
+                    systemImage: radioIsActive
+                        ? "radio.fill"
+                        : model.environmentDisplayMode == .stand
                         ? "sun.max.fill"
                         : (audio.isWritingClip ? "waveform.badge.mic" : "ear")
                 )
@@ -624,7 +659,10 @@ struct RootView: View {
             batteryText: silhouetteBatteryText,
             batterySystemImage: model.batteryStatus.isCharging
                 ? "battery.100percent.bolt"
-                : "battery.50percent"
+                : "battery.50percent",
+            radioConfiguration: settings.value.internetRadio,
+            radioState: radio.state,
+            onToggleRadio: model.toggleInternetRadioPlayback
         )
     }
 
@@ -644,6 +682,12 @@ struct RootView: View {
         case .holding: "현재 상태 · 오브제 모드"
         case .fading: "현재 상태 · 오브제 감광 중"
         }
+    }
+
+    private var internetRadioEditorIdentity: String {
+        let configuration = model.sharedInternetRadioDraft ?? settings.value.internetRadio
+        let source = model.sharedInternetRadioDraft == nil ? "saved" : "shared"
+        return "\(source)|\(configuration?.displayName ?? "")|\(configuration?.urlString ?? "")"
     }
 
     private func enterScreenEditing(isPortrait: Bool, mode: HomeEditorMode) {
@@ -823,6 +867,7 @@ struct RootView: View {
                     isPortrait: currentIsPortrait,
                     canvasSize: currentCanvasSize,
                     insets: currentProtectedInsets,
+                    includesRadio: settings.value.internetRadio != nil,
                     hardLimit: 1.35
                 )
                 let scale = min(max(maximumScale, startingScale), requestedScale)
@@ -987,17 +1032,6 @@ struct RootView: View {
             ) {
                 model.stopNightSession()
             }
-        case .orientation:
-            ControlButton(
-                title: model.orientationControlTitle,
-                systemImage: model.orientationControlImage,
-                hint: model.orientationPreference == .automatic
-                    ? "현재 화면 방향으로 고정합니다"
-                    : "화면 방향이 iPhone 회전을 따르도록 바꿉니다",
-                width: width
-            ) {
-                model.toggleOrientationLock()
-            }
         case .recordings:
             ControlButton(
                 title: "녹음 목록 보기",
@@ -1008,15 +1042,6 @@ struct RootView: View {
             ) {
                 model.pauseMonitoringForPlayback()
                 presentedSheet = .recordings
-            }
-        case .aiShot:
-            ControlButton(
-                title: "AiShot 실행",
-                systemImage: "camera.aperture",
-                hint: "HanClip의 AiShot 촬영 화면을 엽니다",
-                width: width
-            ) {
-                if let url = URL(string: "hanclip://aishot") { openURL(url) }
             }
         case .settings:
             ControlButton(
@@ -1053,6 +1078,17 @@ struct RootView: View {
                     .padding(.vertical, 12)
                     .background(.ultraThinMaterial, in: Capsule())
                     .transition(.move(edge: .top).combined(with: .opacity))
+            }
+            if radio.state.isActive {
+                Label(
+                    "라디오 재생 중 · 소리 감지와 녹음은 일시 중지됨",
+                    systemImage: "radio.fill"
+                )
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(.ultraThinMaterial, in: Capsule())
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
             if model.ambientCameraState == .measuring {
                 Label("주변 밝기 확인 중 · 이미지는 저장하지 않아요", systemImage: "camera.metering.center.weighted")
@@ -1334,6 +1370,9 @@ private struct DashboardCanvas: View {
     let statusText: String
     let batteryText: String
     let batterySystemImage: String
+    let radioConfiguration: InternetRadioConfiguration?
+    let radioState: InternetRadioPlaybackState
+    let onToggleRadio: () -> Void
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -1379,6 +1418,19 @@ private struct DashboardCanvas: View {
                     globalScale: 1,
                     canvasSize: canvasSize
                 )
+
+                if let radioConfiguration {
+                    InternetRadioPanel(
+                        configuration: radioConfiguration,
+                        state: radioState,
+                        isDimmed: isDimmed,
+                        dimmedIntensity: dimmedIntensity,
+                        showsEditBadge: false,
+                        renderedScale: layout.radio.scale * clockScale,
+                        action: onToggleRadio
+                    )
+                    .panelTransform(layout.radio, canvasSize: canvasSize)
+                }
             }
             .scaleEffect(clockScale, anchor: .center)
             .foregroundStyle(
@@ -1386,6 +1438,142 @@ private struct DashboardCanvas: View {
             )
             .offset(drift)
             .animation(.easeInOut(duration: 4), value: drift)
+        }
+    }
+}
+
+enum InternetRadioPanelMetrics {
+    static let width: CGFloat = 144
+    static let height: CGFloat = 60
+    static let cornerRadius: CGFloat = 13
+    static let minimumHitTarget: CGFloat = 44
+
+    static func interactionSize(renderedScale: Double) -> CGSize {
+        let scale = max(0.01, CGFloat(renderedScale))
+        return CGSize(
+            width: max(width, minimumHitTarget / scale),
+            height: max(height, minimumHitTarget / scale)
+        )
+    }
+}
+
+private struct InternetRadioPanel: View {
+    let configuration: InternetRadioConfiguration?
+    let state: InternetRadioPlaybackState
+    let isDimmed: Bool
+    let dimmedIntensity: Double
+    let showsEditBadge: Bool
+    let renderedScale: Double
+    let action: () -> Void
+
+    var body: some View {
+        Group {
+            if showsEditBadge {
+                panelContent
+                    .accessibilityAction(named: Text("주소 편집"), action)
+            } else {
+                Button(action: action) { panelContent }
+                    .buttonStyle(.plain)
+            }
+        }
+        .foregroundStyle(.white.opacity(isDimmed ? 0.46 : 0.78))
+        .opacity(isDimmed ? min(1, max(0, dimmedIntensity)) : 1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(accessibilityHint)
+    }
+
+    private var panelContent: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(configuration?.displayName ?? "인터넷 라디오")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                Text(statusText)
+                    .font(.system(size: 8.5, weight: .medium))
+                    .lineLimit(1)
+                    .foregroundStyle(.white.opacity(isDimmed ? 0.40 : 0.52))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 11)
+        .frame(
+            width: InternetRadioPanelMetrics.width,
+            height: InternetRadioPanelMetrics.height
+        )
+        .background(
+            FlipPanelSurface(
+                isDimmed: isDimmed,
+                cornerRadius: InternetRadioPanelMetrics.cornerRadius,
+                splitGap: 2
+            )
+        )
+        .overlay(alignment: .topTrailing) {
+            if showsEditBadge {
+                Image(systemName: "pencil.circle.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.black.opacity(0.72), .orange)
+                    .offset(x: 6, y: -6)
+                }
+        }
+        .frame(
+            width: showsEditBadge
+                ? InternetRadioPanelMetrics.width
+                : InternetRadioPanelMetrics.interactionSize(
+                    renderedScale: renderedScale
+                ).width,
+            height: showsEditBadge
+                ? InternetRadioPanelMetrics.height
+                : InternetRadioPanelMetrics.interactionSize(
+                    renderedScale: renderedScale
+                ).height
+        )
+        .contentShape(Rectangle())
+    }
+
+    private var systemImage: String {
+        guard configuration != nil else { return "radio.fill" }
+        return switch state {
+        case .loading: "antenna.radiowaves.left.and.right"
+        case .playing: "stop.circle.fill"
+        case .idle, .failed: "radio.fill"
+        }
+    }
+
+    private var statusText: String {
+        guard configuration != nil else { return "HTTPS 주소 등록" }
+        if showsEditBadge { return "주소 편집" }
+        return switch state {
+        case .idle: "재생"
+        case .loading: "연결 취소"
+        case .playing: "감지·녹음 중지"
+        case .failed: "연결 실패 · 다시 듣기"
+        }
+    }
+
+    private var accessibilityLabel: String {
+        let name = configuration?.displayName ?? "인터넷 라디오"
+        return "\(name), \(statusText)"
+    }
+
+    private var accessibilityHint: String {
+        guard !showsEditBadge else {
+            return configuration == nil
+                ? "라디오 주소를 등록합니다"
+                : "라디오 주소를 편집합니다"
+        }
+        return switch state {
+        case .idle, .failed: "등록한 인터넷 라디오를 재생합니다"
+        case .loading: "인터넷 라디오 연결을 취소합니다"
+        case .playing: "인터넷 라디오를 끄고 소리 감지와 녹음을 다시 시작합니다"
         }
     }
 }
@@ -1887,9 +2075,11 @@ private struct ScreenEditorView: View {
     @Binding var layout: StandScreenLayout
     let isPortrait: Bool
     @ObservedObject var weather: WeatherService
+    let radioConfiguration: InternetRadioConfiguration?
     @Binding var clockFont: ClockFontChoice
     @Binding var hourMode: ClockHourMode
     let batteryText: String
+    let onConfigureRadio: () -> Void
     let onReset: () -> Void
     let onSave: () -> Void
     @State private var showFontPalette = false
@@ -1966,6 +2156,22 @@ private struct ScreenEditorView: View {
                         .background(.white.opacity(0.08), in: Capsule())
                 }
 
+                EditablePanel(
+                    transform: $layout.radio,
+                    canvasSize: proxy.size,
+                    onTap: onConfigureRadio
+                ) {
+                    InternetRadioPanel(
+                        configuration: radioConfiguration,
+                        state: .idle,
+                        isDimmed: false,
+                        dimmedIntensity: 1,
+                        showsEditBadge: true,
+                        renderedScale: layout.radio.scale,
+                        action: onConfigureRadio
+                    )
+                }
+
                 if showFontPalette {
                     VStack {
                         Spacer()
@@ -1979,7 +2185,7 @@ private struct ScreenEditorView: View {
                     VStack {
                         Spacer()
                         Label(
-                            "패널을 끌어 이동 · 왼쪽 위 손잡이로 크기 조절",
+                            "패널 이동·크기 조절 · 라디오 연필을 눌러 주소 편집",
                             systemImage: "hand.draw.fill"
                         )
                         .font(.caption.weight(.medium))
@@ -2146,6 +2352,130 @@ private struct ScreenEditorView: View {
     }
 }
 
+private struct InternetRadioConfigurationView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var displayName: String
+    @State private var address: String
+    @State private var validationMessage: String?
+
+    let configuration: InternetRadioConfiguration?
+    let isSharedImport: Bool
+    let allowsDeletion: Bool
+    let onSave: (InternetRadioConfiguration) -> Void
+    let onDelete: () -> Void
+    let onCancel: () -> Void
+
+    init(
+        configuration: InternetRadioConfiguration?,
+        isSharedImport: Bool = false,
+        allowsDeletion: Bool? = nil,
+        onSave: @escaping (InternetRadioConfiguration) -> Void,
+        onDelete: @escaping () -> Void,
+        onCancel: @escaping () -> Void = {}
+    ) {
+        self.configuration = configuration
+        self.isSharedImport = isSharedImport
+        self.allowsDeletion = allowsDeletion ?? (configuration != nil)
+        self.onSave = onSave
+        self.onDelete = onDelete
+        self.onCancel = onCancel
+        _displayName = State(initialValue: configuration?.displayName ?? "")
+        _address = State(initialValue: configuration?.urlString ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("이름 (선택)", text: $displayName)
+                        .textInputAutocapitalization(.never)
+                    TextField("https://…", text: $address)
+                        .keyboardType(.URL)
+                        .textContentType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    if let validationMessage {
+                        Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                } header: {
+                    Text("라디오 정보")
+                } footer: {
+                    Text(radioInformationFooter)
+                }
+
+                if isSharedImport {
+                    Section {
+                        Label(
+                            "Safari에서 공유한 주소를 자동으로 입력했습니다.",
+                            systemImage: "safari.fill"
+                        )
+                        Text("저장을 누르기 전까지 기존 라디오 주소는 바뀌지 않습니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("재생 중 동작") {
+                    Label(
+                        "소리 감지와 수면 녹음은 일시 중지됩니다.",
+                        systemImage: "waveform.slash"
+                    )
+                    Label(
+                        "기기 움직임 감지는 계속됩니다.",
+                        systemImage: "gyroscope"
+                    )
+                }
+
+                if allowsDeletion {
+                    Section {
+                        Button("등록 주소 삭제", role: .destructive) {
+                            onDelete()
+                            dismiss()
+                        }
+                    }
+                }
+            }
+            .navigationTitle("인터넷 라디오")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("취소") {
+                        onCancel()
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("저장", action: save)
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .interactiveDismissDisabled(isSharedImport)
+    }
+
+    private var radioInformationFooter: String {
+        "직접 이용 권한을 확인한 합법적인 HTTPS 스트림 주소만 등록해 주세요. 주소는 이 기기에만 저장되며 방송을 저장하거나 중계하지 않습니다."
+    }
+
+    private func save() {
+        do {
+            let configuration = try InternetRadioConfiguration(
+                displayName: displayName,
+                urlString: address
+            )
+            validationMessage = nil
+            onSave(configuration)
+            dismiss()
+        } catch {
+            validationMessage = error.localizedDescription
+        }
+    }
+}
+
 private struct ControlOrderEditorView: View {
     @Binding var order: [StandControlKind]
     let isPortrait: Bool
@@ -2214,9 +2544,7 @@ extension StandControlKind {
         case .flashlight: "플래시"
         case .brightness: "밝기 기준"
         case .stopDetection: "자동 돌봄 끄기"
-        case .orientation: "화면 방향"
         case .recordings: "수면 소리"
-        case .aiShot: "AiShot"
         case .settings: "설정"
         }
     }
@@ -2226,9 +2554,7 @@ extension StandControlKind {
         case .flashlight: "flashlight.on.fill"
         case .brightness: "slider.horizontal.3"
         case .stopDetection: "stop.circle.fill"
-        case .orientation: "rectangle.portrait.rotate"
         case .recordings: "waveform"
-        case .aiShot: "camera.aperture"
         case .settings: "gearshape.fill"
         }
     }
@@ -2522,6 +2848,7 @@ enum PanelEditingPolicy {
         isPortrait: Bool,
         canvasSize: CGSize,
         insets: EdgeInsets,
+        includesRadio: Bool = true,
         hardLimit: Double
     ) -> Double {
         guard canvasSize.height > 0 else { return hardLimit }
@@ -2529,7 +2856,7 @@ enum PanelEditingPolicy {
         let topRoom = max(0, canvasCenterY - insets.top)
         let bottomRoom = max(0, canvasSize.height - insets.bottom - canvasCenterY)
         let weatherHeight: CGFloat = (isPortrait ? 282 : 370) / 3
-        let panels: [(PanelTransform, CGFloat)] = [
+        var panels: [(PanelTransform, CGFloat)] = [
             (layout.weatherIcon, weatherHeight),
             (layout.weatherTemperature, weatherHeight),
             (layout.weatherCondition, weatherHeight),
@@ -2538,6 +2865,9 @@ enum PanelEditingPolicy {
             (layout.battery, 36),
             (layout.clock, isPortrait ? 92 : 116)
         ]
+        if includesRadio {
+            panels.append((layout.radio, InternetRadioPanelMetrics.height))
+        }
 
         var maximum = hardLimit
         for (transform, baseHeight) in panels {
@@ -2564,6 +2894,7 @@ private struct EditablePanel<Content: View>: View {
     @Binding var transform: PanelTransform
     let canvasSize: CGSize
     var onEnded: () -> Void = {}
+    var onTap: (() -> Void)? = nil
     @ViewBuilder let content: () -> Content
     @State private var dragStart: PanelTransform?
     @State private var scaleStart: Double?
@@ -2573,51 +2904,84 @@ private struct EditablePanel<Content: View>: View {
     @State private var snappedToHorizontalGuide = false
 
     var body: some View {
-        content()
-            .background {
-                GeometryReader { proxy in
-                    Color.clear.preference(key: EditablePanelSizeKey.self, value: proxy.size)
+        let renderedWidth = panelSize.width * transform.scale
+        let renderedHeight = panelSize.height * transform.scale
+
+        ZStack {
+            Color.clear
+                .frame(
+                    width: max(44, renderedWidth),
+                    height: max(44, renderedHeight)
+                )
+                .contentShape(Rectangle())
+
+            content()
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: EditablePanelSizeKey.self,
+                            value: proxy.size
+                        )
+                    }
                 }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(
+                            .orange.opacity(0.45),
+                            style: StrokeStyle(lineWidth: 1, dash: [4])
+                        )
+                }
+                .scaleEffect(transform.scale)
+
+            if let onTap {
+                Color.clear
+                    .frame(
+                        width: max(44, renderedWidth),
+                        height: max(44, renderedHeight)
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onTap)
             }
+
+            ZStack {
+                Color.clear
+                Circle()
+                    .fill(.orange.opacity(0.9))
+                    .frame(width: 26, height: 26)
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.black.opacity(0.72))
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Circle())
+            .offset(x: -renderedWidth / 2, y: -renderedHeight / 2)
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let start = cornerResizeStart ?? transform.scale
+                        cornerResizeStart = start
+                        transform.scale = PanelEditingPolicy.scaleFromTopLeadingDrag(
+                            startScale: start,
+                            panelSize: panelSize,
+                            translation: value.translation
+                        )
+                    }
+                    .onEnded { _ in
+                        cornerResizeStart = nil
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        onEnded()
+                    }
+            )
+            .accessibilityLabel("패널 크기 조절")
+            .accessibilityHint("왼쪽 위 조절점을 끌어 패널 중심을 유지한 채 크기를 변경합니다")
+        }
             .onPreferenceChange(EditablePanelSizeKey.self) { measuredSize in
                 panelSize = measuredSize
             }
-            .overlay {
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(.orange.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4]))
-            }
-            .overlay(alignment: .topLeading) {
-                ZStack {
-                    Circle()
-                        .fill(.orange.opacity(0.9))
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.black.opacity(0.72))
-                }
-                .frame(width: 26, height: 26)
-                .contentShape(Circle())
-                .offset(x: -10, y: -10)
-                .highPriorityGesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            let start = cornerResizeStart ?? transform.scale
-                            cornerResizeStart = start
-                            transform.scale = PanelEditingPolicy.scaleFromTopLeadingDrag(
-                                startScale: start,
-                                panelSize: panelSize,
-                                translation: value.translation
-                            )
-                        }
-                        .onEnded { _ in
-                            cornerResizeStart = nil
-                            UISelectionFeedbackGenerator().selectionChanged()
-                            onEnded()
-                        }
-                )
-                .accessibilityLabel("패널 크기 조절")
-                .accessibilityHint("왼쪽 위 조절점을 끌어 패널 중심을 유지한 채 크기를 변경합니다")
-            }
-            .panelTransform(transform, canvasSize: canvasSize)
+            .offset(
+                x: transform.x * canvasSize.width,
+                y: transform.y * canvasSize.height
+            )
             .gesture(
                 DragGesture(minimumDistance: 2)
                     .onChanged { value in
@@ -2888,6 +3252,7 @@ private struct AudioStatusPill: View {
     @ObservedObject var audio: AudioCaptureService
     let compact: Bool
     let monitoringSuspended: Bool
+    let radioIsActive: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -2927,6 +3292,9 @@ private struct AudioStatusPill: View {
     }
 
     private var statusText: String {
+        if radioIsActive {
+            return compact ? "감지 정지" : "소리 감지 정지"
+        }
         if monitoringSuspended {
             return compact ? "오브제" : "오브제 모드"
         }

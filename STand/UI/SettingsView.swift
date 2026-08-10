@@ -201,16 +201,6 @@ struct SettingsView: View {
                     showsRecordings = true
                 }
 
-                SettingsActionTile(
-                    title: "AiShot",
-                    status: "열기",
-                    systemImage: "camera.aperture",
-                    isActive: false,
-                    accent: accent
-                ) {
-                    guard let url = URL(string: "hanclip://aishot") else { return }
-                    openURL(url)
-                }
             }
         }
     }
