@@ -979,16 +979,48 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(model.environmentDisplayMode, .stand)
     }
 
-    func testSoundSensitivityUsesAnIntuitiveLowToHighScale() {
-        XCTAssertEqual(SoundSensitivityPolicy.level(for: -20), 0, accuracy: 0.000_001)
-        XCTAssertEqual(SoundSensitivityPolicy.level(for: -35), 0.5, accuracy: 0.000_001)
-        XCTAssertEqual(SoundSensitivityPolicy.level(for: -50), 1, accuracy: 0.000_001)
-        XCTAssertEqual(SoundSensitivityPolicy.threshold(for: 0), -20, accuracy: 0.000_001)
-        XCTAssertEqual(SoundSensitivityPolicy.threshold(for: 0.5), -35, accuracy: 0.000_001)
-        XCTAssertEqual(SoundSensitivityPolicy.threshold(for: 1), -50, accuracy: 0.000_001)
-        XCTAssertEqual(SoundSensitivityPolicy.label(for: -45), "높음")
-        XCTAssertEqual(SoundSensitivityPolicy.label(for: -36), "보통")
-        XCTAssertEqual(SoundSensitivityPolicy.label(for: -25), "낮음")
+    func testAdaptiveNoiseFloorMakesQuietRoomsMoreSensitiveAndNoisyRoomsRelative() {
+        var quietTracker = AdaptiveNoiseFloorTracker()
+        var quietState = quietTracker.state
+        for _ in 0..<60 {
+            quietState = quietTracker.observe(rmsDB: -62, duration: 1)
+        }
+
+        var noisyTracker = AdaptiveNoiseFloorTracker()
+        var noisyState = noisyTracker.state
+        for _ in 0..<60 {
+            noisyState = noisyTracker.observe(rmsDB: -30, duration: 1)
+        }
+
+        XCTAssertTrue(quietState.isCalibrated)
+        XCTAssertEqual(quietState.noiseFloorDB, -62)
+        XCTAssertEqual(quietState.effectiveSoundThresholdDB, -58)
+        XCTAssertEqual(noisyState.noiseFloorDB, -30)
+        XCTAssertEqual(noisyState.effectiveSoundThresholdDB, -24)
+        XCTAssertGreaterThan(noisyState.effectiveSoundThresholdDB, quietState.effectiveSoundThresholdDB)
+    }
+
+    func testAdaptiveNoiseFloorIgnoresOneLoudMomentAndWakesOnSmallRelativeRise() {
+        var tracker = AdaptiveNoiseFloorTracker()
+        for _ in 0..<59 { _ = tracker.observe(rmsDB: -60, duration: 1) }
+        let state = tracker.observe(rmsDB: -10, duration: 1)
+
+        XCTAssertEqual(state.noiseFloorDB, -60)
+        var detector = AudioEventDetector(
+            configuration: AudioDetectorConfiguration(
+                soundThresholdDB: state.effectiveSoundThresholdDB
+            )
+        )
+        _ = detector.analyze(rmsDB: -60, peakDB: -54, bufferDuration: 0.02, now: 1)
+        _ = detector.analyze(rmsDB: -54, peakDB: -45, bufferDuration: 0.02, now: 1.02)
+        _ = detector.analyze(rmsDB: -54, peakDB: -45, bufferDuration: 0.02, now: 1.04)
+        let rise = detector.analyze(
+            rmsDB: -54,
+            peakDB: -45,
+            bufferDuration: 0.02,
+            now: 1.06
+        )
+        XCTAssertTrue(rise.soundBegan)
     }
 
     func testWeatherResponseDecodesAndMapsKoreanCondition() throws {
@@ -1937,6 +1969,35 @@ final class AudioAnalysisTests: XCTestCase {
             ),
             1
         )
+    }
+
+    @MainActor
+    func testStartleEventsPersistWithoutARecordingAndKeepTheirDuration() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let start = Date(timeIntervalSinceReferenceDate: 90_000)
+        let library = RecordingLibrary(directory: directory)
+        let sessionID = library.beginSleepSession(at: start)
+        let eventID = try XCTUnwrap(
+            library.beginStartleEvent(sessionID: sessionID, at: start.addingTimeInterval(20))
+        )
+        library.endStartleEvent(id: eventID, at: start.addingTimeInterval(32))
+        library.endSleepSession(id: sessionID, at: start.addingTimeInterval(120))
+
+        let reloaded = RecordingLibrary(directory: directory)
+        let session = try XCTUnwrap(reloaded.recordingSessions.first)
+        XCTAssertTrue(session.clips.isEmpty)
+        XCTAssertEqual(session.startleEvents.count, 1)
+        XCTAssertEqual(session.startleEvents[0].startedAt, start.addingTimeInterval(20))
+        XCTAssertEqual(session.startleEvents[0].endedAt, start.addingTimeInterval(32))
+    }
+
+    @MainActor
+    func testRecordingPlaybackBoostDefaultsToTwoTimes() {
+        XCTAssertTrue(RecordingPlayer().boostEnabled)
     }
 
     @MainActor

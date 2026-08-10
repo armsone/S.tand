@@ -34,7 +34,7 @@ struct RecordingsView: View {
             ZStack {
                 RecordingBackground(accent: accent)
 
-                if library.clips.isEmpty {
+                if library.clips.isEmpty, library.recordingSessions.isEmpty {
                     ContentUnavailableView(
                         "저장된 수면 소리가 없습니다",
                         systemImage: "waveform.badge.mic",
@@ -45,7 +45,9 @@ struct RecordingsView: View {
                     ScrollView {
                         LazyVStack(spacing: 12) {
                             summaryCard
-                            todayMergeCard
+                            if !library.mergeableClips.isEmpty {
+                                todayMergeCard
+                            }
 
                             if playbackDisabled {
                                 RecordingNoticeCard(
@@ -726,7 +728,7 @@ private struct SleepSessionTimelineHeader: View {
                                 .background(.white.opacity(0.07), in: Capsule())
                         }
                     }
-                    Text("\(timeRangeText) · \(session.clips.count)개 · \(session.totalDuration.durationText)")
+                    Text(activitySummary)
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.white.opacity(0.68))
                 }
@@ -774,7 +776,19 @@ private struct SleepSessionTimelineHeader: View {
 
     private var accessibilityLabel: String {
         let estimate = session.isInferred ? "시간 추정, " : ""
-        return "\(estimate)\(sessionTitle), \(timeRangeText), 녹음 \(session.clips.count)개, 총 \(session.totalDuration.durationText)"
+        return "\(estimate)\(sessionTitle), \(timeRangeText), 녹음 \(session.clips.count)개, 화들짝 \(session.startleEvents.count)회, 총 \(session.totalDuration.durationText)"
+    }
+
+    private var activitySummary: String {
+        var parts = [timeRangeText]
+        if !session.clips.isEmpty {
+            parts.append("소리 \(session.clips.count)개")
+            parts.append(session.totalDuration.durationText)
+        }
+        if !session.startleEvents.isEmpty {
+            parts.append("화들짝 \(session.startleEvents.count)회")
+        }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -786,46 +800,66 @@ private struct SessionTimelineBar: View {
         VStack(spacing: 6) {
             GeometryReader { proxy in
                 let width = max(1, proxy.size.width)
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(.white.opacity(0.085))
-                        .frame(height: 10)
-
-                    LinearGradient(
-                        colors: [accent.opacity(0.28), accent.opacity(0.08)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .mask(Capsule().frame(height: 10))
-
-                    ForEach(session.clips) { clip in
-                        let fraction = SleepSessionGroupingPolicy.markerFraction(
-                            for: clip,
-                            sessionStart: session.startedAt,
-                            sessionEnd: session.endedAt
-                        )
-                        let widthForMarker = markerWidth(for: clip, totalWidth: width)
+                VStack(spacing: 4) {
+                    ZStack(alignment: .leading) {
                         Capsule()
-                            .fill(accent)
-                            .frame(width: widthForMarker, height: 10)
-                            .shadow(color: accent.opacity(0.55), radius: 4)
-                            .position(
-                                x: markerX(
-                                    fraction: fraction,
-                                    totalWidth: width,
-                                    markerWidth: widthForMarker
-                                ),
-                                y: 5
+                            .fill(.white.opacity(0.085))
+                            .frame(height: 10)
+
+                        LinearGradient(
+                            colors: [accent.opacity(0.28), accent.opacity(0.08)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .mask(Capsule().frame(height: 10))
+
+                        ForEach(session.clips) { clip in
+                            let fraction = SleepSessionGroupingPolicy.markerFraction(
+                                for: clip,
+                                sessionStart: session.startedAt,
+                                sessionEnd: session.endedAt
                             )
+                            let widthForMarker = markerWidth(for: clip, totalWidth: width)
+                            Capsule()
+                                .fill(accent)
+                                .frame(width: widthForMarker, height: 10)
+                                .shadow(color: accent.opacity(0.55), radius: 4)
+                                .position(
+                                    x: markerX(
+                                        fraction: fraction,
+                                        totalWidth: width,
+                                        markerWidth: widthForMarker
+                                    ),
+                                    y: 5
+                                )
+                        }
                     }
+                    .frame(height: 10)
+
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(.white.opacity(0.035))
+                            .frame(height: 2)
+
+                        ForEach(session.startleEvents) { event in
+                            StartleTimelineMarker(
+                                event: event,
+                                sessionStart: session.startedAt,
+                                sessionEnd: session.endedAt,
+                                totalWidth: width,
+                                accent: accent
+                            )
+                        }
+                    }
+                    .frame(height: 2)
                 }
             }
-            .frame(height: 10)
+            .frame(height: 16)
 
             HStack {
                 Text(session.startedAt.formatted(date: .omitted, time: .shortened))
                 Spacer()
-                Text("수면 소리 감지 시점")
+                Text("수면 소리 · 얇은 선은 화들짝")
                 Spacer()
                 Text(session.endedAt.formatted(date: .omitted, time: .shortened))
             }
@@ -846,6 +880,40 @@ private struct SessionTimelineBar: View {
     private func markerWidth(for clip: RecordingClip, totalWidth: CGFloat) -> CGFloat {
         let sessionDuration = max(1, session.endedAt.timeIntervalSince(session.startedAt))
         return max(7, min(22, totalWidth * clip.duration / sessionDuration))
+    }
+}
+
+private struct StartleTimelineMarker: View {
+    let event: SleepStartleEvent
+    let sessionStart: Date
+    let sessionEnd: Date
+    let totalWidth: CGFloat
+    let accent: Color
+
+    var body: some View {
+        let startFraction = SleepSessionGroupingPolicy.markerFraction(
+            for: event.startedAt,
+            sessionStart: sessionStart,
+            sessionEnd: sessionEnd
+        )
+        let endFraction = SleepSessionGroupingPolicy.markerFraction(
+            for: event.endedAt ?? sessionEnd,
+            sessionStart: sessionStart,
+            sessionEnd: sessionEnd
+        )
+        let fractionWidth = CGFloat(max(0, endFraction - startFraction))
+        let markerWidth = max(CGFloat(2), totalWidth * fractionWidth)
+        let proposedCenter = totalWidth * CGFloat(startFraction) + markerWidth / 2
+        let center = min(
+            totalWidth - markerWidth / 2,
+            max(markerWidth / 2, proposedCenter)
+        )
+
+        Capsule()
+            .fill(.white.opacity(0.88))
+            .frame(width: markerWidth, height: 2)
+            .shadow(color: accent.opacity(0.75), radius: 2)
+            .position(x: center, y: 1)
     }
 }
 
@@ -964,6 +1032,25 @@ private struct PlaybackProgressBar: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(player.isPlaying ? "재생 일시 정지" : "재생 계속")
+
+                Button {
+                    player.toggleBoost()
+                } label: {
+                    VStack(spacing: 1) {
+                        Image(systemName: "speaker.wave.3.fill")
+                            .font(.caption.weight(.bold))
+                        Text("2×")
+                            .font(.system(size: 8, weight: .bold, design: .rounded))
+                    }
+                    .foregroundStyle(player.boostEnabled ? accent : .white.opacity(0.42))
+                    .frame(width: 38, height: 38)
+                    .background(
+                        (player.boostEnabled ? accent.opacity(0.14) : .white.opacity(0.06)),
+                        in: Circle()
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(player.boostEnabled ? "작은 소리 두 배 증폭 끄기" : "작은 소리 두 배 증폭 켜기")
 
                 VStack(spacing: 3) {
                     Slider(

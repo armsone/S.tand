@@ -28,11 +28,51 @@ struct RecordingClip: Identifiable, Hashable {
     }
 }
 
+struct SleepStartleEvent: Identifiable, Codable, Equatable {
+    let id: UUID
+    let startedAt: Date
+    var endedAt: Date?
+}
+
 struct SleepRecordingSession: Identifiable, Codable, Equatable {
     let id: UUID
     let startedAt: Date
     var endedAt: Date?
     var clipFileNames: [String]
+    var startleEvents: [SleepStartleEvent]
+
+    init(
+        id: UUID,
+        startedAt: Date,
+        endedAt: Date?,
+        clipFileNames: [String],
+        startleEvents: [SleepStartleEvent] = []
+    ) {
+        self.id = id
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.clipFileNames = clipFileNames
+        self.startleEvents = startleEvents
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, startedAt, endedAt, clipFileNames, startleEvents
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)
+        clipFileNames = try container.decodeIfPresent(
+            [String].self,
+            forKey: .clipFileNames
+        ) ?? []
+        startleEvents = try container.decodeIfPresent(
+            [SleepStartleEvent].self,
+            forKey: .startleEvents
+        ) ?? []
+    }
 }
 
 struct RecordingSessionGroup: Identifiable {
@@ -40,6 +80,7 @@ struct RecordingSessionGroup: Identifiable {
     let startedAt: Date
     let endedAt: Date
     let clips: [RecordingClip]
+    let startleEvents: [SleepStartleEvent]
     let isInferred: Bool
 
     var totalDuration: TimeInterval {
@@ -92,6 +133,7 @@ enum SleepSessionGroupingPolicy {
                 startedAt: startedAt,
                 endedAt: endedAt,
                 clips: cluster,
+                startleEvents: [],
                 isInferred: true
             )
         }
@@ -102,8 +144,20 @@ enum SleepSessionGroupingPolicy {
         sessionStart: Date,
         sessionEnd: Date
     ) -> Double {
+        markerFraction(
+            for: clip.createdAt,
+            sessionStart: sessionStart,
+            sessionEnd: sessionEnd
+        )
+    }
+
+    static func markerFraction(
+        for date: Date,
+        sessionStart: Date,
+        sessionEnd: Date
+    ) -> Double {
         let duration = max(1, sessionEnd.timeIntervalSince(sessionStart))
-        return min(1, max(0, clip.createdAt.timeIntervalSince(sessionStart) / duration))
+        return min(1, max(0, date.timeIntervalSince(sessionStart) / duration))
     }
 }
 
@@ -185,14 +239,17 @@ final class RecordingLibrary: ObservableObject {
             let sessionClips = session.clipFileNames
                 .compactMap { clipsByName[$0] }
                 .sorted { $0.createdAt < $1.createdAt }
-            guard !sessionClips.isEmpty else { continue }
+            guard !sessionClips.isEmpty || !session.startleEvents.isEmpty else { continue }
             assignedNames.formUnion(sessionClips.map { $0.url.lastPathComponent })
             let lastClipEnd = sessionClips
                 .map { $0.createdAt.addingTimeInterval($0.duration) }
                 .max() ?? session.startedAt
+            let lastStartleEnd = session.startleEvents
+                .map { $0.endedAt ?? Date() }
+                .max() ?? session.startedAt
             let endedAt = max(
                 session.startedAt.addingTimeInterval(1),
-                session.endedAt ?? max(Date(), lastClipEnd)
+                session.endedAt ?? max(Date(), lastClipEnd, lastStartleEnd)
             )
             groups.append(
                 RecordingSessionGroup(
@@ -200,6 +257,7 @@ final class RecordingLibrary: ObservableObject {
                     startedAt: session.startedAt,
                     endedAt: endedAt,
                     clips: sessionClips,
+                    startleEvents: session.startleEvents,
                     isInferred: false
                 )
             )
@@ -258,7 +316,8 @@ final class RecordingLibrary: ObservableObject {
             id: UUID(),
             startedAt: date,
             endedAt: nil,
-            clipFileNames: []
+            clipFileNames: [],
+            startleEvents: []
         )
         sleepSessions.append(session)
         persistSleepSessions()
@@ -269,9 +328,46 @@ final class RecordingLibrary: ObservableObject {
         guard let id,
               let index = sleepSessions.firstIndex(where: { $0.id == id })
         else { return }
-        sleepSessions[index].endedAt = max(sleepSessions[index].startedAt, date)
+        let end = max(sleepSessions[index].startedAt, date)
+        sleepSessions[index].endedAt = end
+        for eventIndex in sleepSessions[index].startleEvents.indices
+            where sleepSessions[index].startleEvents[eventIndex].endedAt == nil {
+            sleepSessions[index].startleEvents[eventIndex].endedAt = max(
+                sleepSessions[index].startleEvents[eventIndex].startedAt,
+                end
+            )
+        }
         persistSleepSessions()
         objectWillChange.send()
+    }
+
+    @discardableResult
+    func beginStartleEvent(sessionID: UUID?, at date: Date = Date()) -> UUID? {
+        guard let sessionID,
+              let index = sleepSessions.firstIndex(where: { $0.id == sessionID })
+        else { return nil }
+        if let openEvent = sleepSessions[index].startleEvents.last(where: { $0.endedAt == nil }) {
+            return openEvent.id
+        }
+        let event = SleepStartleEvent(id: UUID(), startedAt: date, endedAt: nil)
+        objectWillChange.send()
+        sleepSessions[index].startleEvents.append(event)
+        persistSleepSessions()
+        return event.id
+    }
+
+    func endStartleEvent(id: UUID?, at date: Date = Date()) {
+        guard let id else { return }
+        for sessionIndex in sleepSessions.indices {
+            guard let eventIndex = sleepSessions[sessionIndex].startleEvents.firstIndex(
+                where: { $0.id == id }
+            ) else { continue }
+            let startedAt = sleepSessions[sessionIndex].startleEvents[eventIndex].startedAt
+            objectWillChange.send()
+            sleepSessions[sessionIndex].startleEvents[eventIndex].endedAt = max(startedAt, date)
+            persistSleepSessions()
+            return
+        }
     }
 
     func add(_ url: URL, sessionID: UUID? = nil) {
@@ -459,6 +555,13 @@ final class RecordingLibrary: ObservableObject {
             // 시각인 startedAt에서 보수적으로 닫는다. 정상 종료/백그라운드는
             // StandViewModel이 실제 이탈 시각으로 endSleepSession을 먼저 기록한다.
             sleepSessions[index].endedAt = sleepSessions[index].startedAt
+            for eventIndex in sleepSessions[index].startleEvents.indices
+                where sleepSessions[index].startleEvents[eventIndex].endedAt == nil {
+                sleepSessions[index].startleEvents[eventIndex].endedAt = max(
+                    sleepSessions[index].startleEvents[eventIndex].startedAt,
+                    sleepSessions[index].startedAt
+                )
+            }
             changed = true
         }
         if changed { persistSleepSessions() }
@@ -520,7 +623,9 @@ final class RecordingLibrary: ObservableObject {
     private func removeExpiredEmptySessions(at referenceDate: Date) -> Bool {
         let previousCount = sleepSessions.count
         sleepSessions.removeAll { session in
-            guard session.clipFileNames.isEmpty, let endedAt = session.endedAt else {
+            guard session.clipFileNames.isEmpty,
+                  session.startleEvents.isEmpty,
+                  let endedAt = session.endedAt else {
                 return false
             }
             return referenceDate.timeIntervalSince(endedAt)
@@ -613,18 +718,31 @@ private enum RecordingMerger {
 }
 
 @MainActor
-final class RecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
+final class RecordingPlayer: NSObject, ObservableObject {
     @Published private(set) var playingURL: URL?
     @Published private(set) var currentTime: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
     @Published private(set) var isPlaying = false
+    @Published private(set) var boostEnabled = true
 
-    private var player: AVAudioPlayer?
+    private let engine = AVAudioEngine()
+    private let playerNode = AVAudioPlayerNode()
+    private let gainUnit = AVAudioUnitEQ(numberOfBands: 0)
+    private var audioFile: AVAudioFile?
+    private var scheduledStartFrame: AVAudioFramePosition = 0
+    private var playbackToken: UUID?
     private var progressTimer: Timer?
+
+    override init() {
+        super.init()
+        engine.attach(playerNode)
+        engine.attach(gainUnit)
+        gainUnit.globalGain = 6
+    }
 
     func toggle(_ clip: RecordingClip) {
         if playingURL == clip.url {
-            if player?.isPlaying == true {
+            if playerNode.isPlaying {
                 pause()
             } else {
                 resume()
@@ -636,45 +754,50 @@ final class RecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default)
             try session.setActive(true)
-            let player = try AVAudioPlayer(contentsOf: clip.url)
-            player.delegate = self
-            player.prepareToPlay()
-            player.play()
-            self.player = player
+            let file = try AVAudioFile(forReading: clip.url)
+            try prepareEngine(for: file)
+            audioFile = file
             playingURL = clip.url
-            duration = player.duration
+            duration = Double(file.length) / file.processingFormat.sampleRate
             currentTime = 0
-            isPlaying = true
-            startProgressTimer()
+            schedule(from: 0, shouldPlay: true)
         } catch {
             stop()
         }
     }
 
     func seek(to time: TimeInterval) {
-        guard let player else { return }
-        let clampedTime = min(max(0, time), player.duration)
-        player.currentTime = clampedTime
+        guard audioFile != nil else { return }
+        let clampedTime = min(max(0, time), duration)
         currentTime = clampedTime
+        schedule(from: clampedTime, shouldPlay: isPlaying)
     }
 
     func pause() {
-        player?.pause()
+        updateProgress()
+        playerNode.pause()
         isPlaying = false
         progressTimer?.invalidate()
         progressTimer = nil
     }
 
     func resume() {
-        guard let player else { return }
-        player.play()
+        guard audioFile != nil else { return }
+        playerNode.play()
         isPlaying = true
         startProgressTimer()
     }
 
+    func toggleBoost() {
+        boostEnabled.toggle()
+        gainUnit.globalGain = boostEnabled ? 6 : 0
+    }
+
     func stop() {
-        player?.stop()
-        player = nil
+        playbackToken = nil
+        playerNode.stop()
+        engine.stop()
+        audioFile = nil
         playingURL = nil
         currentTime = 0
         duration = 0
@@ -688,10 +811,9 @@ final class RecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         progressTimer?.invalidate()
         progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, let player = self.player else { return }
-                self.currentTime = player.currentTime
-                self.duration = player.duration
-                self.isPlaying = player.isPlaying
+                guard let self else { return }
+                self.updateProgress()
+                self.isPlaying = self.playerNode.isPlaying
             }
         }
         if let progressTimer {
@@ -699,7 +821,64 @@ final class RecordingPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
 
-    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        Task { @MainActor in stop() }
+    private func prepareEngine(for file: AVAudioFile) throws {
+        playerNode.stop()
+        engine.stop()
+        engine.disconnectNodeOutput(playerNode)
+        engine.disconnectNodeOutput(gainUnit)
+        let format = file.processingFormat
+        engine.connect(playerNode, to: gainUnit, format: format)
+        engine.connect(gainUnit, to: engine.mainMixerNode, format: format)
+        gainUnit.globalGain = boostEnabled ? 6 : 0
+        engine.prepare()
+        try engine.start()
+    }
+
+    private func schedule(from time: TimeInterval, shouldPlay: Bool) {
+        guard let audioFile else { return }
+        playerNode.stop()
+        let sampleRate = audioFile.processingFormat.sampleRate
+        let startFrame = min(
+            audioFile.length,
+            max(0, AVAudioFramePosition(time * sampleRate))
+        )
+        let remainingFrames = audioFile.length - startFrame
+        guard remainingFrames > 0 else {
+            stop()
+            return
+        }
+        let token = UUID()
+        playbackToken = token
+        scheduledStartFrame = startFrame
+        playerNode.scheduleSegment(
+            audioFile,
+            startingFrame: startFrame,
+            frameCount: AVAudioFrameCount(remainingFrames),
+            at: nil
+        ) { [weak self] in
+            Task { @MainActor in
+                guard let self, self.playbackToken == token else { return }
+                self.stop()
+            }
+        }
+        if shouldPlay {
+            playerNode.play()
+            isPlaying = true
+            startProgressTimer()
+        } else {
+            isPlaying = false
+        }
+    }
+
+    private func updateProgress() {
+        guard let audioFile,
+              let nodeTime = playerNode.lastRenderTime,
+              let playerTime = playerNode.playerTime(forNodeTime: nodeTime)
+        else { return }
+        let absoluteFrame = scheduledStartFrame + playerTime.sampleTime
+        currentTime = min(
+            duration,
+            max(0, Double(absoluteFrame) / audioFile.processingFormat.sampleRate)
+        )
     }
 }

@@ -461,20 +461,6 @@ struct SettingsView: View {
                 accent: accent
             )
 
-            SettingsSliderRow(
-                title: "감지 민감도",
-                valueText: SoundSensitivityPolicy.label(for: store.value.soundThresholdDB),
-                value: Binding(
-                    get: { SoundSensitivityPolicy.level(for: store.value.soundThresholdDB) },
-                    set: { store.value.soundThresholdDB = SoundSensitivityPolicy.threshold(for: $0) }
-                ),
-                range: 0...1,
-                step: 0.02,
-                accent: accent,
-                leadingLabel: "큰 소리만",
-                trailingLabel: "작은 소리도"
-            )
-
             SettingsInlineButton(
                 title: library.clips.isEmpty ? "수면 소리 열기" : "녹음 \(library.clips.count)개 보기",
                 systemImage: "play.circle.fill",
@@ -485,7 +471,7 @@ struct SettingsView: View {
             }
 
             SettingsHelpText(
-                "민감도를 높이면 더 작은 소리에도 반응합니다. 녹음은 이 iPhone 안에서만 처리됩니다."
+                "처음 1분 동안 방의 평소 소리를 익힙니다. 이후 평균보다 커진 순간에는 바로 화들짝 반응하고, 녹음은 이 iPhone 안에서만 처리합니다."
             )
         }
     }
@@ -720,30 +706,6 @@ struct SettingsView: View {
     }
 }
 
-enum SoundSensitivityPolicy {
-    private static let loudOnlyThreshold = -20.0
-    private static let quietSoundThreshold = -50.0
-
-    static func level(for threshold: Float) -> Double {
-        let normalized = (loudOnlyThreshold - Double(threshold))
-            / (loudOnlyThreshold - quietSoundThreshold)
-        return min(1, max(0, normalized))
-    }
-
-    static func threshold(for level: Double) -> Float {
-        let clamped = min(1, max(0, level))
-        return Float(loudOnlyThreshold - clamped * (loudOnlyThreshold - quietSoundThreshold))
-    }
-
-    static func label(for threshold: Float) -> String {
-        switch threshold {
-        case ..<(-42): "높음"
-        case (-42)...(-32): "보통"
-        default: "낮음"
-        }
-    }
-}
-
 @MainActor
 private final class SettingsRuntimeState: ObservableObject {
     @Published private(set) var isNightSessionActive: Bool
@@ -845,6 +807,12 @@ private struct SettingsAudioStatusView: View {
         default:
             if let classification = audio.lastClassifiedSound {
                 return "최근 감지 · \(classification.kind.settingsDisplayName)"
+            }
+            if audio.state == .monitoring, audio.noiseCalibrationProgress < 1 {
+                return "방 소리 익히는 중 · \(Int((audio.noiseCalibrationProgress * 100).rounded()))%"
+            }
+            if let floor = audio.adaptiveNoiseFloorDB {
+                return "자동 적응 완료 · 평소 \(Int(floor.rounded())) dB"
             }
             return audio.microphoneAccess == .denied
                 ? "설정에서 마이크 권한을 허용해 주세요."

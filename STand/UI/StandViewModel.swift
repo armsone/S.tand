@@ -242,6 +242,7 @@ final class StandViewModel: ObservableObject {
     private var brightnessBeforeSession: CGFloat?
     private var brightnessBeforeFaceDown: CGFloat?
     private var activeRecordingSessionID: UUID?
+    private var activeStartleEventID: UUID?
 
     init() {
         let settings = SettingsStore()
@@ -256,12 +257,11 @@ final class StandViewModel: ObservableObject {
                   self.environmentDisplayMode == .sleeping,
                   self.settings.value.multiStimulusWakeEnabled
             else { return }
-            self.activateLamp()
+            self.wakeForSleepMovement()
         }
-        audio.onSoundClassified = { [weak self] classification in
+        audio.onRelativeSoundRise = { [weak self] in
             guard let self,
                   self.environmentDisplayMode == .sleeping,
-                  SleepSoundWakePolicy.shouldWake(classification),
                   self.settings.value.multiStimulusWakeEnabled
             else { return }
             self.wakeForSleepMovement()
@@ -361,6 +361,7 @@ final class StandViewModel: ObservableObject {
         motionMonitor.stop()
         postureMonitor.stop()
         applyFaceDownState(false)
+        finishStartleEvent()
         library.endSleepSession(id: activeRecordingSessionID)
         activeRecordingSessionID = nil
         turnOffLamp(animated: true)
@@ -417,6 +418,7 @@ final class StandViewModel: ObservableObject {
         motionMonitor.stop()
         // 앱이 화면을 떠난 동안에는 실제 감시가 중단되므로 잠자기 모드 구간도
         // 여기서 닫는다. 다시 30분 이내 돌아오면 같은 잠자리로 재개된다.
+        finishStartleEvent()
         library.endSleepSession(id: activeRecordingSessionID)
         activeRecordingSessionID = nil
     }
@@ -428,6 +430,7 @@ final class StandViewModel: ObservableObject {
     private func activateLamp(triggeredBySleepMovement: Bool) {
         guard isNightSessionActive else { return }
         lampTask?.cancel()
+        if !triggeredBySleepMovement { finishStartleEvent() }
 
         let now = ProcessInfo.processInfo.systemUptime
         let holdDuration = settings.value.holdDuration
@@ -493,6 +496,8 @@ final class StandViewModel: ObservableObject {
                     lampIntensity = 0
                     lampPhase = .off
                     torch.turnOff()
+                    isMovementTriggeredLamp = false
+                    finishStartleEvent()
                     return
                 }
             }
@@ -500,6 +505,15 @@ final class StandViewModel: ObservableObject {
     }
 
     private func wakeForSleepMovement() {
+        guard isNightSessionActive, environmentDisplayMode == .sleeping else { return }
+        if activeRecordingSessionID == nil {
+            syncRecordingSessionForDisplayMode()
+        }
+        if activeStartleEventID == nil {
+            activeStartleEventID = library.beginStartleEvent(
+                sessionID: activeRecordingSessionID
+            )
+        }
         activateLamp(triggeredBySleepMovement: true)
         let torchLevel = SleepMovementLightingPolicy.torchLevel(
             torchEnabled: settings.value.torchEnabled,
@@ -534,6 +548,7 @@ final class StandViewModel: ObservableObject {
         manualDimmingHoldActive = false
         automaticDimmingPaused = false
         isMovementTriggeredLamp = false
+        finishStartleEvent()
         lampPhase = .off
         torch.turnOff()
         if animated {
@@ -567,6 +582,8 @@ final class StandViewModel: ObservableObject {
                     lampIntensity = 0
                     lampPhase = .off
                     torch.turnOff()
+                    isMovementTriggeredLamp = false
+                    finishStartleEvent()
                     return
                 }
             }
@@ -637,6 +654,7 @@ final class StandViewModel: ObservableObject {
         performTransition: Bool
     ) {
         let changed = newMode != environmentDisplayMode
+        if newMode == .stand { finishStartleEvent() }
         environmentDisplayMode = newMode
         if isNightSessionActive { syncRecordingSessionForDisplayMode() }
         guard performTransition, changed, isNightSessionActive else { return }
@@ -737,6 +755,12 @@ final class StandViewModel: ObservableObject {
             library.endSleepSession(id: activeRecordingSessionID, at: date)
             activeRecordingSessionID = nil
         }
+    }
+
+    private func finishStartleEvent(at date: Date = Date()) {
+        guard activeStartleEventID != nil else { return }
+        library.endStartleEvent(id: activeStartleEventID, at: date)
+        activeStartleEventID = nil
     }
 
     private func syncSleepCareMonitoring() {
@@ -910,6 +934,7 @@ final class StandViewModel: ObservableObject {
         isNightSessionActive = false
         audio.stop()
         motionMonitor.stop()
+        finishStartleEvent()
         library.endSleepSession(id: activeRecordingSessionID)
         activeRecordingSessionID = nil
         turnOffLamp(animated: true)

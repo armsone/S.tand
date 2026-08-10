@@ -6,13 +6,148 @@ struct AudioDetectorConfiguration: Equatable {
     var clapRiseDB: Float = 6
     var clapPeakRiseDB: Float = 8
     var clapRefractoryInterval: TimeInterval = 1.5
-    var soundAttackDuration: TimeInterval = 0.12
+    var soundAttackDuration: TimeInterval = 0.06
 }
 
 struct AudioDetection: Equatable {
     let clapDetected: Bool
     let soundBegan: Bool
     let isAboveSoundThreshold: Bool
+}
+
+struct AdaptiveNoiseState: Equatable {
+    let noiseFloorDB: Float?
+    let effectiveSoundThresholdDB: Float
+    let effectiveClapPeakThresholdDB: Float
+    let calibrationProgress: Double
+
+    var isCalibrated: Bool { calibrationProgress >= 1 }
+}
+
+enum AdaptiveSoundThresholdPolicy {
+    static let calibrationDuration: TimeInterval = 60
+    static let quietestThresholdDB: Float = -58
+    static let loudestThresholdDB: Float = -18
+
+    static func soundThreshold(
+        noiseFloorDB: Float?
+    ) -> Float {
+        guard let noiseFloorDB else { return -50 }
+
+        // 사용자가 숫자를 맞추지 않아도 조용한 방에서는 3 dB 상승,
+        // 지속 소음이 있는 방에서는 6 dB 상승을 자동으로 사건으로 본다.
+        let margin: Float = switch noiseFloorDB {
+        case ..<(-50): 3
+        case ..<(-35): 4
+        default: 6
+        }
+        return clamped(noiseFloorDB + margin)
+    }
+
+    static func clapPeakThreshold(
+        noiseFloorDB: Float?
+    ) -> Float {
+        let soundThreshold = soundThreshold(noiseFloorDB: noiseFloorDB)
+        return min(-8, max(-45, soundThreshold + 9))
+    }
+
+    private static func clamped(_ value: Float) -> Float {
+        min(loudestThresholdDB, max(quietestThresholdDB, value))
+    }
+}
+
+struct AdaptiveNoiseFloorTracker {
+    private static let bucketDuration: TimeInterval = 1
+    private static let adaptationWindowCount = 8
+
+    private var totalObservedDuration: TimeInterval = 0
+    private var currentBucketDuration: TimeInterval = 0
+    private var currentBucketSamples: [Float] = []
+    private var calibrationBuckets: [Float] = []
+    private var adaptationBuckets: [Float] = []
+    private var noiseFloorDB: Float?
+
+    mutating func observe(
+        rmsDB: Float,
+        duration: TimeInterval
+    ) -> AdaptiveNoiseState {
+        let safeDuration = max(0, duration)
+        totalObservedDuration += safeDuration
+        currentBucketDuration += safeDuration
+        currentBucketSamples.append(Self.sanitized(rmsDB))
+
+        if currentBucketDuration >= Self.bucketDuration {
+            finishCurrentBucket()
+        }
+        return state
+    }
+
+    var state: AdaptiveNoiseState {
+        AdaptiveNoiseState(
+            noiseFloorDB: noiseFloorDB,
+            effectiveSoundThresholdDB: AdaptiveSoundThresholdPolicy.soundThreshold(
+                noiseFloorDB: noiseFloorDB
+            ),
+            effectiveClapPeakThresholdDB: AdaptiveSoundThresholdPolicy.clapPeakThreshold(
+                noiseFloorDB: noiseFloorDB
+            ),
+            calibrationProgress: min(
+                1,
+                totalObservedDuration / AdaptiveSoundThresholdPolicy.calibrationDuration
+            )
+        )
+    }
+
+    mutating func reset() {
+        totalObservedDuration = 0
+        currentBucketDuration = 0
+        currentBucketSamples.removeAll(keepingCapacity: true)
+        calibrationBuckets.removeAll(keepingCapacity: true)
+        adaptationBuckets.removeAll(keepingCapacity: true)
+        noiseFloorDB = nil
+    }
+
+    private mutating func finishCurrentBucket() {
+        guard !currentBucketSamples.isEmpty else { return }
+        // 한 번의 뒤척임이나 박수로 기준이 올라가지 않도록 각 1초의 낮은 35% 지점을 사용한다.
+        let bucketFloor = Self.percentile(currentBucketSamples, fraction: 0.35)
+        currentBucketDuration = 0
+        currentBucketSamples.removeAll(keepingCapacity: true)
+
+        if totalObservedDuration <= AdaptiveSoundThresholdPolicy.calibrationDuration {
+            calibrationBuckets.append(bucketFloor)
+            noiseFloorDB = Self.percentile(calibrationBuckets, fraction: 0.5)
+            return
+        }
+
+        adaptationBuckets.append(bucketFloor)
+        if adaptationBuckets.count > Self.adaptationWindowCount {
+            adaptationBuckets.removeFirst(adaptationBuckets.count - Self.adaptationWindowCount)
+        }
+        let candidate = Self.percentile(adaptationBuckets, fraction: 0.5)
+        guard let current = noiseFloorDB else {
+            noiseFloorDB = candidate
+            return
+        }
+        // 지속 소음이 생기면 약 10초, 조용해지면 약 5초 안에 다시 민감해진다.
+        let rate: Float = candidate > current ? 0.12 : 0.22
+        noiseFloorDB = current + (candidate - current) * rate
+    }
+
+    private static func sanitized(_ value: Float) -> Float {
+        guard value.isFinite else { return -90 }
+        return min(0, max(-90, value))
+    }
+
+    private static func percentile(_ values: [Float], fraction: Double) -> Float {
+        let sorted = values.sorted()
+        guard !sorted.isEmpty else { return -90 }
+        let position = min(
+            sorted.count - 1,
+            max(0, Int((Double(sorted.count - 1) * fraction).rounded()))
+        )
+        return sorted[position]
+    }
 }
 
 enum SleepSoundKind: String, Equatable {
