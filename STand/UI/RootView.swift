@@ -87,10 +87,6 @@ private struct BrightnessDragState {
     let startingValue: Double
 }
 
-private struct BrightnessFeedback: Equatable {
-    let value: Double
-}
-
 enum HomeEditorMode: Equatable {
     case panels
     case controls
@@ -293,8 +289,6 @@ struct RootView: View {
     @State private var beginsScreenEditingAfterSheetDismiss = false
     @State private var didInitialize = false
     @State private var brightnessDragState: BrightnessDragState?
-    @State private var brightnessFeedback: BrightnessFeedback?
-    @State private var brightnessFeedbackTask: Task<Void, Never>?
     @State private var brightnessFixedEdge: BrightnessFixedEdge?
     @State private var brightnessCommittedEdge: BrightnessFixedEdge?
     @State private var brightnessFixedEdgeTask: Task<Void, Never>?
@@ -358,13 +352,6 @@ struct RootView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.horizontal, isPortrait ? 20 : 32)
                         .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
-
-                    if let brightnessFeedback {
-                        BrightnessFeedbackView(feedback: brightnessFeedback)
-                            .allowsHitTesting(false)
-                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                            .zIndex(90)
-                    }
 
                     if let clockScaleFeedback {
                         ClockScaleFeedbackView(scale: clockScaleFeedback)
@@ -514,18 +501,15 @@ struct RootView: View {
     }
 
     private func resetTransientInterface() {
-        brightnessFeedbackTask?.cancel()
         brightnessFixedEdgeTask?.cancel()
         clockScaleFeedbackTask?.cancel()
 
-        brightnessFeedbackTask = nil
         brightnessFixedEdgeTask = nil
         clockScaleFeedbackTask = nil
 
         brightnessDragState = nil
         brightnessFixedEdge = nil
         brightnessCommittedEdge = nil
-        brightnessFeedback = nil
         clockScaleGestureStart = nil
         clockScaleFeedback = nil
     }
@@ -717,10 +701,6 @@ struct RootView: View {
                 model.previewBrightnessLevel(adjustedValue)
                 updateFixedEdgeHold(fixedEdge)
 
-                brightnessFeedbackTask?.cancel()
-                withAnimation(.easeOut(duration: 0.12)) {
-                    brightnessFeedback = BrightnessFeedback(value: adjustedValue)
-                }
             }
             .onEnded { _ in
                 guard !isEditingScreen else { return }
@@ -728,7 +708,6 @@ struct RootView: View {
                     cancelFixedEdgeHold()
                     model.endBrightnessAdjustment()
                     brightnessDragState = nil
-                    scheduleBrightnessFeedbackHide()
                 }
             }
     }
@@ -746,9 +725,6 @@ struct RootView: View {
             guard !Task.isCancelled, brightnessFixedEdge == edge else { return }
             model.updateBrightnessLevel(edge.level)
             brightnessCommittedEdge = edge
-            withAnimation(.easeOut(duration: 0.16)) {
-                brightnessFeedback = BrightnessFeedback(value: edge.level)
-            }
             brightnessFixedEdgeTask = nil
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         }
@@ -853,19 +829,6 @@ struct RootView: View {
                 proxy.size.width - StandControlLayoutMetrics.rowSpacing * 2
             )
         ).insets
-    }
-
-    private func scheduleBrightnessFeedbackHide() {
-        brightnessFeedbackTask?.cancel()
-        brightnessFeedbackTask = Task {
-            try? await Task.sleep(for: .seconds(1.2))
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.25)) {
-                    brightnessFeedback = nil
-                }
-            }
-        }
     }
 
     private func scheduleClockScaleFeedbackHide() {
@@ -1112,116 +1075,6 @@ private struct LampBackground: View {
                 Color(red: 0.025, green: 0.075, blue: 0.055).opacity(1 - intensity * 0.18)
             ]
         }
-    }
-}
-
-private struct BrightnessFeedbackView: View {
-    let feedback: BrightnessFeedback
-
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "sun.max.fill")
-                .font(.system(size: 24, weight: .semibold))
-
-            GeometryReader { proxy in
-                ZStack(alignment: .bottom) {
-                    Capsule()
-                        .fill(.black.opacity(0.26))
-
-                    Rectangle()
-                        .fill(.white.opacity(0.92))
-                        .frame(height: proxy.size.height * CGFloat(clampedValue))
-                        .frame(maxHeight: .infinity, alignment: .bottom)
-                        .mask(Capsule())
-
-                    Capsule()
-                        .stroke(.white.opacity(0.34), lineWidth: 1)
-
-                    Rectangle()
-                        .fill(.white.opacity(0.44))
-                        .frame(width: proxy.size.width, height: 1)
-                        .position(
-                            x: proxy.size.width / 2,
-                            y: proxy.size.height
-                                * CGFloat(1 - SimplifiedBrightnessModePolicy.mateUpperBound)
-                        )
-                }
-            }
-            .frame(width: 64, height: 176)
-
-            VStack(spacing: 2) {
-                Text(modeTitle)
-                    .font(.caption.weight(.semibold))
-                Text("\(displayPercent)%")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.62))
-            }
-            .lineLimit(1)
-
-            HStack(spacing: 12) {
-                Label("0–30% 매이트", systemImage: "moon.fill")
-                Label("31–99% 오브제", systemImage: "sun.max.fill")
-            }
-            .font(.system(size: 9.5, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.72))
-
-            Text(edgeHint)
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.88))
-                .padding(.horizontal, 11)
-                .padding(.vertical, 6)
-                .background(.white.opacity(0.09), in: Capsule())
-                .lineLimit(1)
-        }
-        .foregroundStyle(.white.opacity(feedbackVisibility))
-        .padding(.horizontal, 22)
-        .padding(.vertical, 20)
-        .background {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .fill(.black.opacity(0.34))
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .stroke(.white.opacity(0.12), lineWidth: 1)
-        }
-        .allowsHitTesting(false)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("화면 밝기")
-        .accessibilityValue("\(modeTitle), \(displayPercent)퍼센트")
-    }
-
-    private var feedbackVisibility: Double {
-        // 매이트 모드의 낮은 물리 밝기에서도 현황판은 실루엣 명도에 묻히지 않는다.
-        0.90 + (1 - clampedValue) * 0.10
-    }
-
-    private var clampedValue: Double {
-        min(1, max(0, feedback.value))
-    }
-
-    private var modeTitle: String {
-        if feedback.value >= 1 { return "오브제 모드 고정" }
-        if feedback.value <= 0 { return "매이트 모드 고정" }
-        return feedback.value <= SimplifiedBrightnessModePolicy.mateUpperBound
-            ? "매이트 모드"
-            : "오브제 모드"
-    }
-
-    private var displayPercent: Int {
-        Int((feedback.value * 100).rounded())
-    }
-
-    private var edgeHint: String {
-        if feedback.value >= 1 { return "오브제 모드 고정됨" }
-        if feedback.value <= 0 { return "매이트 모드 고정됨" }
-        if feedback.value >= SimplifiedBrightnessModePolicy.interactiveMaximum {
-            return "위 끝에서 1초 유지 · 오브제 고정"
-        }
-        if feedback.value <= SimplifiedBrightnessModePolicy.interactiveMinimum {
-            return "아래 끝에서 1초 유지 · 매이트 고정"
-        }
-        return "끝에서 1초 유지하면 모드 고정"
     }
 }
 
