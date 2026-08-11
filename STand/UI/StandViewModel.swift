@@ -65,6 +65,7 @@ enum SimplifiedBrightnessModePolicy {
     static let mateTapLevel = 0.1
     static let objectTapLevel = 0.9
     static let verticalDragTravelRatio = 0.5
+    static let verticalDragMinimumDistance: CGFloat = 6
     static let interactiveMinimum = 0.01
     static let interactiveMaximum = 0.99
     static let fixedEdgeHoldDuration: TimeInterval = 1
@@ -129,6 +130,15 @@ enum SimplifiedBrightnessModePolicy {
 
     static func tapLevel(from mode: EnvironmentDisplayMode) -> Double {
         mode == .stand ? mateTapLevel : objectTapLevel
+    }
+}
+
+enum AppBrightnessSystemSyncPolicy {
+    static func shouldAdoptSystemBrightness(
+        isAdjustingBrightness: Bool,
+        modePreference: StandModePreference
+    ) -> Bool {
+        !isAdjustingBrightness && modePreference == .automatic
     }
 }
 
@@ -510,10 +520,12 @@ final class StandViewModel: ObservableObject {
                 guard let screen = notification.object as? UIScreen else { return }
                 guard let self else { return }
                 guard !isFaceDown else { return }
+                guard AppBrightnessSystemSyncPolicy.shouldAdoptSystemBrightness(
+                    isAdjustingBrightness: isAdjustingBrightness,
+                    modePreference: settings.value.modePreference
+                ) else { return }
                 let newBrightness = Double(screen.brightness)
                 displayBrightness = newBrightness
-                guard !isAdjustingBrightness else { return }
-                guard settings.value.modePreference == .automatic else { return }
                 applyBaseBrightness(newBrightness, animated: false)
                 refreshEnvironmentDisplayMode(
                     preference: .automatic,

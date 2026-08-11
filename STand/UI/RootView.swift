@@ -462,7 +462,8 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.28), value: settings.value.displayTheme)
         .contentShape(Rectangle())
-        .gesture(screenAdjustmentGesture.exclusively(before: screenPressGesture))
+        .highPriorityGesture(screenAdjustmentGesture, including: .all)
+        .gesture(screenPressGesture)
         .simultaneousGesture(clockMagnificationGesture)
         .persistentSystemOverlays(.hidden)
         .sheet(item: $presentedSheet, onDismiss: {
@@ -705,7 +706,7 @@ struct RootView: View {
     }
 
     private var screenAdjustmentGesture: some Gesture {
-        DragGesture(minimumDistance: 10)
+        DragGesture(minimumDistance: SimplifiedBrightnessModePolicy.verticalDragMinimumDistance)
             .onChanged { value in
                 guard !isEditingScreen else { return }
                 guard abs(value.translation.height) > abs(value.translation.width) else { return }

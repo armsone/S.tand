@@ -1680,6 +1680,7 @@ final class AudioAnalysisTests: XCTestCase {
 
     func testHalfScreenVerticalDragStopsAtInteractiveEdgeUntilHeld() {
         XCTAssertEqual(SimplifiedBrightnessModePolicy.verticalDragTravelRatio, 0.5)
+        XCTAssertEqual(SimplifiedBrightnessModePolicy.verticalDragMinimumDistance, 6)
         XCTAssertEqual(SimplifiedBrightnessModePolicy.fixedEdgeHoldDuration, 1)
         XCTAssertEqual(
             SimplifiedBrightnessModePolicy.level(
@@ -1722,6 +1723,25 @@ final class AudioAnalysisTests: XCTestCase {
         )
         XCTAssertEqual(SimplifiedBrightnessModePolicy.preference(for: 0.99), .automatic)
         XCTAssertEqual(SimplifiedBrightnessModePolicy.preference(for: 0.01), .automatic)
+    }
+
+    func testSystemBrightnessCannotOverwriteAnActiveOrFixedAppAdjustment() {
+        XCTAssertFalse(AppBrightnessSystemSyncPolicy.shouldAdoptSystemBrightness(
+            isAdjustingBrightness: true,
+            modePreference: .automatic
+        ))
+        XCTAssertFalse(AppBrightnessSystemSyncPolicy.shouldAdoptSystemBrightness(
+            isAdjustingBrightness: false,
+            modePreference: .object
+        ))
+        XCTAssertFalse(AppBrightnessSystemSyncPolicy.shouldAdoptSystemBrightness(
+            isAdjustingBrightness: false,
+            modePreference: .mate
+        ))
+        XCTAssertTrue(AppBrightnessSystemSyncPolicy.shouldAdoptSystemBrightness(
+            isAdjustingBrightness: false,
+            modePreference: .automatic
+        ))
     }
 
     @MainActor
