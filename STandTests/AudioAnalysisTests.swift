@@ -1095,9 +1095,9 @@ final class AudioAnalysisTests: XCTestCase {
 
         // Top: 59 safe + 18 outer + 46 toolbar + 12 clearance.
         XCTAssertEqual(region.frame.minY, 135)
-        // Bottom: 34 safe + 18 outer + (60 + 6 + 60) rows + 6 clearance.
-        XCTAssertEqual(region.frame.maxY, 668)
-        XCTAssertEqual(region.insets.bottom, 184)
+        // Bottom: 34 safe + 18 outer + 12 version + (60 + 6 + 60) rows + 6 clearance.
+        XCTAssertEqual(region.frame.maxY, 656)
+        XCTAssertEqual(region.insets.bottom, 196)
     }
 
     func testEditorBoundaryGuidesMatchCurrentLandscapeControlRow() {
@@ -1109,9 +1109,9 @@ final class AudioAnalysisTests: XCTestCase {
 
         // Top: 14 outer + 46 toolbar + 2 clearance.
         XCTAssertEqual(region.frame.minY, 62)
-        // Bottom: 21 safe + 6 outer + 60 row + 2 clearance.
-        XCTAssertEqual(region.frame.maxY, 304)
-        XCTAssertEqual(region.insets.bottom, 89)
+        // Bottom: 21 safe + 6 outer + 12 version + 60 row + 2 clearance.
+        XCTAssertEqual(region.frame.maxY, 292)
+        XCTAssertEqual(region.insets.bottom, 101)
         XCTAssertEqual(region.frame.minX, 83)
         XCTAssertEqual(region.frame.maxX, 769)
     }

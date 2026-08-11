@@ -122,9 +122,10 @@ enum StandControlLayoutMetrics {
     static let foregroundOpacity = 0.78
     static let titleFontSize: CGFloat = 10.5
     static let statusFontSize: CGFloat = 8.5
+    static let versionFooterHeight: CGFloat = 12
 
     static func bottomPadding(isPortrait: Bool) -> CGFloat {
-        isPortrait ? 18 : 6
+        (isPortrait ? 18 : 6) + versionFooterHeight
     }
 }
 
@@ -361,6 +362,18 @@ struct RootView: View {
 
                     AppBrightnessDimmingLayer(level: model.displayBrightness)
                         .zIndex(80)
+
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        Text(AppVersion.build)
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.16))
+                            .frame(height: StandControlLayoutMetrics.versionFooterHeight)
+                    }
+                    .allowsHitTesting(false)
+                    .accessibilityLabel("빌드 번호 \(AppVersion.build)")
+                    .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
+                    .zIndex(6)
 
                     if brightnessDragState != nil {
                         AppBrightnessHUD(level: model.displayBrightness)
