@@ -87,6 +87,12 @@ private struct BrightnessDragState {
     let startingValue: Double
 }
 
+enum AppBrightnessVisualPolicy {
+    static func dimmingOpacity(for level: Double) -> Double {
+        1 - SimplifiedBrightnessModePolicy.clamped(level)
+    }
+}
+
 enum HomeEditorMode: Equatable {
     case panels
     case controls
@@ -352,6 +358,9 @@ struct RootView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.horizontal, isPortrait ? 20 : 32)
                         .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
+
+                    AppBrightnessDimmingLayer(level: model.displayBrightness)
+                        .zIndex(80)
 
                     if brightnessDragState != nil {
                         AppBrightnessHUD(level: model.displayBrightness)
@@ -1106,6 +1115,19 @@ private struct AppBrightnessHUD: View {
 
     private var percent: Int {
         Int((min(1, max(0, level)) * 100).rounded())
+    }
+}
+
+private struct AppBrightnessDimmingLayer: View {
+    let level: Double
+
+    var body: some View {
+        Color.black
+            .opacity(AppBrightnessVisualPolicy.dimmingOpacity(for: level))
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .animation(.linear(duration: 0.06), value: level)
     }
 }
 

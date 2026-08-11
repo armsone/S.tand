@@ -1598,6 +1598,15 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(SimplifiedBrightnessModePolicy.tapLevel(from: .sleeping), 0.9)
     }
 
+    func testAppBrightnessDimsTheEntireInterfaceAtTheSelectedLevel() {
+        XCTAssertEqual(AppBrightnessVisualPolicy.dimmingOpacity(for: 1), 0, accuracy: 0.001)
+        XCTAssertEqual(AppBrightnessVisualPolicy.dimmingOpacity(for: 0.7), 0.3, accuracy: 0.001)
+        XCTAssertEqual(AppBrightnessVisualPolicy.dimmingOpacity(for: 0.3), 0.7, accuracy: 0.001)
+        XCTAssertEqual(AppBrightnessVisualPolicy.dimmingOpacity(for: 0), 1, accuracy: 0.001)
+        XCTAssertEqual(AppBrightnessVisualPolicy.dimmingOpacity(for: -1), 1, accuracy: 0.001)
+        XCTAssertEqual(AppBrightnessVisualPolicy.dimmingOpacity(for: 2), 0, accuracy: 0.001)
+    }
+
     func testCameraBrightnessUsesSustainedBrightReadingWithoutReactingToAmbiguousLight() {
         let now = Date()
         XCTAssertEqual(AmbientCameraModePolicy.minimumObservationDuration, 2)
@@ -1734,6 +1743,18 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(model.settings.value.lampIntensity, 0.37, accuracy: 0.001)
         XCTAssertEqual(model.settings.value.modePreference, .automatic)
         XCTAssertEqual(UIScreen.main.brightness, systemBrightness, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testBrightnessPreviewImmediatelyUpdatesTheRenderedLamp() {
+        let model = StandViewModel()
+        model.startNightSession()
+
+        model.beginBrightnessAdjustment()
+        model.previewBrightnessLevel(0.24)
+
+        XCTAssertEqual(model.displayBrightness, 0.24, accuracy: 0.001)
+        XCTAssertEqual(model.lampIntensity, 0.24, accuracy: 0.001)
     }
 
     func testSecondsPanelLosesItsBackgroundWhenPlacedOnClock() {
