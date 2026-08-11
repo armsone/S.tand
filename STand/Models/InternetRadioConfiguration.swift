@@ -23,14 +23,19 @@ enum InternetRadioConfigurationError: LocalizedError, Equatable {
     }
 }
 
-struct InternetRadioConfiguration: Codable, Equatable {
+struct InternetRadioConfiguration: Codable, Equatable, Hashable, Identifiable {
     static let defaultDisplayName = "인터넷 라디오"
     static let maximumAddressLength = 2_048
 
+    let id: UUID
     let displayName: String
     let urlString: String
 
-    init(displayName: String, urlString: String) throws {
+    init(
+        id: UUID = UUID(),
+        displayName: String,
+        urlString: String
+    ) throws {
         let trimmedAddress = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedAddress.isEmpty else {
             throw InternetRadioConfigurationError.emptyAddress
@@ -51,6 +56,7 @@ struct InternetRadioConfiguration: Codable, Equatable {
         }
 
         let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.id = id
         self.displayName = trimmedName.isEmpty ? Self.defaultDisplayName : String(trimmedName.prefix(30))
         self.urlString = trimmedAddress
     }
@@ -61,6 +67,7 @@ struct InternetRadioConfiguration: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case id
         case displayName
         case urlString
     }
@@ -68,9 +75,14 @@ struct InternetRadioConfiguration: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         try self.init(
+            id: (try? container.decode(UUID.self, forKey: .id)) ?? UUID(),
             displayName: container.decodeIfPresent(String.self, forKey: .displayName) ?? "",
             urlString: container.decode(String.self, forKey: .urlString)
         )
+    }
+
+    func updated(displayName: String, urlString: String) throws -> Self {
+        try Self(id: id, displayName: displayName, urlString: urlString)
     }
 }
 
@@ -118,7 +130,23 @@ enum InternetRadioImportPolicy {
         existing: InternetRadioConfiguration?
     ) -> InternetRadioConfiguration {
         (try? InternetRadioConfiguration(
+            id: existing?.id ?? shared.id,
             displayName: existing?.displayName ?? shared.displayName,
+            urlString: shared.urlString
+        )) ?? shared
+    }
+
+    static func draft(
+        shared: InternetRadioConfiguration,
+        existingChannels: [InternetRadioConfiguration]
+    ) -> InternetRadioConfiguration {
+        guard let existing = existingChannels.first(where: {
+            $0.urlString == shared.urlString
+        }) else { return shared }
+
+        return (try? InternetRadioConfiguration(
+            id: existing.id,
+            displayName: existing.displayName,
             urlString: shared.urlString
         )) ?? shared
     }

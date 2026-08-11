@@ -148,7 +148,7 @@ final class ShareViewController: UIViewController {
                 displayName: suggestedName,
                 urlString: url.absoluteString
             )
-            statusLabel.text = "S.tand를 열면 라디오 주소 입력란에 자동으로 채워집니다. 저장 전까지 기존 주소는 바뀌지 않습니다."
+            statusLabel.text = "S.tand를 열면 라디오 채널 입력란에 자동으로 채워집니다. 저장 전까지 기존 채널 목록은 바뀌지 않습니다."
             saveButton.isEnabled = true
         } catch {
             showLoadFailure(error.localizedDescription)

@@ -462,6 +462,7 @@ struct RootView: View {
                 InternetRadioConfigurationView(
                     configuration: model.sharedInternetRadioDraft
                         ?? settings.value.internetRadio,
+                    accent: settings.value.displayTheme.accentColor,
                     isSharedImport: model.sharedInternetRadioDraft != nil,
                     allowsDeletion: model.sharedInternetRadioDraft == nil
                         && settings.value.internetRadio != nil,
@@ -642,7 +643,11 @@ struct RootView: View {
                 : "battery.50percent",
             radioConfiguration: settings.value.internetRadio,
             radioState: radio.state,
-            onToggleRadio: model.toggleInternetRadioPlayback
+            onToggleRadio: model.toggleInternetRadioPlayback,
+            onEditRadio: {
+                guard settings.value.internetRadio != nil else { return }
+                presentedSheet = .internetRadio
+            }
         )
     }
 
@@ -653,7 +658,7 @@ struct RootView: View {
     private var internetRadioEditorIdentity: String {
         let configuration = model.sharedInternetRadioDraft ?? settings.value.internetRadio
         let source = model.sharedInternetRadioDraft == nil ? "saved" : "shared"
-        return "\(source)|\(configuration?.displayName ?? "")|\(configuration?.urlString ?? "")"
+        return "\(source)|\(configuration?.id.uuidString ?? "new")"
     }
 
     private func enterScreenEditing(isPortrait: Bool, mode: HomeEditorMode) {
@@ -753,7 +758,7 @@ struct RootView: View {
             .onEnded { result in
                 switch result {
                 case .first(true):
-                    guard !isEditingScreen else { return }
+                    guard !isEditingScreen, presentedSheet == nil else { return }
                     enterScreenEditing(isPortrait: currentIsPortrait, mode: .panels)
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 case .second(let tapResult):
@@ -1082,8 +1087,10 @@ private struct AppBrightnessHUD: View {
         HStack(spacing: 9) {
             Image(systemName: "sun.max.fill")
                 .font(.system(size: 16, weight: .semibold))
+
             Text("앱 밝기")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
+
             Text("\(percent)%")
                 .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
         }
@@ -1092,7 +1099,8 @@ private struct AppBrightnessHUD: View {
         .frame(height: 46)
         .background(.black.opacity(0.48), in: Capsule())
         .overlay {
-            Capsule().stroke(.white.opacity(0.14), lineWidth: 1)
+            Capsule()
+                .stroke(.white.opacity(0.14), lineWidth: 1)
         }
     }
 
@@ -1296,6 +1304,7 @@ private struct DashboardCanvas: View {
     let radioConfiguration: InternetRadioConfiguration?
     let radioState: InternetRadioPlaybackState
     let onToggleRadio: () -> Void
+    let onEditRadio: () -> Void
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -1363,7 +1372,8 @@ private struct DashboardCanvas: View {
                         dimmedIntensity: dimmedIntensity,
                         showsEditBadge: false,
                         renderedScale: layout.radio.scale * clockScale,
-                        action: onToggleRadio
+                        action: onToggleRadio,
+                        editAction: onEditRadio
                     )
                     .panelTransform(layout.radio, canvasSize: canvasSize)
                 }
@@ -1401,15 +1411,29 @@ private struct InternetRadioPanel: View {
     let showsEditBadge: Bool
     let renderedScale: Double
     let action: () -> Void
+    let editAction: () -> Void
 
     var body: some View {
         Group {
             if showsEditBadge {
                 panelContent
-                    .accessibilityAction(named: Text("주소 편집"), action)
             } else {
-                Button(action: action) { panelContent }
-                    .buttonStyle(.plain)
+                panelContent
+                    .highPriorityGesture(
+                        LongPressGesture(minimumDuration: 0.8, maximumDistance: 12)
+                            .exclusively(before: TapGesture())
+                            .onEnded { result in
+                                switch result {
+                                case .first(true):
+                                    editAction()
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                case .second:
+                                    action()
+                                default:
+                                    break
+                                }
+                            }
+                    )
             }
         }
         .foregroundStyle(.white.opacity(isDimmed ? 0.46 : 0.78))
@@ -1418,6 +1442,14 @@ private struct InternetRadioPanel: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(accessibilityHint)
+        .accessibilityAction {
+            if showsEditBadge {
+                editAction()
+            } else {
+                action()
+            }
+        }
+        .accessibilityAction(named: Text("채널 편집"), editAction)
     }
 
     private var panelContent: some View {
@@ -1486,7 +1518,7 @@ private struct InternetRadioPanel: View {
 
     private var statusText: String {
         guard configuration != nil else { return "HTTPS 주소 등록" }
-        if showsEditBadge { return "주소 편집" }
+        if showsEditBadge { return "채널 편집" }
         return switch state {
         case .idle: "재생"
         case .loading: "연결 취소"
@@ -1503,8 +1535,8 @@ private struct InternetRadioPanel: View {
     private var accessibilityHint: String {
         guard !showsEditBadge else {
             return configuration == nil
-                ? "라디오 주소를 등록합니다"
-                : "라디오 주소를 편집합니다"
+                ? "라디오 채널을 등록합니다"
+                : "라디오 채널을 편집합니다"
         }
         return switch state {
         case .idle, .failed: "등록한 인터넷 라디오를 재생합니다"
@@ -2123,7 +2155,8 @@ private struct ScreenEditorView: View {
                         dimmedIntensity: 1,
                         showsEditBadge: true,
                         renderedScale: layout.radio.scale,
-                        action: onConfigureRadio
+                        action: onConfigureRadio,
+                        editAction: onConfigureRadio
                     )
                 }
 
@@ -2312,8 +2345,10 @@ private struct InternetRadioConfigurationView: View {
     @State private var displayName: String
     @State private var address: String
     @State private var validationMessage: String?
+    @State private var showsBrowser = false
 
     let configuration: InternetRadioConfiguration?
+    let accent: Color
     let isSharedImport: Bool
     let allowsDeletion: Bool
     let onSave: (InternetRadioConfiguration) -> Void
@@ -2322,6 +2357,7 @@ private struct InternetRadioConfigurationView: View {
 
     init(
         configuration: InternetRadioConfiguration?,
+        accent: Color = .orange,
         isSharedImport: Bool = false,
         allowsDeletion: Bool? = nil,
         onSave: @escaping (InternetRadioConfiguration) -> Void,
@@ -2329,6 +2365,7 @@ private struct InternetRadioConfigurationView: View {
         onCancel: @escaping () -> Void = {}
     ) {
         self.configuration = configuration
+        self.accent = accent
         self.isSharedImport = isSharedImport
         self.allowsDeletion = allowsDeletion ?? (configuration != nil)
         self.onSave = onSave
@@ -2350,6 +2387,13 @@ private struct InternetRadioConfigurationView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
 
+                    PasteButton(payloadType: String.self) { values in
+                        guard let pasted = values.first else { return }
+                        address = pasted
+                        validationMessage = nil
+                    }
+                    .accessibilityLabel("복사한 주소 붙여넣기")
+
                     if let validationMessage {
                         Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
@@ -2361,13 +2405,23 @@ private struct InternetRadioConfigurationView: View {
                     Text(radioInformationFooter)
                 }
 
+                Section {
+                    Button {
+                        showsBrowser = true
+                    } label: {
+                        Label("웹에서 주소 찾기", systemImage: "safari.fill")
+                    }
+                } footer: {
+                    Text("브라우저는 주소를 자동으로 감지하거나 입력하지 않습니다. 이용 권한이 있는 주소를 직접 복사한 뒤 돌아와 붙여넣어 주세요.")
+                }
+
                 if isSharedImport {
                     Section {
                         Label(
-                            "Safari에서 공유한 주소를 자동으로 입력했습니다.",
+                            "Safari에서 직접 공유한 주소를 입력했습니다.",
                             systemImage: "safari.fill"
                         )
-                        Text("저장을 누르기 전까지 기존 라디오 주소는 바뀌지 않습니다.")
+                        Text("저장을 누르기 전까지 기존 채널 목록은 바뀌지 않습니다.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -2386,14 +2440,14 @@ private struct InternetRadioConfigurationView: View {
 
                 if allowsDeletion {
                     Section {
-                        Button("등록 주소 삭제", role: .destructive) {
+                        Button("채널 삭제", role: .destructive) {
                             onDelete()
                             dismiss()
                         }
                     }
                 }
             }
-            .navigationTitle("인터넷 라디오")
+            .navigationTitle("라디오 채널")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -2407,6 +2461,9 @@ private struct InternetRadioConfigurationView: View {
                         .fontWeight(.semibold)
                 }
             }
+            .fullScreenCover(isPresented: $showsBrowser) {
+                InternetRadioBrowserView(accent: accent)
+            }
         }
         .preferredColorScheme(.dark)
         .interactiveDismissDisabled(isSharedImport)
@@ -2419,6 +2476,7 @@ private struct InternetRadioConfigurationView: View {
     private func save() {
         do {
             let configuration = try InternetRadioConfiguration(
+                id: configuration?.id ?? UUID(),
                 displayName: displayName,
                 urlString: address
             )

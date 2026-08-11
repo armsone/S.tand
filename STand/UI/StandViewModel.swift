@@ -202,6 +202,16 @@ enum AmbientCameraModePolicy {
         if reading.value <= darkThreshold { return .sleeping }
         return current
     }
+
+    static func isRecentlyDark(
+        _ reading: AmbientBrightnessReading?,
+        now: Date = Date()
+    ) -> Bool {
+        guard let reading,
+              now.timeIntervalSince(reading.measuredAt) <= maximumReadingAge
+        else { return false }
+        return reading.value <= darkThreshold
+    }
 }
 
 enum AmbientCameraSamplingPolicy {
@@ -295,9 +305,10 @@ enum SleepCareMonitoringPolicy {
 enum SleepMovementLightingPolicy {
     static func torchLevel(
         torchEnabled: Bool,
-        environmentDisplayMode: EnvironmentDisplayMode
+        environmentDisplayMode: EnvironmentDisplayMode,
+        roomIsDark: Bool
     ) -> Double {
-        guard environmentDisplayMode == .sleeping else { return 0 }
+        guard environmentDisplayMode == .sleeping, roomIsDark else { return 0 }
         return torchEnabled ? 1 : 0.1
     }
 }
@@ -306,13 +317,40 @@ enum LampTorchLightingPolicy {
     static func maximumLevel(
         torchEnabled: Bool,
         isMovementTriggered: Bool,
-        environmentDisplayMode: EnvironmentDisplayMode
+        environmentDisplayMode: EnvironmentDisplayMode,
+        roomIsDark: Bool
     ) -> Double {
         guard environmentDisplayMode == .sleeping, isMovementTriggered else { return 0 }
         return SleepMovementLightingPolicy.torchLevel(
             torchEnabled: torchEnabled,
-            environmentDisplayMode: environmentDisplayMode
+            environmentDisplayMode: environmentDisplayMode,
+            roomIsDark: roomIsDark
         )
+    }
+}
+
+enum InternetRadioPlaybackMutationPolicy {
+    static func shouldStopForSelection(
+        activeChannelID: UUID?,
+        selectedChannelID: UUID?
+    ) -> Bool {
+        guard let activeChannelID else { return false }
+        return activeChannelID != selectedChannelID
+    }
+
+    static func shouldStopForUpdate(
+        activeChannelID: UUID?,
+        previous: InternetRadioConfiguration,
+        updated: InternetRadioConfiguration
+    ) -> Bool {
+        activeChannelID == previous.id && previous.urlString != updated.urlString
+    }
+
+    static func shouldStopForRemoval(
+        activeChannelID: UUID?,
+        removedChannelID: UUID
+    ) -> Bool {
+        activeChannelID == removedChannelID
     }
 }
 
@@ -435,7 +473,15 @@ final class StandViewModel: ObservableObject {
             .sink { [weak self] value in
                 guard let self else { return }
                 audio.configure(settings: value)
-                if value.internetRadio == nil, radio.state.isActive {
+                if let activeChannelID = radio.activeChannelID {
+                    let activeConfiguration = value.internetRadioChannels.first(where: {
+                        $0.id == activeChannelID
+                    })
+                    if value.selectedInternetRadioID != activeChannelID
+                        || activeConfiguration?.streamURL != radio.activeStreamURL {
+                        stopInternetRadioPlayback()
+                    }
+                } else if value.internetRadio == nil, radio.state.isActive {
                     stopInternetRadioPlayback()
                 }
                 orientationPreference = value.orientationPreference
@@ -681,10 +727,12 @@ final class StandViewModel: ObservableObject {
                 sessionID: activeRecordingSessionID
             )
         }
+        ambientCamera.cancel()
         activateLamp(triggeredBySleepMovement: true)
         let torchLevel = SleepMovementLightingPolicy.torchLevel(
             torchEnabled: settings.value.torchEnabled,
-            environmentDisplayMode: environmentDisplayMode
+            environmentDisplayMode: environmentDisplayMode,
+            roomIsDark: roomIsDarkForStartleTorch
         )
         guard torchLevel > 0 else { return }
 
@@ -700,7 +748,8 @@ final class StandViewModel: ObservableObject {
                       self.lampPhase != .off,
                       SleepMovementLightingPolicy.torchLevel(
                         torchEnabled: self.settings.value.torchEnabled,
-                        environmentDisplayMode: self.environmentDisplayMode
+                        environmentDisplayMode: self.environmentDisplayMode,
+                        roomIsDark: self.roomIsDarkForStartleTorch
                       ) > 0
                 else { return }
                 self.syncTorch()
@@ -782,20 +831,121 @@ final class StandViewModel: ObservableObject {
         radio.stop()
     }
 
-    func saveInternetRadioConfiguration(_ configuration: InternetRadioConfiguration) {
-        stopInternetRadioPlayback()
-        sharedInternetRadioDraft = nil
-        SharedInternetRadioImportStore().clearPendingConfiguration()
+    func addInternetRadioChannel(
+        _ configuration: InternetRadioConfiguration,
+        select: Bool = true
+    ) {
         var value = settings.value
-        value.internetRadio = configuration
+        let existing = value.internetRadioChannels.first(where: { $0.id == configuration.id })
+        let willSelect = select || value.selectedInternetRadioID == nil
+        let shouldStopForUpdate = existing.map {
+            InternetRadioPlaybackMutationPolicy.shouldStopForUpdate(
+                activeChannelID: radio.activeChannelID,
+                previous: $0,
+                updated: configuration
+            )
+        } ?? false
+        let shouldStopForSelection = willSelect
+            && InternetRadioPlaybackMutationPolicy.shouldStopForSelection(
+                activeChannelID: radio.activeChannelID,
+                selectedChannelID: configuration.id
+            )
+        if shouldStopForUpdate || shouldStopForSelection {
+            stopInternetRadioPlayback()
+        }
+
+        value.addInternetRadioChannel(configuration, select: select)
         settings.value = value
     }
 
-    func removeInternetRadioConfiguration() {
-        stopInternetRadioPlayback()
+    @discardableResult
+    func updateInternetRadioChannel(_ configuration: InternetRadioConfiguration) -> Bool {
         var value = settings.value
-        value.internetRadio = nil
+        guard let previous = value.internetRadioChannels.first(where: {
+            $0.id == configuration.id
+        }) else { return false }
+
+        if InternetRadioPlaybackMutationPolicy.shouldStopForUpdate(
+            activeChannelID: radio.activeChannelID,
+            previous: previous,
+            updated: configuration
+        ) {
+            stopInternetRadioPlayback()
+        }
+        guard value.updateInternetRadioChannel(configuration) else { return false }
         settings.value = value
+        return true
+    }
+
+    @discardableResult
+    func selectInternetRadioChannel(id: UUID) -> Bool {
+        var value = settings.value
+        guard value.internetRadioChannels.contains(where: { $0.id == id }) else {
+            return false
+        }
+        if InternetRadioPlaybackMutationPolicy.shouldStopForSelection(
+            activeChannelID: radio.activeChannelID,
+            selectedChannelID: id
+        ) {
+            stopInternetRadioPlayback()
+        }
+        guard value.selectInternetRadioChannel(id: id) else { return false }
+        settings.value = value
+        return true
+    }
+
+    @discardableResult
+    func removeInternetRadioChannel(id: UUID) -> InternetRadioConfiguration? {
+        var value = settings.value
+        guard value.internetRadioChannels.contains(where: { $0.id == id }) else {
+            return nil
+        }
+        if InternetRadioPlaybackMutationPolicy.shouldStopForRemoval(
+            activeChannelID: radio.activeChannelID,
+            removedChannelID: id
+        ) {
+            stopInternetRadioPlayback()
+        }
+        guard let removed = value.removeInternetRadioChannel(id: id) else { return nil }
+        settings.value = value
+        return removed
+    }
+
+    @discardableResult
+    func moveInternetRadioChannel(id: UUID, to destinationIndex: Int) -> Bool {
+        var value = settings.value
+        guard value.moveInternetRadioChannel(id: id, to: destinationIndex) else {
+            return false
+        }
+        settings.value = value
+        return true
+    }
+
+    func saveInternetRadioConfiguration(_ configuration: InternetRadioConfiguration) {
+        let identity = sharedInternetRadioDraft?.id
+            ?? settings.value.internetRadio?.id
+            ?? configuration.id
+        let identifiedConfiguration = (try? InternetRadioConfiguration(
+            id: identity,
+            displayName: configuration.displayName,
+            urlString: configuration.urlString
+        )) ?? configuration
+
+        if settings.value.internetRadioChannels.contains(where: {
+            $0.id == identifiedConfiguration.id
+        }) {
+            _ = updateInternetRadioChannel(identifiedConfiguration)
+            _ = selectInternetRadioChannel(id: identifiedConfiguration.id)
+        } else {
+            addInternetRadioChannel(identifiedConfiguration)
+        }
+        sharedInternetRadioDraft = nil
+        SharedInternetRadioImportStore().clearPendingConfiguration()
+    }
+
+    func removeInternetRadioConfiguration() {
+        guard let id = settings.value.selectedInternetRadioID else { return }
+        _ = removeInternetRadioChannel(id: id)
     }
 
     func discardSharedInternetRadioDraft() {
@@ -807,7 +957,7 @@ final class StandViewModel: ObservableObject {
         guard let configuration = SharedInternetRadioImportStore().pendingConfiguration() else { return }
         sharedInternetRadioDraft = InternetRadioImportPolicy.draft(
             shared: configuration,
-            existing: settings.value.internetRadio
+            existingChannels: settings.value.internetRadioChannels
         )
     }
 
@@ -815,7 +965,7 @@ final class StandViewModel: ObservableObject {
         guard let configuration = settings.value.internetRadio else { return }
         monitoringSuspensions.insert(.internetRadio)
         audio.stop()
-        radio.play(url: configuration.streamURL)
+        radio.play(configuration)
     }
 
     private func refreshEnvironmentDisplayMode(
@@ -1072,7 +1222,8 @@ final class StandViewModel: ObservableObject {
         let maximumTorchLevel = LampTorchLightingPolicy.maximumLevel(
             torchEnabled: currentSettings.torchEnabled,
             isMovementTriggered: isMovementTriggeredLamp,
-            environmentDisplayMode: environmentDisplayMode
+            environmentDisplayMode: environmentDisplayMode,
+            roomIsDark: roomIsDarkForStartleTorch
         )
         guard maximumTorchLevel > 0 else {
             torch.turnOff()
@@ -1082,6 +1233,10 @@ final class StandViewModel: ObservableObject {
             ? lampIntensity / activeLampMaximumIntensity
             : 0
         torch.setLevel(progress * maximumTorchLevel)
+    }
+
+    private var roomIsDarkForStartleTorch: Bool {
+        AmbientCameraModePolicy.isRecentlyDark(lastAmbientBrightnessReading)
     }
 
     func revealControls() {

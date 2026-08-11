@@ -120,8 +120,84 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
+    func testInternetRadioBrowserAddressAcceptsOnlyCredentialFreeHTTPS() throws {
+        let explicit = try InternetRadioBrowserAddress.secureURL(
+            from: "  https://radio.example.com/live?token=public  "
+        )
+        let schemeLess = try InternetRadioBrowserAddress.secureURL(
+            from: "radio.example.com/live.mp3"
+        )
+
+        XCTAssertEqual(
+            explicit.absoluteString,
+            "https://radio.example.com/live?token=public"
+        )
+        XCTAssertEqual(
+            schemeLess.absoluteString,
+            "https://radio.example.com/live.mp3"
+        )
+        XCTAssertTrue(InternetRadioBrowserAddress.isSecureWebURL(explicit))
+
+        let searchURL = try InternetRadioBrowserAddress.browsingURL(from: "한국 라디오")
+        XCTAssertEqual(searchURL.host, "www.google.com")
+        XCTAssertEqual(searchURL.path, "/search")
+        XCTAssertEqual(
+            URLComponents(url: searchURL, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "q" })?.value,
+            "한국 라디오"
+        )
+
+        for rejectedAddress in [
+            "",
+            "http://radio.example.com/live",
+            "file:///tmp/radio.mp3",
+            "https:///live.mp3",
+            "https://user:password@radio.example.com/live.mp3"
+        ] {
+            XCTAssertThrowsError(
+                try InternetRadioBrowserAddress.secureURL(from: rejectedAddress),
+                "허용되지 않은 주소가 브라우저 검증을 통과했습니다: \(rejectedAddress)"
+            )
+        }
+
+        let oversizedAddress = String(
+            repeating: "a",
+            count: InternetRadioConfiguration.maximumAddressLength + 1
+        )
+        XCTAssertThrowsError(
+            try InternetRadioBrowserAddress.secureURL(from: oversizedAddress)
+        )
+    }
+
+    func testInternetRadioBrowserUsesRequestedHomepageAndFavorites() {
+        XCTAssertEqual(
+            InternetRadioBrowserAddress.defaultHomepage.absoluteString,
+            "https://www.google.com/"
+        )
+        XCTAssertEqual(
+            InternetRadioBrowserFavorite.defaults.map(\.title),
+            ["Google", "한국 라디오", "FMSTREAM", "Radio Browser"]
+        )
+        XCTAssertEqual(
+            InternetRadioBrowserFavorite.defaults.map { $0.url.absoluteString },
+            [
+                "https://www.google.com/",
+                "https://radio.bsod.kr/",
+                "https://fmstream.org/",
+                "https://www.radio-browser.info/"
+            ]
+        )
+        XCTAssertTrue(InternetRadioBrowserFavorite.defaults[0].isHomepage)
+        XCTAssertTrue(
+            InternetRadioBrowserFavorite.defaults.dropFirst().allSatisfy {
+                !$0.isHomepage
+            }
+        )
+    }
+
     func testInternetRadioSettingsRoundTripWithoutBundledPreset() throws {
         XCTAssertNil(AppSettings.recommended.internetRadio)
+        XCTAssertTrue(AppSettings.recommended.internetRadioChannels.isEmpty)
 
         let configuration = try InternetRadioConfiguration(
             displayName: "개인 방송",
@@ -134,6 +210,222 @@ final class AudioAnalysisTests: XCTestCase {
         )
 
         XCTAssertEqual(decoded.internetRadio, configuration)
+        XCTAssertEqual(decoded.internetRadioChannels, [configuration])
+        XCTAssertEqual(decoded.selectedInternetRadioID, configuration.id)
+    }
+
+    func testLegacySingleInternetRadioMigratesToSelectedChannel() throws {
+        let legacyJSON = """
+        {
+          "internetRadio": {
+            "displayName": "예전 방송",
+            "urlString": "https://legacy.example.com/live"
+          }
+        }
+        """.data(using: .utf8)!
+
+        let settings = try JSONDecoder().decode(AppSettings.self, from: legacyJSON)
+        let migrated = try XCTUnwrap(settings.internetRadio)
+
+        XCTAssertEqual(settings.internetRadioChannels, [migrated])
+        XCTAssertEqual(settings.selectedInternetRadioID, migrated.id)
+        XCTAssertEqual(migrated.displayName, "예전 방송")
+        XCTAssertEqual(migrated.urlString, "https://legacy.example.com/live")
+    }
+
+    @MainActor
+    func testSettingsStorePersistsLegacyRadioMigrationWithStableID() throws {
+        let suiteName = "STandTests.radio-migration.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let legacyJSON = """
+        {
+          "internetRadio": {
+            "displayName": "예전 방송",
+            "urlString": "https://legacy.example.com/live"
+          }
+        }
+        """.data(using: .utf8)!
+        defaults.set(legacyJSON, forKey: "appSettings")
+        defaults.set(true, forKey: SettingsMigration.torchEnabledByDefaultKey)
+        defaults.set(true, forKey: SettingsMigration.fiveSecondHoldDurationKey)
+
+        let firstLoad = SettingsStore(defaults: defaults)
+        let migratedID = try XCTUnwrap(firstLoad.value.selectedInternetRadioID)
+
+        XCTAssertTrue(defaults.bool(forKey: SettingsMigration.internetRadioChannelsKey))
+        let persistedData = try XCTUnwrap(defaults.data(forKey: "appSettings"))
+        let persisted = try JSONDecoder().decode(AppSettings.self, from: persistedData)
+        XCTAssertEqual(persisted.selectedInternetRadioID, migratedID)
+        XCTAssertEqual(persisted.internetRadioChannels.count, 1)
+
+        let secondLoad = SettingsStore(defaults: defaults)
+        XCTAssertEqual(secondLoad.value.selectedInternetRadioID, migratedID)
+    }
+
+    func testInternetRadioChannelsRoundTripAndRepairMissingSelection() throws {
+        let first = try InternetRadioConfiguration(
+            displayName: "첫 방송",
+            urlString: "https://one.example.com/live"
+        )
+        let second = try InternetRadioConfiguration(
+            displayName: "둘째 방송",
+            urlString: "https://two.example.com/live"
+        )
+        let original = AppSettings(
+            internetRadioChannels: [first, second],
+            selectedInternetRadioID: second.id
+        )
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: encoded)
+
+        XCTAssertEqual(decoded.internetRadioChannels, [first, second])
+        XCTAssertEqual(decoded.selectedInternetRadioID, second.id)
+        XCTAssertEqual(decoded.internetRadio, second)
+
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object["selectedInternetRadioID"] = UUID().uuidString
+        let repaired = try JSONDecoder().decode(
+            AppSettings.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertEqual(repaired.selectedInternetRadioID, first.id)
+        XCTAssertEqual(repaired.internetRadio, first)
+    }
+
+    func testInternetRadioChannelMutationsPreserveStableSelection() throws {
+        let first = try InternetRadioConfiguration(
+            displayName: "첫 방송",
+            urlString: "https://one.example.com/live"
+        )
+        let second = try InternetRadioConfiguration(
+            displayName: "둘째 방송",
+            urlString: "https://two.example.com/live"
+        )
+        var settings = AppSettings(
+            internetRadioChannels: [first, second],
+            selectedInternetRadioID: first.id
+        )
+
+        let renamedSecond = try second.updated(
+            displayName: "수정한 둘째 방송",
+            urlString: "https://two.example.com/new-live"
+        )
+        XCTAssertTrue(settings.updateInternetRadioChannel(renamedSecond))
+        XCTAssertEqual(settings.internetRadio, first)
+        XCTAssertEqual(settings.internetRadioChannels[1], renamedSecond)
+
+        XCTAssertTrue(settings.selectInternetRadioChannel(id: second.id))
+        XCTAssertEqual(settings.internetRadio, renamedSecond)
+        XCTAssertEqual(settings.removeInternetRadioChannel(id: second.id), renamedSecond)
+        XCTAssertEqual(settings.internetRadio, first)
+
+        settings.addInternetRadioChannel(renamedSecond, select: false)
+        XCTAssertEqual(settings.internetRadio, first)
+        XCTAssertTrue(settings.moveInternetRadioChannel(id: renamedSecond.id, to: 0))
+        XCTAssertEqual(settings.internetRadioChannels, [renamedSecond, first])
+        XCTAssertEqual(settings.internetRadio, first)
+        XCTAssertFalse(settings.selectInternetRadioChannel(id: UUID()))
+    }
+
+    func testRadioPlaybackMutationPolicyStopsOnlyForActiveChannelChanges() throws {
+        let active = try InternetRadioConfiguration(
+            displayName: "재생 중",
+            urlString: "https://active.example.com/live"
+        )
+        let inactive = try InternetRadioConfiguration(
+            displayName: "대기 중",
+            urlString: "https://inactive.example.com/live"
+        )
+        let renamedActive = try active.updated(
+            displayName: "이름만 수정",
+            urlString: active.urlString
+        )
+        let changedActive = try active.updated(
+            displayName: "주소 수정",
+            urlString: "https://active.example.com/new-live"
+        )
+        let changedInactive = try inactive.updated(
+            displayName: "대기 주소 수정",
+            urlString: "https://inactive.example.com/new-live"
+        )
+
+        XCTAssertFalse(
+            InternetRadioPlaybackMutationPolicy.shouldStopForSelection(
+                activeChannelID: active.id,
+                selectedChannelID: active.id
+            )
+        )
+        XCTAssertTrue(
+            InternetRadioPlaybackMutationPolicy.shouldStopForSelection(
+                activeChannelID: active.id,
+                selectedChannelID: inactive.id
+            )
+        )
+        XCTAssertFalse(
+            InternetRadioPlaybackMutationPolicy.shouldStopForUpdate(
+                activeChannelID: active.id,
+                previous: active,
+                updated: renamedActive
+            )
+        )
+        XCTAssertTrue(
+            InternetRadioPlaybackMutationPolicy.shouldStopForUpdate(
+                activeChannelID: active.id,
+                previous: active,
+                updated: changedActive
+            )
+        )
+        XCTAssertFalse(
+            InternetRadioPlaybackMutationPolicy.shouldStopForUpdate(
+                activeChannelID: active.id,
+                previous: inactive,
+                updated: changedInactive
+            )
+        )
+        XCTAssertTrue(
+            InternetRadioPlaybackMutationPolicy.shouldStopForRemoval(
+                activeChannelID: active.id,
+                removedChannelID: active.id
+            )
+        )
+        XCTAssertFalse(
+            InternetRadioPlaybackMutationPolicy.shouldStopForRemoval(
+                activeChannelID: active.id,
+                removedChannelID: inactive.id
+            )
+        )
+    }
+
+    func testSharedImportReusesOnlyAnExactExistingStream() throws {
+        let existing = try InternetRadioConfiguration(
+            displayName: "저장한 이름",
+            urlString: "https://radio.example.com/Live"
+        )
+        let sameStream = try InternetRadioConfiguration(
+            displayName: "공유 페이지 제목",
+            urlString: "https://radio.example.com/Live"
+        )
+        let differentCasePath = try InternetRadioConfiguration(
+            displayName: "다른 방송",
+            urlString: "https://radio.example.com/live"
+        )
+
+        let matched = InternetRadioImportPolicy.draft(
+            shared: sameStream,
+            existingChannels: [existing]
+        )
+        let unmatched = InternetRadioImportPolicy.draft(
+            shared: differentCasePath,
+            existingChannels: [existing]
+        )
+
+        XCTAssertEqual(matched.id, existing.id)
+        XCTAssertEqual(matched.displayName, existing.displayName)
+        XCTAssertEqual(unmatched, differentCasePath)
     }
 
     func testSharedInternetRadioImportIsLocalLatestWinsAndClearsExplicitly() throws {
@@ -285,7 +577,8 @@ final class AudioAnalysisTests: XCTestCase {
             LampTorchLightingPolicy.maximumLevel(
                 torchEnabled: true,
                 isMovementTriggered: false,
-                environmentDisplayMode: .stand
+                environmentDisplayMode: .stand,
+                roomIsDark: true
             ),
             0
         )
@@ -1198,21 +1491,32 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(
             SleepMovementLightingPolicy.torchLevel(
                 torchEnabled: true,
-                environmentDisplayMode: .sleeping
+                environmentDisplayMode: .sleeping,
+                roomIsDark: true
             ),
             1
         )
         XCTAssertEqual(
             SleepMovementLightingPolicy.torchLevel(
                 torchEnabled: false,
-                environmentDisplayMode: .sleeping
+                environmentDisplayMode: .sleeping,
+                roomIsDark: true
             ),
             0.1
         )
         XCTAssertEqual(
             SleepMovementLightingPolicy.torchLevel(
                 torchEnabled: true,
-                environmentDisplayMode: .stand
+                environmentDisplayMode: .stand,
+                roomIsDark: true
+            ),
+            0
+        )
+        XCTAssertEqual(
+            SleepMovementLightingPolicy.torchLevel(
+                torchEnabled: true,
+                environmentDisplayMode: .sleeping,
+                roomIsDark: false
             ),
             0
         )
@@ -1223,7 +1527,8 @@ final class AudioAnalysisTests: XCTestCase {
             LampTorchLightingPolicy.maximumLevel(
                 torchEnabled: true,
                 isMovementTriggered: false,
-                environmentDisplayMode: .sleeping
+                environmentDisplayMode: .sleeping,
+                roomIsDark: true
             ),
             0
         )
@@ -1231,7 +1536,8 @@ final class AudioAnalysisTests: XCTestCase {
             LampTorchLightingPolicy.maximumLevel(
                 torchEnabled: false,
                 isMovementTriggered: false,
-                environmentDisplayMode: .sleeping
+                environmentDisplayMode: .sleeping,
+                roomIsDark: true
             ),
             0
         )
@@ -1239,10 +1545,40 @@ final class AudioAnalysisTests: XCTestCase {
             LampTorchLightingPolicy.maximumLevel(
                 torchEnabled: false,
                 isMovementTriggered: true,
-                environmentDisplayMode: .sleeping
+                environmentDisplayMode: .sleeping,
+                roomIsDark: true
             ),
             0.1
         )
+    }
+
+    func testStartleTorchRequiresARecentDarkRoomReading() {
+        let now = Date()
+        XCTAssertTrue(AmbientCameraModePolicy.isRecentlyDark(
+            AmbientBrightnessReading(
+                value: AmbientCameraModePolicy.darkThreshold,
+                measuredAt: now,
+                cameraPosition: .front
+            ),
+            now: now
+        ))
+        XCTAssertFalse(AmbientCameraModePolicy.isRecentlyDark(
+            AmbientBrightnessReading(
+                value: AmbientCameraModePolicy.brightThreshold,
+                measuredAt: now,
+                cameraPosition: .front
+            ),
+            now: now
+        ))
+        XCTAssertFalse(AmbientCameraModePolicy.isRecentlyDark(
+            AmbientBrightnessReading(
+                value: 0,
+                measuredAt: now.addingTimeInterval(-AmbientCameraModePolicy.maximumReadingAge - 1),
+                cameraPosition: .front
+            ),
+            now: now
+        ))
+        XCTAssertFalse(AmbientCameraModePolicy.isRecentlyDark(nil, now: now))
     }
 
     func testSimplifiedBrightnessModeBoundariesAndTapTargets() {

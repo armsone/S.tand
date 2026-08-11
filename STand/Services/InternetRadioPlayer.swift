@@ -21,6 +21,9 @@ enum InternetRadioPlaybackState: Equatable {
 @MainActor
 final class InternetRadioPlayer: ObservableObject {
     @Published private(set) var state: InternetRadioPlaybackState = .idle
+    @Published private(set) var activeChannelID: UUID?
+
+    var activeStreamURL: URL? { activeURL }
 
     var onPlaybackBecameInactive: (() -> Void)?
 
@@ -32,14 +35,33 @@ final class InternetRadioPlayer: ObservableObject {
     private var pausedFailureTask: Task<Void, Never>?
     private var ownsAudioSession = false
     private var isWaitingForInterruptionToEnd = false
+    private var activeURL: URL?
 
     init() {
         observeAudioSession()
     }
 
+    func play(_ configuration: InternetRadioConfiguration) {
+        startPlayback(url: configuration.streamURL, channelID: configuration.id)
+    }
+
+    func switchChannel(to configuration: InternetRadioConfiguration) {
+        if state.isActive, activeURL == configuration.streamURL {
+            activeChannelID = configuration.id
+            return
+        }
+        startPlayback(url: configuration.streamURL, channelID: configuration.id)
+    }
+
     func play(url: URL) {
+        startPlayback(url: url, channelID: nil)
+    }
+
+    private func startPlayback(url: URL, channelID: UUID?) {
         guard !isWaitingForInterruptionToEnd else { return }
         tearDownPlayer()
+        activeChannelID = channelID
+        activeURL = url
         state = .loading
 
         do {
@@ -66,6 +88,8 @@ final class InternetRadioPlayer: ObservableObject {
         let shouldNotify = state.isActive && !isWaitingForInterruptionToEnd
         tearDownPlayer()
         deactivateAudioSessionIfOwned()
+        activeChannelID = nil
+        activeURL = nil
         state = .idle
         if shouldNotify { onPlaybackBecameInactive?() }
     }
@@ -215,6 +239,8 @@ final class InternetRadioPlayer: ObservableObject {
         let shouldNotify = state.isActive
         tearDownPlayer()
         deactivateAudioSessionIfOwned()
+        activeChannelID = nil
+        activeURL = nil
         state = .failed(message)
         if shouldNotify { onPlaybackBecameInactive?() }
     }
@@ -227,6 +253,8 @@ final class InternetRadioPlayer: ObservableObject {
         isWaitingForInterruptionToEnd = shouldWaitToResumeMonitoring
         tearDownPlayer()
         deactivateAudioSessionIfOwned()
+        activeChannelID = nil
+        activeURL = nil
         state = .failed("다른 오디오 사용으로 라디오가 중단되었습니다.")
     }
 

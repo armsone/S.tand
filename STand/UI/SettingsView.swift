@@ -15,6 +15,7 @@ struct SettingsView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showsRecordings = false
+    @State private var showsInternetRadioChannels = false
     @State private var confirmsRestore = false
 
     init(model: StandViewModel, onEditScreen: @escaping () -> Void) {
@@ -56,6 +57,7 @@ struct SettingsView: View {
                                 screenAndClockCard
                                 lightingCard
                                 detectionCard
+                                internetRadioCard
                                 weatherAndDeviceCard
                                 informationCard
                             }
@@ -91,6 +93,9 @@ struct SettingsView: View {
                 theme: store.value.displayTheme
             )
         }
+        .sheet(isPresented: $showsInternetRadioChannels) {
+            InternetRadioChannelManagementView(model: model)
+        }
         .confirmationDialog(
             "추천 설정으로 되돌릴까요?",
             isPresented: $confirmsRestore,
@@ -101,7 +106,7 @@ struct SettingsView: View {
             }
             Button("취소", role: .cancel) {}
         } message: {
-            Text("세로·가로 화면 배치와 하단 버튼 순서도 처음 모습으로 돌아갑니다.")
+            Text("저장한 라디오 채널, 세로·가로 화면 배치와 하단 버튼 순서도 처음 모습으로 돌아갑니다.")
         }
         .onAppear {
             library.reload()
@@ -363,6 +368,58 @@ struct SettingsView: View {
 
             SettingsHelpText(
                 "처음 1분 동안 방의 평소 소리를 익힙니다. 이후 평균보다 커진 순간에는 바로 화들짝 반응하고, 녹음은 이 기기 안에서만 처리합니다."
+            )
+        }
+    }
+
+    private var internetRadioCard: some View {
+        let channels = store.value.internetRadioChannels
+        let selected = store.value.internetRadio
+
+        return StandSettingsCard(
+            title: "인터넷 라디오",
+            subtitle: channels.isEmpty
+                ? "합법적인 HTTPS 스트림 주소를 직접 관리합니다"
+                : "\(channels.count)개 채널 · \(selected?.displayName ?? "선택 필요")",
+            systemImage: "radio.fill",
+            accent: accent
+        ) {
+            HStack(spacing: 13) {
+                Image(systemName: channels.isEmpty ? "radio" : "dot.radiowaves.left.and.right")
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(channels.isEmpty ? Color.white.opacity(0.56) : accent)
+                    .frame(width: 48, height: 48)
+                    .background(
+                        (channels.isEmpty ? Color.white.opacity(0.07) : accent.opacity(0.12)),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    )
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(selected?.displayName ?? "등록한 채널이 없습니다")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text(selected.map { "홈에서 재생할 채널 · \($0.streamURL.host ?? $0.urlString)" }
+                        ?? "채널 관리에서 주소를 추가해 주세요.")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.56))
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .accessibilityElement(children: .combine)
+
+            SettingsInlineButton(
+                title: channels.isEmpty ? "첫 채널 추가" : "채널 관리",
+                systemImage: channels.isEmpty ? "plus.circle.fill" : "list.bullet",
+                accent: accent
+            ) {
+                showsInternetRadioChannels = true
+            }
+
+            SettingsHelpText(
+                "여러 주소를 저장하고 홈에서 사용할 채널을 고를 수 있습니다. 라디오는 포그라운드에서만 재생되며 재생 중에는 소리 감지와 녹음이 잠시 멈춥니다."
             )
         }
     }
@@ -1581,5 +1638,439 @@ private struct FontLicenseDetailView: View {
             return "라이선스 전문을 불러올 수 없습니다."
         }
         return text
+    }
+}
+
+private struct InternetRadioEditorRoute: Hashable {
+    let routeID = UUID()
+    let configuration: InternetRadioConfiguration?
+    let initialAddress: String
+    let suggestedName: String
+
+    init(
+        configuration: InternetRadioConfiguration? = nil,
+        initialAddress: String = "",
+        suggestedName: String = ""
+    ) {
+        self.configuration = configuration
+        self.initialAddress = initialAddress
+        self.suggestedName = suggestedName
+    }
+}
+
+private enum InternetRadioManagementDestination: Hashable {
+    case editor(InternetRadioEditorRoute)
+}
+
+@MainActor
+struct InternetRadioChannelManagementView: View {
+    private let model: StandViewModel
+    @ObservedObject private var store: SettingsStore
+    @ObservedObject private var radio: InternetRadioPlayer
+    @Environment(\.dismiss) private var dismiss
+    @State private var path: [InternetRadioManagementDestination] = []
+    @State private var showsBrowser = false
+
+    init(model: StandViewModel) {
+        self.model = model
+        _store = ObservedObject(wrappedValue: model.settings)
+        _radio = ObservedObject(wrappedValue: model.radio)
+    }
+
+    private var accent: Color {
+        store.value.displayTheme.accentColor
+    }
+
+    private var channels: [InternetRadioConfiguration] {
+        store.value.internetRadioChannels
+    }
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            List {
+                if channels.isEmpty {
+                    Section {
+                        ContentUnavailableView {
+                            Label("저장한 채널이 없습니다", systemImage: "radio")
+                        } description: {
+                            Text("직접 이용할 수 있는 HTTPS 스트림 주소를 추가해 주세요.")
+                        } actions: {
+                            Button {
+                                addChannel()
+                            } label: {
+                                Label("첫 채널 추가", systemImage: "plus.circle.fill")
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
+                    }
+                } else {
+                    Section {
+                        ForEach(channels) { channel in
+                            channelRow(channel)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button(role: .destructive) {
+                                        delete(channel)
+                                    } label: {
+                                        Label("삭제", systemImage: "trash")
+                                    }
+
+                                    Button {
+                                        edit(channel)
+                                    } label: {
+                                        Label("수정", systemImage: "pencil")
+                                    }
+                                    .tint(accent)
+                                }
+                        }
+                        .onMove(perform: moveChannels)
+                    } header: {
+                        Text("홈에서 사용할 채널을 선택하세요")
+                    } footer: {
+                        Text("채널을 누르면 홈 라디오 패널에서 사용할 주소로 선택됩니다. 편집을 눌러 순서를 바꿀 수 있습니다.")
+                    }
+                }
+
+                Section {
+                    Button {
+                        showsBrowser = true
+                    } label: {
+                        Label("웹에서 주소 찾기", systemImage: "safari.fill")
+                    }
+                    .accessibilityHint("앱 안의 브라우저에서 주소를 찾고 직접 복사합니다")
+                } footer: {
+                    Text("브라우저는 스트리밍 주소를 자동으로 감지하거나 채널에 입력하지 않습니다. 이용 권한이 있는 주소를 직접 복사한 뒤 채널 추가 화면에서 붙여넣어 주세요.")
+                }
+
+                Section("재생 안내") {
+                    Label("라디오 재생 중에는 소리 감지와 녹음이 일시 중지됩니다.", systemImage: "waveform.slash")
+                    Label("앱이 화면을 떠나면 라디오가 자동으로 멈춥니다.", systemImage: "iphone.slash")
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(StandSettingsBackground(accent: accent))
+            .navigationTitle("인터넷 라디오")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("완료") { dismiss() }
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    if channels.count > 1 {
+                        EditButton()
+                    }
+                    Button {
+                        addChannel()
+                    } label: {
+                        Label("채널 추가", systemImage: "plus")
+                    }
+                    .accessibilityHint("이름과 HTTPS 스트림 주소를 직접 입력합니다")
+                }
+            }
+            .navigationDestination(for: InternetRadioManagementDestination.self) { destination in
+                switch destination {
+                case .editor(let route):
+                    InternetRadioChannelEditorView(
+                        configuration: route.configuration,
+                        initialAddress: route.initialAddress,
+                        suggestedName: route.suggestedName,
+                        accent: accent,
+                        onSave: save,
+                        onDelete: { channelID in
+                            _ = model.removeInternetRadioChannel(id: channelID)
+                        }
+                    )
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .tint(accent)
+        .grayscale(store.value.displayTheme == .grayscale ? 1 : 0)
+        .fullScreenCover(isPresented: $showsBrowser) {
+            InternetRadioBrowserView(accent: accent)
+        }
+    }
+
+    private func channelRow(_ channel: InternetRadioConfiguration) -> some View {
+        let isSelected = store.value.selectedInternetRadioID == channel.id
+        let isActive = radio.activeChannelID == channel.id
+
+        return HStack(spacing: 8) {
+            Button {
+                guard model.selectInternetRadioChannel(id: channel.id) else { return }
+                UISelectionFeedbackGenerator().selectionChanged()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: isActive ? "antenna.radiowaves.left.and.right" : "radio.fill")
+                        .symbolRenderingMode(.hierarchical)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(isSelected ? accent : .secondary)
+                        .frame(width: 30, height: 30)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(channel.displayName)
+                            .font(.body.weight(.semibold))
+                            .lineLimit(1)
+                        Text(channelStatus(channel, isActive: isActive))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(accent)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                channelAccessibilityLabel(
+                    channel,
+                    isSelected: isSelected,
+                    isActive: isActive
+                )
+            )
+            .accessibilityHint(isSelected ? "현재 홈 채널입니다" : "두 번 탭하여 홈 채널로 선택합니다")
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+            .accessibilityAction(named: "채널 수정") {
+                edit(channel)
+            }
+
+            Button {
+                edit(channel)
+            } label: {
+                Image(systemName: "pencil")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("\(channel.displayName) 수정")
+        }
+        .contextMenu {
+            Button {
+                edit(channel)
+            } label: {
+                Label("채널 수정", systemImage: "pencil")
+            }
+            Button(role: .destructive) {
+                delete(channel)
+            } label: {
+                Label("채널 삭제", systemImage: "trash")
+            }
+        }
+    }
+
+    private func channelStatus(
+        _ channel: InternetRadioConfiguration,
+        isActive: Bool
+    ) -> String {
+        if isActive {
+            return radio.state == .loading ? "연결 중" : "재생 중"
+        }
+        return channel.streamURL.host ?? channel.urlString
+    }
+
+    private func channelAccessibilityLabel(
+        _ channel: InternetRadioConfiguration,
+        isSelected: Bool,
+        isActive: Bool
+    ) -> String {
+        [
+            channel.displayName,
+            isSelected ? "홈 채널" : nil,
+            isActive ? channelStatus(channel, isActive: true) : nil,
+            channel.streamURL.host
+        ]
+        .compactMap { $0 }
+        .joined(separator: ", ")
+    }
+
+    private func addChannel() {
+        path.append(.editor(InternetRadioEditorRoute()))
+    }
+
+    private func edit(_ channel: InternetRadioConfiguration) {
+        path.append(.editor(InternetRadioEditorRoute(configuration: channel)))
+    }
+
+    private func save(_ configuration: InternetRadioConfiguration) {
+        if store.value.internetRadioChannels.contains(where: { $0.id == configuration.id }) {
+            if !model.updateInternetRadioChannel(configuration) {
+                model.addInternetRadioChannel(configuration, select: true)
+            }
+        } else {
+            model.addInternetRadioChannel(configuration, select: true)
+        }
+    }
+
+    private func delete(_ channel: InternetRadioConfiguration) {
+        guard model.removeInternetRadioChannel(id: channel.id) != nil else { return }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    private func moveChannels(from offsets: IndexSet, to destination: Int) {
+        guard offsets.count == 1, let source = offsets.first, channels.indices.contains(source) else {
+            return
+        }
+        let channel = channels[source]
+        let adjustedDestination = source < destination ? destination - 1 : destination
+        guard model.moveInternetRadioChannel(id: channel.id, to: adjustedDestination) else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+}
+
+@MainActor
+struct InternetRadioChannelEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var displayName: String
+    @State private var address: String
+    @State private var validationMessage: String?
+    @State private var showsBrowser = false
+    @State private var confirmsDeletion = false
+
+    let configuration: InternetRadioConfiguration?
+    let accent: Color
+    let onSave: (InternetRadioConfiguration) -> Void
+    let onDelete: (UUID) -> Void
+
+    init(
+        configuration: InternetRadioConfiguration? = nil,
+        initialAddress: String = "",
+        suggestedName: String = "",
+        accent: Color = .orange,
+        onSave: @escaping (InternetRadioConfiguration) -> Void,
+        onDelete: @escaping (UUID) -> Void = { _ in }
+    ) {
+        self.configuration = configuration
+        self.accent = accent
+        self.onSave = onSave
+        self.onDelete = onDelete
+        _displayName = State(
+            initialValue: configuration?.displayName
+                ?? suggestedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        _address = State(
+            initialValue: initialAddress.isEmpty
+                ? (configuration?.urlString ?? "")
+                : initialAddress
+        )
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("이름 (선택)", text: $displayName)
+                    .textInputAutocapitalization(.never)
+                    .accessibilityHint("비워 두면 인터넷 라디오로 저장됩니다")
+
+                TextField("https://…", text: $address, axis: .vertical)
+                    .keyboardType(.URL)
+                    .textContentType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .lineLimit(1...4)
+
+                if let validationMessage {
+                    Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .accessibilityLabel("입력 오류, \(validationMessage)")
+                }
+
+                PasteButton(payloadType: String.self) { values in
+                    guard let pasted = values.first else { return }
+                    address = pasted
+                    validationMessage = nil
+                }
+                .accessibilityLabel("복사한 주소 붙여넣기")
+                .accessibilityHint("클립보드의 텍스트를 주소 입력란에 넣습니다")
+            } header: {
+                Text("채널 정보")
+            } footer: {
+                Text("직접 이용 권한을 확인한 합법적인 HTTPS 스트림 주소만 등록해 주세요. 이름은 최대 30자, 주소는 최대 2,048자로 저장됩니다.")
+            }
+
+            Section {
+                Button {
+                    showsBrowser = true
+                } label: {
+                    Label("웹에서 주소 찾기", systemImage: "safari.fill")
+                }
+                .accessibilityHint("브라우저에서 주소를 찾고 직접 복사합니다")
+            } footer: {
+                Text("브라우저에서 이용 권한이 있는 주소를 직접 복사한 뒤 이 화면으로 돌아와 붙여넣어 주세요. 웹페이지 주소는 자동으로 입력되지 않습니다.")
+            }
+
+            Section("재생 중 동작") {
+                Label("소리 감지와 수면 녹음은 일시 중지됩니다.", systemImage: "waveform.slash")
+                Label("기기 움직임 감지는 계속됩니다.", systemImage: "gyroscope")
+            }
+
+            if let configuration {
+                Section {
+                    Button("이 채널 삭제", role: .destructive) {
+                        confirmsDeletion = true
+                    }
+                    .accessibilityHint("확인 후 \(configuration.displayName) 채널을 삭제합니다")
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(StandSettingsBackground(accent: accent))
+        .scrollDismissesKeyboard(.interactively)
+        .navigationTitle(configuration == nil ? "채널 추가" : "채널 수정")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("저장", action: save)
+                    .fontWeight(.semibold)
+            }
+        }
+        .fullScreenCover(isPresented: $showsBrowser) {
+            InternetRadioBrowserView(accent: accent)
+        }
+        .confirmationDialog(
+            "\(configuration?.displayName ?? "이 채널")을 삭제할까요?",
+            isPresented: $confirmsDeletion,
+            titleVisibility: .visible
+        ) {
+            if let configuration {
+                Button("채널 삭제", role: .destructive) {
+                    onDelete(configuration.id)
+                    dismiss()
+                }
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("삭제한 채널 주소는 되돌릴 수 없습니다.")
+        }
+        .onChange(of: displayName) { _, _ in validationMessage = nil }
+        .onChange(of: address) { _, _ in validationMessage = nil }
+    }
+
+    private func save() {
+        do {
+            let saved = try configuration?.updated(
+                displayName: displayName,
+                urlString: address
+            ) ?? InternetRadioConfiguration(
+                displayName: displayName,
+                urlString: address
+            )
+            validationMessage = nil
+            onSave(saved)
+            dismiss()
+        } catch {
+            validationMessage = error.localizedDescription
+        }
     }
 }

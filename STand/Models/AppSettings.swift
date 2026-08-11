@@ -337,7 +337,43 @@ struct AppSettings: Codable, Equatable {
     var multiStimulusWakeEnabled = true
     var modePreference = StandModePreference.automatic
     var cameraAmbientSensingEnabled = false
-    var internetRadio: InternetRadioConfiguration?
+    private(set) var internetRadioChannels: [InternetRadioConfiguration] = []
+    private(set) var selectedInternetRadioID: UUID?
+
+    /// The selected channel kept as a compatibility surface for the original
+    /// single-station UI. New channel-management code should use the collection
+    /// mutation methods below so adding a station does not replace this one.
+    var internetRadio: InternetRadioConfiguration? {
+        get {
+            guard !internetRadioChannels.isEmpty else { return nil }
+            if let selectedInternetRadioID,
+               let selected = internetRadioChannels.first(where: { $0.id == selectedInternetRadioID }) {
+                return selected
+            }
+            return internetRadioChannels.first
+        }
+        set {
+            guard let newValue else {
+                internetRadioChannels.removeAll()
+                selectedInternetRadioID = nil
+                return
+            }
+
+            if let existingIndex = internetRadioChannels.firstIndex(where: { $0.id == newValue.id }) {
+                internetRadioChannels[existingIndex] = newValue
+            } else if let selectedInternetRadioID,
+                      let selectedIndex = internetRadioChannels.firstIndex(where: {
+                          $0.id == selectedInternetRadioID
+                      }) {
+                // The original editor creates a fresh configuration on save.
+                // Treat that assignment as replacing the selected station.
+                internetRadioChannels[selectedIndex] = newValue
+            } else {
+                internetRadioChannels.append(newValue)
+            }
+            selectedInternetRadioID = newValue.id
+        }
+    }
 
     static let recommended = AppSettings()
 
@@ -364,7 +400,9 @@ struct AppSettings: Codable, Equatable {
         multiStimulusWakeEnabled: Bool = true,
         modePreference: StandModePreference = .automatic,
         cameraAmbientSensingEnabled: Bool = false,
-        internetRadio: InternetRadioConfiguration? = nil
+        internetRadio: InternetRadioConfiguration? = nil,
+        internetRadioChannels: [InternetRadioConfiguration] = [],
+        selectedInternetRadioID: UUID? = nil
     ) {
         self.lampIntensity = lampIntensity
         self.silhouetteIntensity = silhouetteIntensity
@@ -388,7 +426,14 @@ struct AppSettings: Codable, Equatable {
         self.multiStimulusWakeEnabled = multiStimulusWakeEnabled
         self.modePreference = modePreference
         self.cameraAmbientSensingEnabled = cameraAmbientSensingEnabled
-        self.internetRadio = internetRadio
+        let initialChannels = internetRadioChannels.isEmpty
+            ? internetRadio.map { [$0] } ?? []
+            : internetRadioChannels
+        self.internetRadioChannels = Self.uniqueChannels(initialChannels)
+        self.selectedInternetRadioID = Self.resolvedSelection(
+            requestedID: selectedInternetRadioID ?? internetRadio?.id,
+            channels: self.internetRadioChannels
+        )
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -414,6 +459,8 @@ struct AppSettings: Codable, Equatable {
         case multiStimulusWakeEnabled
         case modePreference
         case cameraAmbientSensingEnabled
+        case internetRadioChannels
+        case selectedInternetRadioID
         case internetRadio
     }
 
@@ -486,16 +533,141 @@ struct AppSettings: Codable, Equatable {
             Bool.self,
             forKey: .cameraAmbientSensingEnabled
         ) ?? false
-        internetRadio = try? container.decode(
+        let decodedChannels: [InternetRadioConfiguration]?
+        do {
+            decodedChannels = try container.decodeIfPresent(
+                [InternetRadioConfiguration].self,
+                forKey: .internetRadioChannels
+            )
+        } catch {
+            decodedChannels = nil
+        }
+        let legacyConfiguration = try? container.decode(
             InternetRadioConfiguration.self,
             forKey: .internetRadio
         )
+        internetRadioChannels = Self.uniqueChannels(
+            decodedChannels ?? legacyConfiguration.map { [$0] } ?? []
+        )
+        selectedInternetRadioID = Self.resolvedSelection(
+            requestedID: try? container.decode(UUID.self, forKey: .selectedInternetRadioID),
+            channels: internetRadioChannels
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(lampIntensity, forKey: .lampIntensity)
+        try container.encode(silhouetteIntensity, forKey: .silhouetteIntensity)
+        try container.encode(clockScale, forKey: .clockScale)
+        try container.encode(clockFont, forKey: .clockFont)
+        try container.encode(clockHourMode, forKey: .clockHourMode)
+        try container.encode(displayTheme, forKey: .displayTheme)
+        try container.encode(portraitLayout, forKey: .portraitLayout)
+        try container.encode(landscapeLayout, forKey: .landscapeLayout)
+        try container.encode(brightnessModeThreshold, forKey: .brightnessModeThreshold)
+        try container.encode(holdDuration, forKey: .holdDuration)
+        try container.encode(fadeDuration, forKey: .fadeDuration)
+        try container.encode(automaticDimmingEnabled, forKey: .automaticDimmingEnabled)
+        try container.encode(
+            preventAutoDimmingWhenScreenBright,
+            forKey: .preventAutoDimmingWhenScreenBright
+        )
+        try container.encode(soundThresholdDB, forKey: .soundThresholdDB)
+        try container.encode(recordingEnabled, forKey: .recordingEnabled)
+        try container.encode(orientationPreference, forKey: .orientationPreference)
+        try container.encode(torchEnabled, forKey: .torchEnabled)
+        try container.encode(torchIntensity, forKey: .torchIntensity)
+        try container.encode(wakeOnSleepSound, forKey: .wakeOnSleepSound)
+        try container.encode(multiStimulusWakeEnabled, forKey: .multiStimulusWakeEnabled)
+        try container.encode(modePreference, forKey: .modePreference)
+        try container.encode(cameraAmbientSensingEnabled, forKey: .cameraAmbientSensingEnabled)
+        try container.encode(internetRadioChannels, forKey: .internetRadioChannels)
+        try container.encodeIfPresent(selectedInternetRadioID, forKey: .selectedInternetRadioID)
+
+        // Keep the selected station in the former key so a downgraded build can
+        // still open the user's current station. New builds read the array first.
+        try container.encodeIfPresent(internetRadio, forKey: .internetRadio)
+    }
+
+    mutating func addInternetRadioChannel(
+        _ configuration: InternetRadioConfiguration,
+        select: Bool = true
+    ) {
+        if let index = internetRadioChannels.firstIndex(where: { $0.id == configuration.id }) {
+            internetRadioChannels[index] = configuration
+        } else {
+            internetRadioChannels.append(configuration)
+        }
+        if select || selectedInternetRadioID == nil {
+            selectedInternetRadioID = configuration.id
+        }
+    }
+
+    @discardableResult
+    mutating func updateInternetRadioChannel(_ configuration: InternetRadioConfiguration) -> Bool {
+        guard let index = internetRadioChannels.firstIndex(where: {
+            $0.id == configuration.id
+        }) else { return false }
+        internetRadioChannels[index] = configuration
+        return true
+    }
+
+    @discardableResult
+    mutating func selectInternetRadioChannel(id: UUID) -> Bool {
+        guard internetRadioChannels.contains(where: { $0.id == id }) else { return false }
+        selectedInternetRadioID = id
+        return true
+    }
+
+    @discardableResult
+    mutating func removeInternetRadioChannel(id: UUID) -> InternetRadioConfiguration? {
+        guard let index = internetRadioChannels.firstIndex(where: { $0.id == id }) else {
+            return nil
+        }
+        let removed = internetRadioChannels.remove(at: index)
+        if selectedInternetRadioID == id {
+            selectedInternetRadioID = internetRadioChannels.isEmpty
+                ? nil
+                : internetRadioChannels[min(index, internetRadioChannels.count - 1)].id
+        }
+        return removed
+    }
+
+    @discardableResult
+    mutating func moveInternetRadioChannel(id: UUID, to destinationIndex: Int) -> Bool {
+        guard let sourceIndex = internetRadioChannels.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+        let channel = internetRadioChannels.remove(at: sourceIndex)
+        let boundedDestination = min(max(0, destinationIndex), internetRadioChannels.count)
+        internetRadioChannels.insert(channel, at: boundedDestination)
+        return true
+    }
+
+    private static func uniqueChannels(
+        _ channels: [InternetRadioConfiguration]
+    ) -> [InternetRadioConfiguration] {
+        var seenIDs = Set<UUID>()
+        return channels.filter { seenIDs.insert($0.id).inserted }
+    }
+
+    private static func resolvedSelection(
+        requestedID: UUID?,
+        channels: [InternetRadioConfiguration]
+    ) -> UUID? {
+        guard !channels.isEmpty else { return nil }
+        if let requestedID, channels.contains(where: { $0.id == requestedID }) {
+            return requestedID
+        }
+        return channels.first?.id
     }
 }
 
 enum SettingsMigration {
     static let torchEnabledByDefaultKey = "settingsMigration.torchEnabledByDefault.v1"
     static let fiveSecondHoldDurationKey = "settingsMigration.fiveSecondHoldDuration.v1"
+    static let internetRadioChannelsKey = "settingsMigration.internetRadioChannels.v1"
 
     static func applyingTorchDefault(
         to settings: AppSettings,
@@ -539,6 +711,9 @@ final class SettingsStore: ObservableObject {
         let hasMigratedHoldDuration = defaults.bool(
             forKey: SettingsMigration.fiveSecondHoldDurationKey
         )
+        let hasMigratedInternetRadioChannels = defaults.bool(
+            forKey: SettingsMigration.internetRadioChannelsKey
+        )
         let torchMigrated = SettingsMigration.applyingTorchDefault(
             to: saved,
             hasMigrated: hasMigratedTorchDefault
@@ -548,7 +723,10 @@ final class SettingsStore: ObservableObject {
             hasMigrated: hasMigratedHoldDuration
         )
 
-        guard !hasMigratedTorchDefault || !hasMigratedHoldDuration else { return }
+        guard !hasMigratedTorchDefault
+                || !hasMigratedHoldDuration
+                || !hasMigratedInternetRadioChannels
+        else { return }
         if let data = try? JSONEncoder().encode(value) {
             defaults.set(data, forKey: storageKey)
             if !hasMigratedTorchDefault {
@@ -556,6 +734,9 @@ final class SettingsStore: ObservableObject {
             }
             if !hasMigratedHoldDuration {
                 defaults.set(true, forKey: SettingsMigration.fiveSecondHoldDurationKey)
+            }
+            if !hasMigratedInternetRadioChannels {
+                defaults.set(true, forKey: SettingsMigration.internetRadioChannelsKey)
             }
         }
     }
@@ -576,7 +757,7 @@ enum AppVersion {
     }
 
     static var build: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.19.5"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.20.1"
     }
 
     static var display: String { "\(marketing) (\(build))" }
