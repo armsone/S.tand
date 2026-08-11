@@ -1005,16 +1005,6 @@ struct RootView: View {
                 .minimumScaleFactor(0.72)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
-            if model.ambientCameraState == .measuring {
-                Label("주변 밝기 확인 중 · 이미지는 저장하지 않아요", systemImage: "camera.metering.center.weighted")
-                    .font(.caption.weight(.medium))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)

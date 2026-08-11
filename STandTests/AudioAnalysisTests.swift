@@ -1306,6 +1306,33 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
+    func testAmbientCameraSamplesOnlyDuringAutomaticMateMode() {
+        XCTAssertTrue(AmbientCameraSamplingPolicy.shouldSample(
+            isSessionActive: true,
+            displayMode: .sleeping,
+            modePreference: .automatic,
+            isEnabled: true
+        ))
+        XCTAssertFalse(AmbientCameraSamplingPolicy.shouldSample(
+            isSessionActive: true,
+            displayMode: .stand,
+            modePreference: .automatic,
+            isEnabled: true
+        ))
+        XCTAssertFalse(AmbientCameraSamplingPolicy.shouldSample(
+            isSessionActive: true,
+            displayMode: .sleeping,
+            modePreference: .mate,
+            isEnabled: true
+        ))
+        XCTAssertFalse(AmbientCameraSamplingPolicy.shouldSample(
+            isSessionActive: false,
+            displayMode: .sleeping,
+            modePreference: .automatic,
+            isEnabled: true
+        ))
+    }
+
     func testHalfScreenVerticalDragStopsAtInteractiveEdgeUntilHeld() {
         XCTAssertEqual(SimplifiedBrightnessModePolicy.verticalDragTravelRatio, 0.5)
         XCTAssertEqual(SimplifiedBrightnessModePolicy.fixedEdgeHoldDuration, 1)

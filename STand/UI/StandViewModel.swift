@@ -204,6 +204,20 @@ enum AmbientCameraModePolicy {
     }
 }
 
+enum AmbientCameraSamplingPolicy {
+    static func shouldSample(
+        isSessionActive: Bool,
+        displayMode: EnvironmentDisplayMode,
+        modePreference: StandModePreference,
+        isEnabled: Bool
+    ) -> Bool {
+        isSessionActive
+            && displayMode == .sleeping
+            && modePreference == .automatic
+            && isEnabled
+    }
+}
+
 enum AutomaticModeTransitionPolicy {
     static let cameraDarkThreshold = 0.16
     static let objectToMateDelay: TimeInterval = 20
@@ -840,6 +854,16 @@ final class StandViewModel: ObservableObject {
         let changed = newMode != environmentDisplayMode
         if newMode == .stand { finishStartleEvent() }
         environmentDisplayMode = newMode
+        if newMode == .sleeping {
+            startAmbientSamplingIfNeeded()
+        } else {
+            ambientSamplingTask?.cancel()
+            ambientSamplingTask = nil
+            ambientCamera.cancel()
+            ambientCameraState = settings.value.cameraAmbientSensingEnabled
+                ? ambientCamera.currentState
+                : .disabled
+        }
         if isNightSessionActive { syncRecordingSessionForDisplayMode() }
         guard performTransition, changed, isNightSessionActive else { return }
         syncSleepCareMonitoring()
@@ -868,7 +892,6 @@ final class StandViewModel: ObservableObject {
             guard let self else { return }
             self.ambientCameraState = state
             if state == .ready {
-                self.measureAmbientBrightness()
                 self.startAmbientSamplingIfNeeded()
             }
         }
@@ -879,6 +902,7 @@ final class StandViewModel: ObservableObject {
             ambientCameraState = .disabled
             return
         }
+        guard environmentDisplayMode == .sleeping else { return }
         guard !isAdjustingBrightness else { return }
         guard experienceMode != .startled else { return }
         torch.turnOff()
@@ -896,6 +920,12 @@ final class StandViewModel: ObservableObject {
     }
 
     private func measureAmbientBrightnessIfNeeded() {
+        guard AmbientCameraSamplingPolicy.shouldSample(
+            isSessionActive: isNightSessionActive,
+            displayMode: environmentDisplayMode,
+            modePreference: settings.value.modePreference,
+            isEnabled: settings.value.cameraAmbientSensingEnabled
+        ) else { return }
         if let lastAmbientBrightnessReading,
            Date().timeIntervalSince(lastAmbientBrightnessReading.measuredAt) < 45 {
             return
@@ -905,10 +935,12 @@ final class StandViewModel: ObservableObject {
 
     private func startAmbientSamplingIfNeeded() {
         ambientSamplingTask?.cancel()
-        guard isNightSessionActive,
-              settings.value.modePreference == .automatic,
-              settings.value.cameraAmbientSensingEnabled
-        else {
+        guard AmbientCameraSamplingPolicy.shouldSample(
+            isSessionActive: isNightSessionActive,
+            displayMode: environmentDisplayMode,
+            modePreference: settings.value.modePreference,
+            isEnabled: settings.value.cameraAmbientSensingEnabled
+        ) else {
             ambientSamplingTask = nil
             return
         }
