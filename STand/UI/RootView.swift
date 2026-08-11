@@ -337,6 +337,8 @@ struct RootView: View {
                     VStack(spacing: 0) {
                         topBar(isPortrait: isPortrait)
                             .padding(.horizontal, isPortrait ? 20 : 32)
+                        statusBanners
+                            .padding(.horizontal, isPortrait ? 20 : 32)
                         Spacer(minLength: 0)
                         bottomControls(
                             isPortrait: isPortrait,
@@ -355,9 +357,6 @@ struct RootView: View {
                     centerContent(isPortrait: isPortrait, canvasSize: proxy.size)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.horizontal, isPortrait ? 20 : 32)
-                        .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
-
-                    statusBanners
                         .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
 
                     if let brightnessFeedback {
@@ -447,7 +446,8 @@ struct RootView: View {
         .grayscale(settings.value.displayTheme == .grayscale ? 1 : 0)
         .animation(.easeInOut(duration: 0.28), value: settings.value.displayTheme)
         .contentShape(Rectangle())
-        .gesture(screenAdjustmentGesture.exclusively(before: screenPressGesture))
+        .gesture(screenPressGesture)
+        .simultaneousGesture(screenAdjustmentGesture)
         .simultaneousGesture(clockMagnificationGesture)
         .persistentSystemOverlays(.hidden)
         .sheet(item: $presentedSheet, onDismiss: {
@@ -1009,7 +1009,7 @@ struct RootView: View {
     }
 
     private var statusBanners: some View {
-        VStack {
+        VStack(spacing: 6) {
             if model.batteryProtectionActive {
                 batteryProtectionBanner
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -1031,6 +1031,8 @@ struct RootView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
                 .background(.ultraThinMaterial, in: Capsule())
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
             if model.ambientCameraState == .measuring {
@@ -1039,11 +1041,14 @@ struct RootView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
                     .background(.ultraThinMaterial, in: Capsule())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-            Spacer()
         }
-        .padding(.top, 12)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
+        .allowsHitTesting(false)
     }
 
     private var batteryProtectionBanner: some View {

@@ -64,7 +64,7 @@ enum SimplifiedBrightnessModePolicy {
     static let mateUpperBound = 0.3
     static let mateTapLevel = 0.1
     static let objectTapLevel = 0.9
-    static let verticalDragTravelRatio = 0.25
+    static let verticalDragTravelRatio = 0.5
     static let interactiveMinimum = 0.01
     static let interactiveMaximum = 0.99
     static let fixedEdgeHoldDuration: TimeInterval = 1
@@ -884,6 +884,7 @@ final class StandViewModel: ObservableObject {
             ambientCameraState = .disabled
             return
         }
+        guard !isAdjustingBrightness else { return }
         guard experienceMode != .startled else { return }
         torch.turnOff()
         ambientCameraState = .measuring
@@ -920,7 +921,8 @@ final class StandViewModel: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3))
                 guard let self, !Task.isCancelled else { return }
-                if self.ambientCameraState != .measuring,
+                if !self.isAdjustingBrightness,
+                   self.ambientCameraState != .measuring,
                    self.experienceMode != .startled {
                     self.measureAmbientBrightness()
                 }
@@ -1007,6 +1009,9 @@ final class StandViewModel: ObservableObject {
 
     func beginBrightnessAdjustment() {
         isAdjustingBrightness = true
+        if settings.value.cameraAmbientSensingEnabled {
+            ambientCamera.cancel()
+        }
         lampTask?.cancel()
         movementTorchSyncTask?.cancel()
         movementTorchSyncTask = nil

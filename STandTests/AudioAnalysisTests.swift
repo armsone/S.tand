@@ -1306,13 +1306,13 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
-    func testQuarterScreenVerticalDragStopsAtInteractiveEdgeUntilHeld() {
-        XCTAssertEqual(SimplifiedBrightnessModePolicy.verticalDragTravelRatio, 0.25)
+    func testHalfScreenVerticalDragStopsAtInteractiveEdgeUntilHeld() {
+        XCTAssertEqual(SimplifiedBrightnessModePolicy.verticalDragTravelRatio, 0.5)
         XCTAssertEqual(SimplifiedBrightnessModePolicy.fixedEdgeHoldDuration, 1)
         XCTAssertEqual(
             SimplifiedBrightnessModePolicy.level(
                 startingAt: 0.5,
-                verticalTranslation: -200,
+                verticalTranslation: -400,
                 viewportHeight: 800
             ),
             0.99
@@ -1320,7 +1320,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(
             SimplifiedBrightnessModePolicy.level(
                 startingAt: 0.5,
-                verticalTranslation: 200,
+                verticalTranslation: 400,
                 viewportHeight: 800
             ),
             0.01
@@ -1328,7 +1328,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(
             SimplifiedBrightnessModePolicy.fixedEdge(
                 startingAt: 0.5,
-                verticalTranslation: -200,
+                verticalTranslation: -400,
                 viewportHeight: 800
             ),
             .object
@@ -1336,7 +1336,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(
             SimplifiedBrightnessModePolicy.fixedEdge(
                 startingAt: 0.5,
-                verticalTranslation: 200,
+                verticalTranslation: 400,
                 viewportHeight: 800
             ),
             .mate
@@ -1344,7 +1344,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertNil(
             SimplifiedBrightnessModePolicy.fixedEdge(
                 startingAt: 0.5,
-                verticalTranslation: -90,
+                verticalTranslation: -190,
                 viewportHeight: 800
             )
         )
