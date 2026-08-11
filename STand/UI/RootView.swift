@@ -544,10 +544,27 @@ struct RootView: View {
         clockScaleFeedback = nil
     }
 
-    private func topBar(isPortrait: Bool) -> some View {
-        let radioIsActive = radio.state.isActive
+    private func topBar(isPortrait _: Bool) -> some View {
+        let statusTitle = model.isNightSessionActive
+            ? model.experienceMode.title
+            : "자동 기능 꺼짐"
+        let statusImage = model.isNightSessionActive
+            ? model.experienceMode.systemImage
+            : "stop.circle.fill"
 
-        return HStack(spacing: 12) {
+        return ZStack {
+            HStack(spacing: 12) {
+                Label(statusTitle, systemImage: statusImage)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                Spacer(minLength: 12)
+
+                BatteryStatusPill(status: model.batteryStatus)
+            }
+
             HStack(spacing: 8) {
                 STandBrandIcon(size: 28)
 
@@ -556,43 +573,8 @@ struct RootView: View {
                     .tracking(0.8)
             }
             .accessibilityElement(children: .combine)
-
-            if model.isNightSessionActive {
-                AudioStatusPill(
-                    audio: audio,
-                    compact: isPortrait,
-                    monitoringSuspended: model.environmentDisplayMode == .stand || radioIsActive,
-                    radioIsActive: radioIsActive
-                )
-            }
-
-            Spacer()
-
-            if model.isNightSessionActive, !isPortrait {
-                Label(
-                    radioIsActive
-                        ? (radio.state == .loading
-                            ? "라디오 연결 중 · 소리 감지 정지"
-                            : "라디오 재생 중 · 소리 감지 정지")
-                        : model.environmentDisplayMode == .stand
-                        ? "오브제 모드 · 조용히 대기"
-                        : (audio.isWritingClip ? "수면 소리 저장 중" : "기기에서 소리 분석 중"),
-                    systemImage: radioIsActive
-                        ? "radio.fill"
-                        : model.environmentDisplayMode == .stand
-                        ? "sun.max.fill"
-                        : (audio.isWritingClip ? "waveform.badge.mic" : "ear")
-                )
-                .font(.caption.weight(.medium))
-                .foregroundStyle(audio.isWritingClip ? Color.red.opacity(0.9) : Color.white.opacity(0.55))
-            } else if !model.isNightSessionActive {
-                Text("버전 \(AppVersion.display)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.42))
-            }
-
-            BatteryStatusPill(status: model.batteryStatus)
         }
+        .frame(maxWidth: .infinity)
         .foregroundStyle(.white.opacity(0.82))
         .opacity(model.controlsVisible || !model.isNightSessionActive ? 1 : 0.18)
         .animation(.easeOut(duration: 0.3), value: model.controlsVisible)
@@ -1018,19 +1000,6 @@ struct RootView: View {
                     .padding(.vertical, 12)
                     .background(.ultraThinMaterial, in: Capsule())
                     .transition(.move(edge: .top).combined(with: .opacity))
-            }
-            if radio.state.isActive {
-                Label(
-                    "라디오 재생 중 · 소리 감지와 녹음은 일시 중지됨",
-                    systemImage: "radio.fill"
-                )
-                .font(.caption.weight(.medium))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(.ultraThinMaterial, in: Capsule())
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .frame(maxWidth: .infinity)
@@ -3335,69 +3304,6 @@ private struct FlipPanelSurface: View {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(.white.opacity(isDimmed ? 0.018 : 0.08), lineWidth: 1)
             }
-    }
-}
-
-private struct AudioStatusPill: View {
-    @ObservedObject var audio: AudioCaptureService
-    let compact: Bool
-    let monitoringSuspended: Bool
-    let radioIsActive: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 7, height: 7)
-
-            Group {
-                GeometryReader { proxy in
-                    Capsule()
-                        .fill(Color.white.opacity(0.12))
-                        .overlay(alignment: .leading) {
-                            Capsule()
-                                .fill(statusColor.opacity(0.9))
-                                .frame(width: max(3, proxy.size.width * audio.normalizedLevel))
-                        }
-                }
-                .frame(width: compact ? 32 : 44, height: 5)
-            }
-
-            Text(statusText)
-                .font(.caption2.weight(.semibold))
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(.white.opacity(0.07), in: Capsule())
-        .fixedSize(horizontal: true, vertical: false)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(statusText), 감지 레벨 \(Int((audio.normalizedLevel * 100).rounded()))퍼센트")
-    }
-
-    private var statusColor: Color {
-        if monitoringSuspended { return .white.opacity(0.42) }
-        if audio.isWritingClip { return .red }
-        if audio.state == .monitoring { return .green }
-        return .orange
-    }
-
-    private var statusText: String {
-        if radioIsActive {
-            return compact ? "감지 정지" : "소리 감지 정지"
-        }
-        if monitoringSuspended {
-            return compact ? "오브제" : "오브제 모드"
-        }
-        if audio.microphoneAccess == .denied {
-            return compact ? "감지 안 됨" : "소리 감지 안 됨"
-        }
-        if audio.isWritingClip { return compact ? "저장" : "저장 중" }
-        switch audio.state {
-        case .monitoring: return compact ? "감지" : "감지 중"
-        case .starting: return compact ? "준비" : "준비 중"
-        case .failed: return compact ? "감지 안 됨" : "소리 감지 안 됨"
-        case .stopped: return "정지됨"
-        }
     }
 }
 
