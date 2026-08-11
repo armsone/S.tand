@@ -362,6 +362,7 @@ struct RootView: View {
 
                     if let brightnessFeedback {
                         BrightnessFeedbackView(feedback: brightnessFeedback)
+                            .allowsHitTesting(false)
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                             .zIndex(90)
                     }
@@ -713,7 +714,7 @@ struct RootView: View {
                     verticalTranslation: value.translation.height,
                     viewportHeight: currentCanvasSize.height
                 )
-                model.updateBrightnessLevel(adjustedValue)
+                model.previewBrightnessLevel(adjustedValue)
                 updateFixedEdgeHold(fixedEdge)
 
                 brightnessFeedbackTask?.cancel()

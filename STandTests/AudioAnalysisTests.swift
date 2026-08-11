@@ -1352,6 +1352,27 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(SimplifiedBrightnessModePolicy.preference(for: 0.01), .automatic)
     }
 
+    @MainActor
+    func testBrightnessDragStillWorksWhenAutomaticFeaturesAreStoppedAndPersistsOnceAtEnd() {
+        let originalBrightness = UIScreen.main.brightness
+        defer { UIScreen.main.brightness = originalBrightness }
+
+        let model = StandViewModel()
+        XCTAssertFalse(model.isNightSessionActive)
+        let storedIntensity = model.settings.value.lampIntensity
+
+        model.beginBrightnessAdjustment()
+        model.previewBrightnessLevel(0.37)
+
+        XCTAssertEqual(model.displayBrightness, 0.37, accuracy: 0.001)
+        XCTAssertEqual(model.settings.value.lampIntensity, storedIntensity, accuracy: 0.001)
+
+        model.endBrightnessAdjustment()
+
+        XCTAssertEqual(model.settings.value.lampIntensity, 0.37, accuracy: 0.001)
+        XCTAssertEqual(model.settings.value.modePreference, .automatic)
+    }
+
     func testSecondsPanelLosesItsBackgroundWhenPlacedOnClock() {
         var layout = StandScreenLayout.portrait
         XCTAssertTrue(

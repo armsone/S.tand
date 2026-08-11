@@ -361,6 +361,7 @@ final class StandViewModel: ObservableObject {
     private var monitoringSuspensions: Set<MonitoringSuspensionReason> = []
     private var appIsActive = true
     private var brightnessBeforeSession: CGFloat?
+    private var isAdjustingBrightness = false
     private var brightnessBeforeFaceDown: CGFloat?
     private var activeRecordingSessionID: UUID?
     private var activeStartleEventID: UUID?
@@ -452,6 +453,7 @@ final class StandViewModel: ObservableObject {
                 guard !isFaceDown else { return }
                 let newBrightness = Double(screen.brightness)
                 displayBrightness = newBrightness
+                guard !isAdjustingBrightness else { return }
                 guard settings.value.modePreference == .automatic else { return }
                 applyBaseBrightness(newBrightness, animated: false)
                 refreshEnvironmentDisplayMode(
@@ -553,6 +555,7 @@ final class StandViewModel: ObservableObject {
 
     func appWillResignActive() {
         appIsActive = false
+        isAdjustingBrightness = false
         stopInternetRadioPlayback()
         manualDimmingHoldActive = false
         automaticDimmingPaused = false
@@ -1003,7 +1006,7 @@ final class StandViewModel: ObservableObject {
     }
 
     func beginBrightnessAdjustment() {
-        guard isNightSessionActive else { return }
+        isAdjustingBrightness = true
         lampTask?.cancel()
         movementTorchSyncTask?.cancel()
         movementTorchSyncTask = nil
@@ -1012,8 +1015,14 @@ final class StandViewModel: ObservableObject {
         torch.turnOff()
     }
 
+    func previewBrightnessLevel(_ level: Double) {
+        let value = SimplifiedBrightnessModePolicy.clamped(level)
+        displayBrightness = value
+        UIScreen.main.brightness = CGFloat(value)
+        applyBaseBrightness(value, animated: false)
+    }
+
     func updateBrightnessLevel(_ level: Double) {
-        guard isNightSessionActive else { return }
         let value = SimplifiedBrightnessModePolicy.clamped(level)
         let preference = SimplifiedBrightnessModePolicy.preference(for: value)
         displayBrightness = value
@@ -1032,8 +1041,8 @@ final class StandViewModel: ObservableObject {
     }
 
     func endBrightnessAdjustment() {
-        guard isNightSessionActive else { return }
-        applyBaseBrightness(displayBrightness, animated: false)
+        isAdjustingBrightness = false
+        updateBrightnessLevel(displayBrightness)
     }
 
     func toggleObjectMateMode() {
