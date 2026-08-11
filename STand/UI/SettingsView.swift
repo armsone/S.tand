@@ -461,7 +461,7 @@ struct SettingsView: View {
             }
 
             SettingsHelpText(
-                "처음 1분 동안 방의 평소 소리를 익힙니다. 이후 평균보다 커진 순간에는 바로 화들짝 반응하고, 녹음은 이 iPhone 안에서만 처리합니다."
+                "처음 1분 동안 방의 평소 소리를 익힙니다. 이후 평균보다 커진 순간에는 바로 화들짝 반응하고, 녹음은 이 기기 안에서만 처리합니다."
             )
         }
     }
@@ -576,7 +576,7 @@ struct SettingsView: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 8) {
-                Label("오디오는 이 iPhone에서 처리하고 로컬에만 저장합니다.", systemImage: "iphone.and.arrow.forward.inward")
+                Label("오디오는 이 기기에서 처리하고 로컬에만 저장합니다.", systemImage: "lock.shield.fill")
                 Label("함께 있는 사람에게 녹음 사실을 먼저 알려 주세요.", systemImage: "person.2.fill")
                 Label("충전 중인 기기와 플래시를 침구로 덮지 마세요.", systemImage: "thermometer.medium")
             }

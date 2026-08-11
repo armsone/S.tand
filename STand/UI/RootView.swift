@@ -139,12 +139,14 @@ enum StandControlLayoutMetrics {
 }
 
 enum BottomControlLayoutPolicy {
-    static func columnCount(isPortrait: Bool) -> Int {
-        isPortrait ? 4 : 8
+    static func columnCount(availableWidth: CGFloat, isPortrait: Bool) -> Int {
+        isPortrait && availableWidth < 700 ? 4 : 8
     }
 
     static func columnWidth(availableWidth: CGFloat, isPortrait: Bool) -> CGFloat {
-        let count = CGFloat(columnCount(isPortrait: isPortrait))
+        let count = CGFloat(
+            columnCount(availableWidth: availableWidth, isPortrait: isPortrait)
+        )
         let spacingWidth = CGFloat(max(0, Int(count) - 1)) * StandControlLayoutMetrics.rowSpacing
         return max(0, (availableWidth - spacingWidth) / count)
     }

@@ -431,6 +431,34 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
+    func testIPadPortraitBottomControlsUseACompactSingleRow() {
+        let availableWidth: CGFloat = 822
+
+        XCTAssertEqual(
+            BottomControlLayoutPolicy.columnCount(
+                availableWidth: availableWidth,
+                isPortrait: true
+            ),
+            8
+        )
+        XCTAssertEqual(
+            BottomControlLayoutPolicy.rows(
+                for: StandControlKind.defaultOrder,
+                availableWidth: availableWidth,
+                isPortrait: true
+            ).count,
+            1
+        )
+        XCTAssertEqual(
+            BottomControlLayoutPolicy.height(
+                for: StandControlKind.defaultOrder,
+                availableWidth: availableWidth,
+                isPortrait: true
+            ),
+            StandControlLayoutMetrics.itemHeight
+        )
+    }
+
     func testPanelEditorResetPreservesBottomButtonOrder() {
         var customized = StandScreenLayout.portrait
         customized.clock = PanelTransform(x: 0.18, y: -0.12, scale: 1.4)
