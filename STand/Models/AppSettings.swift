@@ -85,30 +85,6 @@ enum ClockFontChoice: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum OrientationPreference: String, Codable, CaseIterable, Identifiable {
-    case automatic
-    case portrait
-    case landscape
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .automatic: "기기 설정 따르기"
-        case .portrait: "세로 고정"
-        case .landscape: "가로 고정"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .automatic: "rectangle.rotate"
-        case .portrait: "rectangle.portrait"
-        case .landscape: "rectangle"
-        }
-    }
-}
-
 enum ClockHourMode: String, Codable, CaseIterable {
     case twelve
     case twentyFour
@@ -180,6 +156,7 @@ struct PanelTransform: Codable, Equatable {
 enum StandControlKind: String, Codable, CaseIterable, Identifiable {
     case flashlight
     case brightness
+    // Decoding-only legacy value. It is intentionally excluded from defaultOrder.
     case stopDetection
     case recordings
     case settings
@@ -187,7 +164,6 @@ enum StandControlKind: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     static let defaultOrder: [StandControlKind] = [
-        .stopDetection,
         .recordings,
         .settings
     ]
@@ -208,6 +184,11 @@ struct StandScreenLayout: Codable, Equatable {
         y: 0.215,
         scale: 0.75
     )
+    static let defaultSecondaryRadioPanelTransform = PanelTransform(
+        x: -0.26,
+        y: 0.215,
+        scale: 0.75
+    )
 
     var clock: PanelTransform
     var seconds: PanelTransform
@@ -219,6 +200,8 @@ struct StandScreenLayout: Codable, Equatable {
     var brightnessRule: PanelTransform
     var battery: PanelTransform
     var radio: PanelTransform
+    var secondaryRadio: PanelTransform
+    var radiosGrouped: Bool
     var weatherGroupIDs: [Int]
     var controlOrder: [StandControlKind]
 
@@ -233,6 +216,8 @@ struct StandScreenLayout: Codable, Equatable {
         brightnessRule: PanelTransform,
         battery: PanelTransform = .init(x: 0, y: 0.18),
         radio: PanelTransform = StandScreenLayout.defaultRadioPanelTransform,
+        secondaryRadio: PanelTransform = StandScreenLayout.defaultSecondaryRadioPanelTransform,
+        radiosGrouped: Bool = false,
         weatherGroupIDs: [Int],
         controlOrder: [StandControlKind] = StandControlKind.defaultOrder
     ) {
@@ -246,6 +231,8 @@ struct StandScreenLayout: Codable, Equatable {
         self.brightnessRule = brightnessRule
         self.battery = battery
         self.radio = radio
+        self.secondaryRadio = secondaryRadio
+        self.radiosGrouped = radiosGrouped
         self.weatherGroupIDs = weatherGroupIDs
         self.controlOrder = StandControlKind.normalizedOrder(controlOrder)
     }
@@ -253,7 +240,8 @@ struct StandScreenLayout: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case clock, seconds
         case weatherIcon, weatherTemperature, weatherCondition
-        case date, status, brightnessRule, battery, radio, weatherGroupIDs, controlOrder
+        case date, status, brightnessRule, battery, radio, secondaryRadio, radiosGrouped
+        case weatherGroupIDs, controlOrder
     }
 
     init(from decoder: Decoder) throws {
@@ -272,6 +260,9 @@ struct StandScreenLayout: Codable, Equatable {
             ?? .init(x: 0, y: 0.18)
         radio = try values.decodeIfPresent(PanelTransform.self, forKey: .radio)
             ?? StandScreenLayout.defaultRadioPanelTransform
+        secondaryRadio = try values.decodeIfPresent(PanelTransform.self, forKey: .secondaryRadio)
+            ?? StandScreenLayout.defaultSecondaryRadioPanelTransform
+        radiosGrouped = try values.decodeIfPresent(Bool.self, forKey: .radiosGrouped) ?? false
         weatherGroupIDs = try values.decode([Int].self, forKey: .weatherGroupIDs)
         let rawControlOrder = try? values.decode([String].self, forKey: .controlOrder)
         controlOrder = StandControlKind.normalizedOrder(
@@ -280,65 +271,77 @@ struct StandScreenLayout: Codable, Equatable {
     }
 
     static let portrait = StandScreenLayout(
-        clock: .init(x: 0, y: 0),
-        seconds: .init(x: 0.27, y: 0.036),
-        weatherIcon: .init(x: 0, y: -0.22811053984575841, scale: 0.86922719107523572),
-        weatherTemperature: .init(x: 0, y: -0.22811053984575841, scale: 0.86922719107523572),
-        weatherCondition: .init(x: 0, y: -0.22811053984575841, scale: 0.86922719107523572),
-        date: .init(x: 0, y: 0.10),
+        clock: .init(x: 0, y: 0, scale: 1.2919049397971205),
+        seconds: .init(x: 0.33550580431177457, y: 0.05785089974293066),
+        weatherIcon: .init(x: 0, y: -0.20497429305912612, scale: 0.8692271910752357),
+        weatherTemperature: .init(x: 0, y: -0.20497429305912612, scale: 0.8692271910752357),
+        weatherCondition: .init(x: 0, y: -0.20497429305912612, scale: 0.8692271910752357),
+        date: .init(x: 0, y: 0.1179948586118252),
         status: .init(x: 0, y: 0.15),
         brightnessRule: .init(x: 0, y: 0.21),
-        battery: .init(x: 0, y: 0.20698371893744649),
+        battery: .init(x: 0, y: 0.2069837189374465),
+        radio: .init(x: 0, y: -0.31070694087403605, scale: 1.0476520613791829),
+        secondaryRadio: .init(
+            x: -0.17436152570480928,
+            y: 0.31097257926306765,
+            scale: 0.75
+        ),
+        radiosGrouped: true,
         weatherGroupIDs: [1, 1, 1],
-        controlOrder: [
-            .flashlight, .brightness, .stopDetection,
-            .recordings, .settings
-        ]
+        controlOrder: [.recordings, .settings]
     )
 
     static let landscape = StandScreenLayout(
         clock: .init(x: 0, y: 0.07155322862129146, scale: 1.2810187063251741),
-        seconds: .init(x: 0.176, y: 0.17, scale: 1.1),
+        seconds: .init(x: 0.2508888888888889, y: 0.21401047120418848),
         weatherIcon: .init(x: 0, y: -0.25582024432809763, scale: 0.68640335461830571),
         weatherTemperature: .init(x: 0, y: -0.25582024432809763, scale: 0.68640335461830571),
         weatherCondition: .init(x: 0, y: -0.25582024432809763, scale: 0.68640335461830571),
         date: .init(x: -0.17600000000000007, y: -0.08265270506108202),
         status: .init(x: 0, y: 0.4646596858638743),
         brightnessRule: .init(x: 0, y: 0.32),
-        battery: .init(x: 0, y: 0.27773123909249542),
+        battery: .init(x: 0, y: 0.29780104712041866),
+        radio: .init(x: 0.4084444444444445, y: -0.2762739965095986, scale: 0.75),
+        secondaryRadio: .init(
+            x: -0.40577777777777785,
+            y: -0.27627399650959866,
+            scale: 0.75
+        ),
+        radiosGrouped: false,
         weatherGroupIDs: [1, 1, 1],
-        controlOrder: [
-            .flashlight, .stopDetection, .brightness,
-            .recordings, .settings
-        ]
+        controlOrder: [.recordings, .settings]
     )
 }
 
 struct AppSettings: Codable, Equatable {
+    static let maximumInternetRadioChannelCount = 2
+    static let defaultClockScale = 1.0059052830861586
+
     var lampIntensity = 0.72
     var silhouetteIntensity = 0.05
-    var clockScale = 1.0
+    var clockScale = Self.defaultClockScale
     var clockFont = ClockFontChoice.tenada
-    var clockHourMode = ClockHourMode.twelve
     var displayTheme = StandDisplayTheme.color
     var portraitLayout = StandScreenLayout.portrait
     var landscapeLayout = StandScreenLayout.landscape
-    var brightnessModeThreshold = 0.3
+    var brightnessModeThreshold = 0.4
     var holdDuration = 5.0
     var fadeDuration = 30.0
     var automaticDimmingEnabled = false
     var preventAutoDimmingWhenScreenBright = true
     var soundThresholdDB: Float = -36
     var recordingEnabled = true
-    var orientationPreference: OrientationPreference = .automatic
+    var soundSensingEnabled = true
     var torchEnabled = true
     var torchIntensity = 0.25
     var wakeOnSleepSound = false
     var multiStimulusWakeEnabled = true
     var modePreference = StandModePreference.automatic
     var cameraAmbientSensingEnabled = false
+    var weatherLocationEnabled = true
     private(set) var internetRadioChannels: [InternetRadioConfiguration] = []
     private(set) var selectedInternetRadioID: UUID?
+    private(set) var secondaryInternetRadioID: UUID?
 
     /// The selected channel kept as a compatibility surface for the original
     /// single-station UI. New channel-management code should use the collection
@@ -356,6 +359,7 @@ struct AppSettings: Codable, Equatable {
             guard let newValue else {
                 internetRadioChannels.removeAll()
                 selectedInternetRadioID = nil
+                secondaryInternetRadioID = nil
                 return
             }
 
@@ -372,7 +376,25 @@ struct AppSettings: Codable, Equatable {
                 internetRadioChannels.append(newValue)
             }
             selectedInternetRadioID = newValue.id
+            if secondaryInternetRadioID == newValue.id {
+                secondaryInternetRadioID = nil
+            }
         }
+    }
+
+    var secondaryInternetRadio: InternetRadioConfiguration? {
+        guard let secondaryInternetRadioID,
+              secondaryInternetRadioID != selectedInternetRadioID
+        else { return nil }
+        return internetRadioChannels.first { $0.id == secondaryInternetRadioID }
+    }
+
+    var homeInternetRadios: [InternetRadioConfiguration] {
+        Array(internetRadioChannels.prefix(2))
+    }
+
+    func internetRadioChannel(id: UUID) -> InternetRadioConfiguration? {
+        internetRadioChannels.first { $0.id == id }
     }
 
     static let recommended = AppSettings()
@@ -380,35 +402,35 @@ struct AppSettings: Codable, Equatable {
     init(
         lampIntensity: Double = 0.72,
         silhouetteIntensity: Double = 0.05,
-        clockScale: Double = 1,
+        clockScale: Double = AppSettings.defaultClockScale,
         clockFont: ClockFontChoice = .tenada,
-        clockHourMode: ClockHourMode = .twelve,
         displayTheme: StandDisplayTheme = .color,
         portraitLayout: StandScreenLayout = .portrait,
         landscapeLayout: StandScreenLayout = .landscape,
-        brightnessModeThreshold: Double = 0.3,
+        brightnessModeThreshold: Double = 0.4,
         holdDuration: Double = 5,
         fadeDuration: Double = 30,
         automaticDimmingEnabled: Bool = false,
         preventAutoDimmingWhenScreenBright: Bool = true,
         soundThresholdDB: Float = -36,
         recordingEnabled: Bool = true,
-        orientationPreference: OrientationPreference = .automatic,
+        soundSensingEnabled: Bool = true,
         torchEnabled: Bool = true,
         torchIntensity: Double = 0.25,
         wakeOnSleepSound: Bool = false,
         multiStimulusWakeEnabled: Bool = true,
         modePreference: StandModePreference = .automatic,
         cameraAmbientSensingEnabled: Bool = false,
+        weatherLocationEnabled: Bool = true,
         internetRadio: InternetRadioConfiguration? = nil,
         internetRadioChannels: [InternetRadioConfiguration] = [],
-        selectedInternetRadioID: UUID? = nil
+        selectedInternetRadioID: UUID? = nil,
+        secondaryInternetRadioID: UUID? = nil
     ) {
         self.lampIntensity = lampIntensity
         self.silhouetteIntensity = silhouetteIntensity
         self.clockScale = clockScale
         self.clockFont = clockFont
-        self.clockHourMode = clockHourMode
         self.displayTheme = displayTheme
         self.portraitLayout = portraitLayout
         self.landscapeLayout = landscapeLayout
@@ -419,19 +441,25 @@ struct AppSettings: Codable, Equatable {
         self.preventAutoDimmingWhenScreenBright = preventAutoDimmingWhenScreenBright
         self.soundThresholdDB = soundThresholdDB
         self.recordingEnabled = recordingEnabled
-        self.orientationPreference = orientationPreference
+        self.soundSensingEnabled = soundSensingEnabled
         self.torchEnabled = torchEnabled
         self.torchIntensity = torchIntensity
         self.wakeOnSleepSound = wakeOnSleepSound
         self.multiStimulusWakeEnabled = multiStimulusWakeEnabled
         self.modePreference = modePreference
         self.cameraAmbientSensingEnabled = cameraAmbientSensingEnabled
+        self.weatherLocationEnabled = weatherLocationEnabled
         let initialChannels = internetRadioChannels.isEmpty
             ? internetRadio.map { [$0] } ?? []
             : internetRadioChannels
-        self.internetRadioChannels = Self.uniqueChannels(initialChannels)
+        self.internetRadioChannels = Self.normalizedChannels(initialChannels)
         self.selectedInternetRadioID = Self.resolvedSelection(
             requestedID: selectedInternetRadioID ?? internetRadio?.id,
+            channels: self.internetRadioChannels
+        )
+        self.secondaryInternetRadioID = Self.resolvedSecondarySelection(
+            requestedID: secondaryInternetRadioID,
+            primaryID: self.selectedInternetRadioID,
             channels: self.internetRadioChannels
         )
     }
@@ -441,7 +469,6 @@ struct AppSettings: Codable, Equatable {
         case silhouetteIntensity
         case clockScale
         case clockFont
-        case clockHourMode
         case displayTheme
         case portraitLayout
         case landscapeLayout
@@ -452,15 +479,17 @@ struct AppSettings: Codable, Equatable {
         case preventAutoDimmingWhenScreenBright
         case soundThresholdDB
         case recordingEnabled
-        case orientationPreference
+        case soundSensingEnabled
         case torchEnabled
         case torchIntensity
         case wakeOnSleepSound
         case multiStimulusWakeEnabled
         case modePreference
         case cameraAmbientSensingEnabled
+        case weatherLocationEnabled
         case internetRadioChannels
         case selectedInternetRadioID
+        case secondaryInternetRadioID
         case internetRadio
     }
 
@@ -473,16 +502,13 @@ struct AppSettings: Codable, Equatable {
         ) ?? 0.05
         clockScale = min(1.35, max(
             0.7,
-            try container.decodeIfPresent(Double.self, forKey: .clockScale) ?? 1
+            try container.decodeIfPresent(Double.self, forKey: .clockScale)
+                ?? Self.defaultClockScale
         ))
         clockFont = try container.decodeIfPresent(
             ClockFontChoice.self,
             forKey: .clockFont
         ) ?? .tenada
-        clockHourMode = try container.decodeIfPresent(
-            ClockHourMode.self,
-            forKey: .clockHourMode
-        ) ?? .twelve
         displayTheme = try container.decodeIfPresent(
             StandDisplayTheme.self,
             forKey: .displayTheme
@@ -514,10 +540,10 @@ struct AppSettings: Codable, Equatable {
         ) ?? true
         soundThresholdDB = try container.decodeIfPresent(Float.self, forKey: .soundThresholdDB) ?? -36
         recordingEnabled = try container.decodeIfPresent(Bool.self, forKey: .recordingEnabled) ?? true
-        orientationPreference = try container.decodeIfPresent(
-            OrientationPreference.self,
-            forKey: .orientationPreference
-        ) ?? .automatic
+        soundSensingEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .soundSensingEnabled
+        ) ?? true
         torchEnabled = try container.decodeIfPresent(Bool.self, forKey: .torchEnabled) ?? true
         torchIntensity = try container.decodeIfPresent(Double.self, forKey: .torchIntensity) ?? 0.25
         wakeOnSleepSound = try container.decodeIfPresent(Bool.self, forKey: .wakeOnSleepSound) ?? false
@@ -533,6 +559,10 @@ struct AppSettings: Codable, Equatable {
             Bool.self,
             forKey: .cameraAmbientSensingEnabled
         ) ?? false
+        weatherLocationEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .weatherLocationEnabled
+        ) ?? true
         let decodedChannels: [InternetRadioConfiguration]?
         do {
             decodedChannels = try container.decodeIfPresent(
@@ -546,11 +576,16 @@ struct AppSettings: Codable, Equatable {
             InternetRadioConfiguration.self,
             forKey: .internetRadio
         )
-        internetRadioChannels = Self.uniqueChannels(
+        internetRadioChannels = Self.normalizedChannels(
             decodedChannels ?? legacyConfiguration.map { [$0] } ?? []
         )
         selectedInternetRadioID = Self.resolvedSelection(
             requestedID: try? container.decode(UUID.self, forKey: .selectedInternetRadioID),
+            channels: internetRadioChannels
+        )
+        secondaryInternetRadioID = Self.resolvedSecondarySelection(
+            requestedID: try? container.decode(UUID.self, forKey: .secondaryInternetRadioID),
+            primaryID: selectedInternetRadioID,
             channels: internetRadioChannels
         )
     }
@@ -561,7 +596,6 @@ struct AppSettings: Codable, Equatable {
         try container.encode(silhouetteIntensity, forKey: .silhouetteIntensity)
         try container.encode(clockScale, forKey: .clockScale)
         try container.encode(clockFont, forKey: .clockFont)
-        try container.encode(clockHourMode, forKey: .clockHourMode)
         try container.encode(displayTheme, forKey: .displayTheme)
         try container.encode(portraitLayout, forKey: .portraitLayout)
         try container.encode(landscapeLayout, forKey: .landscapeLayout)
@@ -575,15 +609,17 @@ struct AppSettings: Codable, Equatable {
         )
         try container.encode(soundThresholdDB, forKey: .soundThresholdDB)
         try container.encode(recordingEnabled, forKey: .recordingEnabled)
-        try container.encode(orientationPreference, forKey: .orientationPreference)
+        try container.encode(soundSensingEnabled, forKey: .soundSensingEnabled)
         try container.encode(torchEnabled, forKey: .torchEnabled)
         try container.encode(torchIntensity, forKey: .torchIntensity)
         try container.encode(wakeOnSleepSound, forKey: .wakeOnSleepSound)
         try container.encode(multiStimulusWakeEnabled, forKey: .multiStimulusWakeEnabled)
         try container.encode(modePreference, forKey: .modePreference)
         try container.encode(cameraAmbientSensingEnabled, forKey: .cameraAmbientSensingEnabled)
+        try container.encode(weatherLocationEnabled, forKey: .weatherLocationEnabled)
         try container.encode(internetRadioChannels, forKey: .internetRadioChannels)
         try container.encodeIfPresent(selectedInternetRadioID, forKey: .selectedInternetRadioID)
+        try container.encodeIfPresent(secondaryInternetRadioID, forKey: .secondaryInternetRadioID)
 
         // Keep the selected station in the former key so a downgraded build can
         // still open the user's current station. New builds read the array first.
@@ -597,6 +633,9 @@ struct AppSettings: Codable, Equatable {
         if let index = internetRadioChannels.firstIndex(where: { $0.id == configuration.id }) {
             internetRadioChannels[index] = configuration
         } else {
+            guard internetRadioChannels.count < Self.maximumInternetRadioChannelCount else {
+                return
+            }
             internetRadioChannels.append(configuration)
         }
         if select || selectedInternetRadioID == nil {
@@ -617,6 +656,20 @@ struct AppSettings: Codable, Equatable {
     mutating func selectInternetRadioChannel(id: UUID) -> Bool {
         guard internetRadioChannels.contains(where: { $0.id == id }) else { return false }
         selectedInternetRadioID = id
+        if secondaryInternetRadioID == id { secondaryInternetRadioID = nil }
+        return true
+    }
+
+    @discardableResult
+    mutating func selectSecondaryInternetRadioChannel(id: UUID?) -> Bool {
+        guard let id else {
+            secondaryInternetRadioID = nil
+            return true
+        }
+        guard id != selectedInternetRadioID,
+              internetRadioChannels.contains(where: { $0.id == id })
+        else { return false }
+        secondaryInternetRadioID = id
         return true
     }
 
@@ -631,6 +684,8 @@ struct AppSettings: Codable, Equatable {
                 ? nil
                 : internetRadioChannels[min(index, internetRadioChannels.count - 1)].id
         }
+        if secondaryInternetRadioID == id { secondaryInternetRadioID = nil }
+        if secondaryInternetRadioID == selectedInternetRadioID { secondaryInternetRadioID = nil }
         return removed
     }
 
@@ -652,6 +707,28 @@ struct AppSettings: Codable, Equatable {
         return channels.filter { seenIDs.insert($0.id).inserted }
     }
 
+    private static func normalizedChannels(
+        _ channels: [InternetRadioConfiguration]
+    ) -> [InternetRadioConfiguration] {
+        Array(uniqueChannels(channels).prefix(maximumInternetRadioChannelCount))
+    }
+
+    mutating func applyCurrentExperienceDefaults() {
+        clockScale = Self.defaultClockScale
+        portraitLayout = .portrait
+        landscapeLayout = .landscape
+        internetRadioChannels = Self.normalizedChannels(internetRadioChannels)
+        selectedInternetRadioID = Self.resolvedSelection(
+            requestedID: selectedInternetRadioID,
+            channels: internetRadioChannels
+        )
+        secondaryInternetRadioID = Self.resolvedSecondarySelection(
+            requestedID: secondaryInternetRadioID,
+            primaryID: selectedInternetRadioID,
+            channels: internetRadioChannels
+        )
+    }
+
     private static func resolvedSelection(
         requestedID: UUID?,
         channels: [InternetRadioConfiguration]
@@ -662,12 +739,25 @@ struct AppSettings: Codable, Equatable {
         }
         return channels.first?.id
     }
+
+    private static func resolvedSecondarySelection(
+        requestedID: UUID?,
+        primaryID: UUID?,
+        channels: [InternetRadioConfiguration]
+    ) -> UUID? {
+        guard let requestedID,
+              requestedID != primaryID,
+              channels.contains(where: { $0.id == requestedID })
+        else { return nil }
+        return requestedID
+    }
 }
 
 enum SettingsMigration {
     static let torchEnabledByDefaultKey = "settingsMigration.torchEnabledByDefault.v1"
     static let fiveSecondHoldDurationKey = "settingsMigration.fiveSecondHoldDuration.v1"
     static let internetRadioChannelsKey = "settingsMigration.internetRadioChannels.v1"
+    static let currentExperienceDefaultsKey = "settingsMigration.currentExperienceDefaults.v1"
 
     static func applyingTorchDefault(
         to settings: AppSettings,
@@ -686,6 +776,16 @@ enum SettingsMigration {
         guard !hasMigrated else { return settings }
         var migrated = settings
         migrated.holdDuration = 5
+        return migrated
+    }
+
+    static func applyingCurrentExperienceDefaults(
+        to settings: AppSettings,
+        hasMigrated: Bool
+    ) -> AppSettings {
+        guard !hasMigrated else { return settings }
+        var migrated = settings
+        migrated.applyCurrentExperienceDefaults()
         return migrated
     }
 }
@@ -714,18 +814,26 @@ final class SettingsStore: ObservableObject {
         let hasMigratedInternetRadioChannels = defaults.bool(
             forKey: SettingsMigration.internetRadioChannelsKey
         )
+        let hasMigratedCurrentExperienceDefaults = defaults.bool(
+            forKey: SettingsMigration.currentExperienceDefaultsKey
+        )
         let torchMigrated = SettingsMigration.applyingTorchDefault(
             to: saved,
             hasMigrated: hasMigratedTorchDefault
         )
-        value = SettingsMigration.applyingFiveSecondHoldDuration(
+        let holdDurationMigrated = SettingsMigration.applyingFiveSecondHoldDuration(
             to: torchMigrated,
             hasMigrated: hasMigratedHoldDuration
+        )
+        value = SettingsMigration.applyingCurrentExperienceDefaults(
+            to: holdDurationMigrated,
+            hasMigrated: hasMigratedCurrentExperienceDefaults
         )
 
         guard !hasMigratedTorchDefault
                 || !hasMigratedHoldDuration
                 || !hasMigratedInternetRadioChannels
+                || !hasMigratedCurrentExperienceDefaults
         else { return }
         if let data = try? JSONEncoder().encode(value) {
             defaults.set(data, forKey: storageKey)
@@ -737,6 +845,9 @@ final class SettingsStore: ObservableObject {
             }
             if !hasMigratedInternetRadioChannels {
                 defaults.set(true, forKey: SettingsMigration.internetRadioChannelsKey)
+            }
+            if !hasMigratedCurrentExperienceDefaults {
+                defaults.set(true, forKey: SettingsMigration.currentExperienceDefaultsKey)
             }
         }
     }
@@ -757,7 +868,7 @@ enum AppVersion {
     }
 
     static var build: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.20.6"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.23.3"
     }
 
     static var display: String { "\(marketing) (\(build))" }

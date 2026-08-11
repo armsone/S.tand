@@ -124,6 +124,27 @@ final class AudioCaptureService: ObservableObject {
         }
     }
 
+    func requestAccess(completion: @escaping (Bool) -> Void) {
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
+            microphoneAccess = .granted
+            completion(true)
+        case .denied:
+            microphoneAccess = .denied
+            completion(false)
+        case .undetermined:
+            AVAudioApplication.requestRecordPermission { [weak self] granted in
+                DispatchQueue.main.async {
+                    self?.microphoneAccess = granted ? .granted : .denied
+                    completion(granted)
+                }
+            }
+        @unknown default:
+            microphoneAccess = .unknown
+            completion(false)
+        }
+    }
+
     func startIfAuthorized() {
         refreshPermissionState()
         guard microphoneAccess == .granted else {

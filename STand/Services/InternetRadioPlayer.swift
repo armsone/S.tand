@@ -6,15 +6,23 @@ enum InternetRadioPlaybackState: Equatable {
     case idle
     case loading
     case playing
+    case reconnecting(Int)
     case failed(String)
 
     var isActive: Bool {
         switch self {
-        case .loading, .playing:
+        case .loading, .playing, .reconnecting:
             true
         case .idle, .failed:
             false
         }
+    }
+}
+
+enum InternetRadioReconnectPolicy {
+    static func delay(forAttempt attempt: Int) -> TimeInterval {
+        let delays: [TimeInterval] = [2, 4, 8, 15, 30]
+        return delays[min(max(0, attempt - 1), delays.count - 1)]
     }
 }
 
@@ -33,16 +41,18 @@ final class InternetRadioPlayer: ObservableObject {
     private var notificationCancellables: Set<AnyCancellable> = []
     private var loadingTimeoutTask: Task<Void, Never>?
     private var pausedFailureTask: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
     private var ownsAudioSession = false
     private var isWaitingForInterruptionToEnd = false
     private var activeURL: URL?
+    private var reconnectAttempt = 0
 
     init() {
         observeAudioSession()
     }
 
     func play(_ configuration: InternetRadioConfiguration) {
-        startPlayback(url: configuration.streamURL, channelID: configuration.id)
+        beginPlayback(url: configuration.streamURL, channelID: configuration.id)
     }
 
     func switchChannel(to configuration: InternetRadioConfiguration) {
@@ -50,18 +60,26 @@ final class InternetRadioPlayer: ObservableObject {
             activeChannelID = configuration.id
             return
         }
-        startPlayback(url: configuration.streamURL, channelID: configuration.id)
+        beginPlayback(url: configuration.streamURL, channelID: configuration.id)
     }
 
     func play(url: URL) {
-        startPlayback(url: url, channelID: nil)
+        beginPlayback(url: url, channelID: nil)
     }
 
-    private func startPlayback(url: URL, channelID: UUID?) {
-        guard !isWaitingForInterruptionToEnd else { return }
-        tearDownPlayer()
+    private func beginPlayback(url: URL, channelID: UUID?) {
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        reconnectAttempt = 0
         activeChannelID = channelID
         activeURL = url
+        startPlaybackAttempt()
+    }
+
+    private func startPlaybackAttempt() {
+        guard !isWaitingForInterruptionToEnd else { return }
+        guard let url = activeURL else { return }
+        tearDownPlayer()
         state = .loading
 
         do {
@@ -71,7 +89,7 @@ final class InternetRadioPlayer: ObservableObject {
                 ownsAudioSession = true
             }
         } catch {
-            fail("오디오 출력을 시작할 수 없습니다.")
+            scheduleReconnect(after: "오디오 출력을 시작할 수 없습니다.")
             return
         }
 
@@ -85,8 +103,11 @@ final class InternetRadioPlayer: ObservableObject {
     }
 
     func stop() {
-        let shouldNotify = state.isActive && !isWaitingForInterruptionToEnd
+        let shouldNotify = state.isActive || isWaitingForInterruptionToEnd
         tearDownPlayer()
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        isWaitingForInterruptionToEnd = false
         deactivateAudioSessionIfOwned()
         activeChannelID = nil
         activeURL = nil
@@ -101,7 +122,9 @@ final class InternetRadioPlayer: ObservableObject {
                 guard let self, self.player?.currentItem === item else { return }
                 switch status {
                 case .failed:
-                    self.fail(item.error?.localizedDescription ?? "스트림에 연결할 수 없습니다.")
+                    self.scheduleReconnect(
+                        after: item.error?.localizedDescription ?? "스트림에 연결할 수 없습니다."
+                    )
                 case .readyToPlay, .unknown:
                     break
                 @unknown default:
@@ -121,6 +144,7 @@ final class InternetRadioPlayer: ObservableObject {
                     self.pausedFailureTask?.cancel()
                     self.pausedFailureTask = nil
                     self.state = .playing
+                    self.reconnectAttempt = 0
                 case .waitingToPlayAtSpecifiedRate:
                     self.pausedFailureTask?.cancel()
                     self.pausedFailureTask = nil
@@ -142,7 +166,7 @@ final class InternetRadioPlayer: ObservableObject {
         .sink { [weak self] notification in
             guard let self, self.player?.currentItem === item else { return }
             let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
-            self.fail(error?.localizedDescription ?? "라디오 재생이 중단되었습니다.")
+            self.scheduleReconnect(after: error?.localizedDescription ?? "라디오 재생이 중단되었습니다.")
         }
         .store(in: &playerCancellables)
 
@@ -153,7 +177,7 @@ final class InternetRadioPlayer: ObservableObject {
         .receive(on: RunLoop.main)
         .sink { [weak self] _ in
             guard let self, self.player?.currentItem === item else { return }
-            self.fail("라디오 재생이 종료되었습니다.")
+            self.scheduleReconnect(after: "라디오 재생이 종료되었습니다.")
         }
         .store(in: &playerCancellables)
 
@@ -197,7 +221,7 @@ final class InternetRadioPlayer: ObservableObject {
                 guard let rawValue = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
                       AVAudioSession.RouteChangeReason(rawValue: rawValue) == .oldDeviceUnavailable
                 else { return }
-                self?.fail("오디오 출력 기기가 분리되어 라디오를 멈췄습니다.")
+                self?.stopWithFailure("오디오 출력 기기가 분리되어 라디오를 멈췄습니다.")
             }
             .store(in: &notificationCancellables)
 
@@ -206,7 +230,8 @@ final class InternetRadioPlayer: ObservableObject {
             .sink { [weak self] _ in
                 guard let self, self.state.isActive || self.ownsAudioSession else { return }
                 self.ownsAudioSession = false
-                self.fail("오디오 서비스가 재설정되어 라디오를 멈췄습니다.")
+                self.ownsAudioSession = false
+                self.scheduleReconnect(after: "오디오 서비스가 재설정되었습니다.")
             }
             .store(in: &notificationCancellables)
     }
@@ -216,7 +241,7 @@ final class InternetRadioPlayer: ObservableObject {
         loadingTimeoutTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(30))
             guard let self, !Task.isCancelled, self.state == .loading else { return }
-            self.fail("30초 안에 스트림에 연결하지 못했습니다.")
+            self.scheduleReconnect(after: "30초 안에 스트림에 연결하지 못했습니다.")
         }
     }
 
@@ -230,14 +255,31 @@ final class InternetRadioPlayer: ObservableObject {
                   !self.isWaitingForInterruptionToEnd,
                   self.player?.timeControlStatus == .paused
             else { return }
-            self.fail("라디오 재생이 중단되었습니다.")
+            self.scheduleReconnect(after: "라디오 재생이 중단되었습니다.")
         }
     }
 
-    private func fail(_ message: String) {
-        guard state.isActive || ownsAudioSession else { return }
+    private func scheduleReconnect(after _: String) {
+        guard activeURL != nil else { return }
+        tearDownPlayer()
+        deactivateAudioSessionIfOwned()
+        reconnectTask?.cancel()
+        reconnectAttempt += 1
+        let attempt = reconnectAttempt
+        state = .reconnecting(attempt)
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(InternetRadioReconnectPolicy.delay(forAttempt: attempt)))
+            guard let self, !Task.isCancelled, self.activeURL != nil else { return }
+            self.reconnectTask = nil
+            self.startPlaybackAttempt()
+        }
+    }
+
+    private func stopWithFailure(_ message: String) {
         let shouldNotify = state.isActive
         tearDownPlayer()
+        reconnectTask?.cancel()
+        reconnectTask = nil
         deactivateAudioSessionIfOwned()
         activeChannelID = nil
         activeURL = nil
@@ -252,16 +294,20 @@ final class InternetRadioPlayer: ObservableObject {
         let shouldWaitToResumeMonitoring = state.isActive
         isWaitingForInterruptionToEnd = shouldWaitToResumeMonitoring
         tearDownPlayer()
+        reconnectTask?.cancel()
+        reconnectTask = nil
         deactivateAudioSessionIfOwned()
-        activeChannelID = nil
-        activeURL = nil
-        state = .failed("다른 오디오 사용으로 라디오가 중단되었습니다.")
+        state = .reconnecting(max(1, reconnectAttempt))
     }
 
     private func finishInterruption() {
         guard isWaitingForInterruptionToEnd else { return }
         isWaitingForInterruptionToEnd = false
-        onPlaybackBecameInactive?()
+        guard activeURL != nil else {
+            onPlaybackBecameInactive?()
+            return
+        }
+        startPlaybackAttempt()
     }
 
     private func tearDownPlayer() {

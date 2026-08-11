@@ -1,6 +1,5 @@
 import SwiftUI
 import UIKit
-import UniformTypeIdentifiers
 
 struct STandBrandIcon: View {
     let size: CGFloat
@@ -78,6 +77,7 @@ struct BurnInProtection {
 private enum PresentedSheet: String, Identifiable {
     case recordings
     case internetRadio
+    case internetRadioChannels
     case settings
 
     var id: String { rawValue }
@@ -87,17 +87,6 @@ private struct BrightnessDragState {
     let startingValue: Double
 }
 
-enum AppBrightnessVisualPolicy {
-    static func dimmingOpacity(for level: Double) -> Double {
-        1 - SimplifiedBrightnessModePolicy.clamped(level)
-    }
-}
-
-enum HomeEditorMode: Equatable {
-    case panels
-    case controls
-}
-
 enum HomeEditorResetPolicy {
     static func panels(in layout: StandScreenLayout, isPortrait: Bool) -> StandScreenLayout {
         var reset = isPortrait ? StandScreenLayout.portrait : .landscape
@@ -105,11 +94,6 @@ enum HomeEditorResetPolicy {
         return reset
     }
 
-    static func controls(in layout: StandScreenLayout) -> StandScreenLayout {
-        var reset = layout
-        reset.controlOrder = StandControlKind.defaultOrder
-        return reset
-    }
 }
 
 enum StandControlLayoutMetrics {
@@ -293,22 +277,18 @@ struct RootView: View {
     @ObservedObject private var weather: WeatherService
     @Environment(\.scenePhase) private var scenePhase
     @State private var presentedSheet: PresentedSheet?
-    @State private var beginsScreenEditingAfterSheetDismiss = false
     @State private var didInitialize = false
     @State private var brightnessDragState: BrightnessDragState?
-    @State private var brightnessFixedEdge: BrightnessFixedEdge?
-    @State private var brightnessCommittedEdge: BrightnessFixedEdge?
-    @State private var brightnessFixedEdgeTask: Task<Void, Never>?
     @State private var clockScaleGestureStart: Double?
     @State private var clockScaleFeedback: Double?
     @State private var clockScaleFeedbackTask: Task<Void, Never>?
     @State private var isEditingScreen = false
-    @State private var editorMode = HomeEditorMode.panels
     @State private var editingLayout = StandScreenLayout.portrait
     @State private var editingIsPortrait = true
     @State private var currentIsPortrait = true
     @State private var currentCanvasSize = CGSize.zero
     @State private var currentProtectedInsets = EdgeInsets()
+    @State private var radioEditorChannelID: UUID?
 
     init(model: StandViewModel) {
         _model = ObservedObject(wrappedValue: model)
@@ -360,18 +340,26 @@ struct RootView: View {
                         .padding(.horizontal, isPortrait ? 20 : 32)
                         .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
 
-                    AppBrightnessDimmingLayer(level: model.displayBrightness)
-                        .zIndex(80)
-
                     VStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        Text(AppVersion.build)
-                            .font(.system(size: 8, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.16))
+                        HStack(spacing: 7) {
+                            Text(AppVersion.build)
+                            Text("·")
+                            Text("밝기 \(Int((model.displayBrightness * 100).rounded()))%")
+                                .monospacedDigit()
+                        }
+                            .font(.system(
+                                size: StandControlLayoutMetrics.statusFontSize,
+                                weight: .medium,
+                                design: .monospaced
+                            ))
+                            .foregroundStyle(.white.opacity(0.28))
                             .frame(height: StandControlLayoutMetrics.versionFooterHeight)
                     }
                     .allowsHitTesting(false)
-                    .accessibilityLabel("빌드 번호 \(AppVersion.build)")
+                    .accessibilityLabel(
+                        "빌드 번호 \(AppVersion.build), 현재 밝기 \(Int((model.displayBrightness * 100).rounded()))퍼센트"
+                    )
                     .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
                     .zIndex(6)
 
@@ -390,45 +378,33 @@ struct RootView: View {
                 }
 
                 if isEditingScreen {
-                    Group {
-                        switch editorMode {
-                        case .panels:
-                            ScreenEditorView(
-                                layout: $editingLayout,
-                                isPortrait: editingIsPortrait,
-                                weather: weather,
-                                radioConfiguration: settings.value.internetRadio,
-                                clockFont: Binding(
-                                    get: { settings.value.clockFont },
-                                    set: { settings.value.clockFont = $0 }
-                                ),
-                                hourMode: Binding(
-                                    get: { settings.value.clockHourMode },
-                                    set: { settings.value.clockHourMode = $0 }
-                                ),
-                                batteryText: silhouetteBatteryText,
-                                onConfigureRadio: {
-                                    presentedSheet = .internetRadio
-                                },
-                                onReset: {
-                                    editingLayout = HomeEditorResetPolicy.panels(
-                                        in: editingLayout,
-                                        isPortrait: editingIsPortrait
-                                    )
-                                },
-                                onSave: saveScreenLayout
+                    ScreenEditorView(
+                        layout: $editingLayout,
+                        isPortrait: editingIsPortrait,
+                        weather: weather,
+                        radioConfigurations: settings.value.homeInternetRadios,
+                        availableRadioCount: settings.value.internetRadioChannels.count,
+                        clockFont: Binding(
+                            get: { settings.value.clockFont },
+                            set: { settings.value.clockFont = $0 }
+                        ),
+                        hourMode: .twelve,
+                        batteryText: silhouetteBatteryText,
+                        onConfigureRadio: { channelID in
+                            radioEditorChannelID = channelID
+                            presentedSheet = .internetRadio
+                        },
+                        onManageRadios: {
+                            presentedSheet = .internetRadioChannels
+                        },
+                        onReset: {
+                            editingLayout = HomeEditorResetPolicy.panels(
+                                in: editingLayout,
+                                isPortrait: editingIsPortrait
                             )
-                        case .controls:
-                            ControlOrderEditorView(
-                                order: $editingLayout.controlOrder,
-                                isPortrait: editingIsPortrait,
-                                onReset: {
-                                    editingLayout = HomeEditorResetPolicy.controls(in: editingLayout)
-                                },
-                                onSave: saveScreenLayout
-                            )
-                        }
-                    }
+                        },
+                        onSave: saveScreenLayout
+                    )
                     .transition(.opacity)
                     .zIndex(20)
                 }
@@ -440,6 +416,7 @@ struct RootView: View {
                         .transition(.opacity)
                         .zIndex(100)
                 }
+
             }
             .grayscale(settings.value.displayTheme == .grayscale ? 1 : 0)
             .onAppear {
@@ -462,16 +439,11 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.28), value: settings.value.displayTheme)
         .contentShape(Rectangle())
-        .highPriorityGesture(screenAdjustmentGesture, including: .all)
-        .gesture(screenPressGesture)
+        .gesture(screenAdjustmentGesture.exclusively(before: screenPressGesture))
         .simultaneousGesture(clockMagnificationGesture)
         .persistentSystemOverlays(.hidden)
         .sheet(item: $presentedSheet, onDismiss: {
             model.resumeMonitoringAfterPlayback()
-            if beginsScreenEditingAfterSheetDismiss {
-                beginsScreenEditingAfterSheetDismiss = false
-                enterScreenEditing(isPortrait: currentIsPortrait, mode: .panels)
-            }
         }) { sheet in
             switch sheet {
             case .recordings:
@@ -483,25 +455,32 @@ struct RootView: View {
             case .internetRadio:
                 InternetRadioConfigurationView(
                     configuration: model.sharedInternetRadioDraft
-                        ?? settings.value.internetRadio,
+                        ?? radioConfigurationForEditor,
                     accent: settings.value.displayTheme.accentColor,
                     isSharedImport: model.sharedInternetRadioDraft != nil,
                     allowsDeletion: model.sharedInternetRadioDraft == nil
-                        && settings.value.internetRadio != nil,
+                        && radioConfigurationForEditor != nil,
                     onSave: { configuration in
-                        model.saveInternetRadioConfiguration(configuration)
+                        if radioEditorChannelID != nil {
+                            _ = model.updateInternetRadioChannel(configuration)
+                        } else {
+                            model.saveInternetRadioConfiguration(configuration)
+                        }
                     },
                     onDelete: {
-                        model.removeInternetRadioConfiguration()
+                        if let radioEditorChannelID {
+                            _ = model.removeInternetRadioChannel(id: radioEditorChannelID)
+                        } else {
+                            model.removeInternetRadioConfiguration()
+                        }
                     },
                     onCancel: model.discardSharedInternetRadioDraft
                 )
                 .id(internetRadioEditorIdentity)
+            case .internetRadioChannels:
+                InternetRadioChannelManagementView(model: model)
             case .settings:
-                SettingsView(
-                    model: model,
-                    onEditScreen: transitionFromSettingsToScreenEditor
-                )
+                SettingsView(model: model)
             }
         }
         .onAppear {
@@ -531,25 +510,23 @@ struct RootView: View {
     }
 
     private func resetTransientInterface() {
-        brightnessFixedEdgeTask?.cancel()
         clockScaleFeedbackTask?.cancel()
 
-        brightnessFixedEdgeTask = nil
         clockScaleFeedbackTask = nil
 
         brightnessDragState = nil
-        brightnessFixedEdge = nil
-        brightnessCommittedEdge = nil
         clockScaleGestureStart = nil
         clockScaleFeedback = nil
     }
 
     private func topBar(isPortrait _: Bool) -> some View {
+        let objectModeLocked = model.isNightSessionActive
+            && settings.value.modePreference == .object
         let statusTitle = model.isNightSessionActive
-            ? model.experienceMode.title
+            ? (objectModeLocked ? "오브제 모드 잠금" : model.experienceMode.title)
             : "자동 기능 꺼짐"
         let statusImage = model.isNightSessionActive
-            ? model.experienceMode.systemImage
+            ? (objectModeLocked ? "lock.fill" : model.experienceMode.systemImage)
             : "stop.circle.fill"
 
         return ZStack {
@@ -639,43 +616,38 @@ struct RootView: View {
             intensity: isDimmed ? 0 : model.lampIntensity,
             clockScale: settings.value.clockScale,
             clockFont: settings.value.clockFont,
-            hourMode: settings.value.clockHourMode,
-            statusText: dashboardStatusText,
+            hourMode: .twelve,
             batteryText: silhouetteBatteryText,
             batterySystemImage: model.batteryStatus.isCharging
                 ? "battery.100percent.bolt"
                 : "battery.50percent",
-            radioConfiguration: settings.value.internetRadio,
+            radioConfigurations: settings.value.homeInternetRadios,
             radioState: radio.state,
-            onToggleRadio: model.toggleInternetRadioPlayback,
-            onEditRadio: {
-                guard settings.value.internetRadio != nil else { return }
+            activeRadioChannelID: radio.activeChannelID,
+            onToggleRadio: model.toggleInternetRadioPlayback(channelID:),
+            onEditRadio: { channelID in
+                radioEditorChannelID = channelID
                 presentedSheet = .internetRadio
             }
         )
     }
 
-    private var dashboardStatusText: String {
-        model.experienceMode.title
-    }
-
     private var internetRadioEditorIdentity: String {
-        let configuration = model.sharedInternetRadioDraft ?? settings.value.internetRadio
+        let configuration = model.sharedInternetRadioDraft ?? radioConfigurationForEditor
         let source = model.sharedInternetRadioDraft == nil ? "saved" : "shared"
         return "\(source)|\(configuration?.id.uuidString ?? "new")"
     }
 
-    private func enterScreenEditing(isPortrait: Bool, mode: HomeEditorMode) {
-        editingIsPortrait = isPortrait
-        editingLayout = isPortrait ? settings.value.portraitLayout : settings.value.landscapeLayout
-        editorMode = mode
-        model.revealControls()
-        withAnimation(.easeOut(duration: 0.25)) { isEditingScreen = true }
+    private var radioConfigurationForEditor: InternetRadioConfiguration? {
+        guard let radioEditorChannelID else { return settings.value.internetRadio }
+        return settings.value.internetRadioChannels.first { $0.id == radioEditorChannelID }
     }
 
-    private func transitionFromSettingsToScreenEditor() {
-        beginsScreenEditingAfterSheetDismiss = true
-        presentedSheet = nil
+    private func enterScreenEditing(isPortrait: Bool) {
+        editingIsPortrait = isPortrait
+        editingLayout = isPortrait ? settings.value.portraitLayout : settings.value.landscapeLayout
+        model.revealControls()
+        withAnimation(.easeOut(duration: 0.25)) { isEditingScreen = true }
     }
 
     private func saveScreenLayout() {
@@ -688,9 +660,9 @@ struct RootView: View {
     }
 
     private var screenAdjustmentGesture: some Gesture {
-        DragGesture(minimumDistance: SimplifiedBrightnessModePolicy.verticalDragMinimumDistance)
+        DragGesture(minimumDistance: 10)
             .onChanged { value in
-                guard !isEditingScreen else { return }
+                guard !isEditingScreen, presentedSheet == nil else { return }
                 guard abs(value.translation.height) > abs(value.translation.width) else { return }
 
                 let state: BrightnessDragState
@@ -702,55 +674,20 @@ struct RootView: View {
                     model.beginBrightnessAdjustment()
                 }
 
-                let fixedEdge = SimplifiedBrightnessModePolicy.fixedEdge(
+                let adjustedValue = SimplifiedBrightnessModePolicy.level(
                     startingAt: state.startingValue,
                     verticalTranslation: value.translation.height,
                     viewportHeight: currentCanvasSize.height
                 )
-                let adjustedValue = brightnessCommittedEdge == fixedEdge
-                    ? (fixedEdge?.level ?? model.displayBrightness)
-                    : SimplifiedBrightnessModePolicy.level(
-                    startingAt: state.startingValue,
-                    verticalTranslation: value.translation.height,
-                    viewportHeight: currentCanvasSize.height
-                )
-                model.previewBrightnessLevel(adjustedValue)
-                updateFixedEdgeHold(fixedEdge)
-
+                model.updateBrightnessLevel(adjustedValue)
             }
             .onEnded { _ in
                 guard !isEditingScreen else { return }
                 if brightnessDragState != nil {
-                    cancelFixedEdgeHold()
                     model.endBrightnessAdjustment()
                     brightnessDragState = nil
                 }
             }
-    }
-
-    private func updateFixedEdgeHold(_ edge: BrightnessFixedEdge?) {
-        guard edge != brightnessFixedEdge else { return }
-        brightnessFixedEdgeTask?.cancel()
-        if edge != brightnessCommittedEdge { brightnessCommittedEdge = nil }
-        brightnessFixedEdge = edge
-        brightnessFixedEdgeTask = nil
-
-        guard let edge else { return }
-        brightnessFixedEdgeTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(SimplifiedBrightnessModePolicy.fixedEdgeHoldDuration))
-            guard !Task.isCancelled, brightnessFixedEdge == edge else { return }
-            model.updateBrightnessLevel(edge.level)
-            brightnessCommittedEdge = edge
-            brightnessFixedEdgeTask = nil
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        }
-    }
-
-    private func cancelFixedEdgeHold() {
-        brightnessFixedEdgeTask?.cancel()
-        brightnessFixedEdgeTask = nil
-        brightnessFixedEdge = nil
-        brightnessCommittedEdge = nil
     }
 
     private var screenPressGesture: some Gesture {
@@ -763,7 +700,7 @@ struct RootView: View {
                 switch result {
                 case .first(true):
                     guard !isEditingScreen, presentedSheet == nil else { return }
-                    enterScreenEditing(isPortrait: currentIsPortrait, mode: .panels)
+                    enterScreenEditing(isPortrait: currentIsPortrait)
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 case .second(let tapResult):
                     switch tapResult {
@@ -804,19 +741,7 @@ struct RootView: View {
                     clockScaleGestureStart = startingScale
                 }
 
-                let requestedScale = max(0.7, startingScale * Double(magnification))
-                let layout = currentIsPortrait
-                    ? settings.value.portraitLayout
-                    : settings.value.landscapeLayout
-                let maximumScale = PanelEditingPolicy.maximumScreenScale(
-                    layout: layout,
-                    isPortrait: currentIsPortrait,
-                    canvasSize: currentCanvasSize,
-                    insets: currentProtectedInsets,
-                    includesRadio: settings.value.internetRadio != nil,
-                    hardLimit: 1.35
-                )
-                let scale = min(max(maximumScale, startingScale), requestedScale)
+                let scale = min(1.35, max(0.7, startingScale * Double(magnification)))
                 settings.value.clockScale = scale
                 clockScaleFeedbackTask?.cancel()
                 withAnimation(.easeOut(duration: 0.12)) {
@@ -892,17 +817,6 @@ struct RootView: View {
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
-            .highPriorityGesture(
-                LongPressGesture(minimumDuration: 0.8, maximumDistance: 12)
-                    .onEnded { completed in
-                        guard completed else { return }
-                        enterScreenEditing(isPortrait: isPortrait, mode: .controls)
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    }
-            )
-            .accessibilityAction(named: "버튼 순서 편집") {
-                enterScreenEditing(isPortrait: isPortrait, mode: .controls)
-            }
             .animation(.easeOut(duration: 0.3), value: model.controlsVisible)
         }
     }
@@ -912,8 +826,7 @@ struct RootView: View {
             ? settings.value.portraitLayout.controlOrder
             : settings.value.landscapeLayout.controlOrder
         let simplifiedOrder = order.filter { ![.flashlight, .brightness].contains($0) }
-        guard !model.isNightSessionActive else { return simplifiedOrder }
-        return simplifiedOrder.filter { $0 != .stopDetection }
+        return simplifiedOrder
     }
 
     @ViewBuilder
@@ -945,15 +858,7 @@ struct RootView: View {
                 )
             )
         case .stopDetection:
-            ControlButton(
-                title: "자동 기능 끄기",
-                systemImage: "stop.circle.fill",
-                status: "전환·감지·녹음",
-                hint: "시계와 날씨는 유지하고 자동 모드 전환, 소리와 움직임 감지, 수면 녹음을 종료합니다",
-                width: width
-            ) {
-                model.stopNightSession()
-            }
+            EmptyView()
         case .recordings:
             ControlButton(
                 title: "녹음 목록 보기",
@@ -1097,19 +1002,6 @@ private struct AppBrightnessHUD: View {
 
     private var percent: Int {
         Int((min(1, max(0, level)) * 100).rounded())
-    }
-}
-
-private struct AppBrightnessDimmingLayer: View {
-    let level: Double
-
-    var body: some View {
-        Color.black
-            .opacity(AppBrightnessVisualPolicy.dimmingOpacity(for: level))
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-            .animation(.linear(duration: 0.06), value: level)
     }
 }
 
@@ -1302,13 +1194,13 @@ private struct DashboardCanvas: View {
     let clockScale: Double
     let clockFont: ClockFontChoice
     let hourMode: ClockHourMode
-    let statusText: String
     let batteryText: String
     let batterySystemImage: String
-    let radioConfiguration: InternetRadioConfiguration?
+    let radioConfigurations: [InternetRadioConfiguration]
     let radioState: InternetRadioPlaybackState
-    let onToggleRadio: () -> Void
-    let onEditRadio: () -> Void
+    let activeRadioChannelID: UUID?
+    let onToggleRadio: (UUID) -> Void
+    let onEditRadio: (UUID) -> Void
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -1340,16 +1232,6 @@ private struct DashboardCanvas: View {
                 StandDatePanel(date: context.date, isPortrait: isPortrait)
                     .panelTransform(layout.date, canvasSize: canvasSize)
 
-                Text(statusText)
-                    .font(.caption.weight(.medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.58)
-                    .frame(
-                        width: StatusPanelMetrics.width(isPortrait: isPortrait),
-                        height: StatusPanelMetrics.height
-                    )
-                    .panelTransform(layout.status, canvasSize: canvasSize)
-
                 if isDimmed {
                     Label(batteryText, systemImage: batterySystemImage)
                         .font(.caption.monospacedDigit())
@@ -1368,19 +1250,7 @@ private struct DashboardCanvas: View {
                     canvasSize: canvasSize
                 )
 
-                if let radioConfiguration {
-                    InternetRadioPanel(
-                        configuration: radioConfiguration,
-                        state: radioState,
-                        isDimmed: isDimmed,
-                        dimmedIntensity: dimmedIntensity,
-                        showsEditBadge: false,
-                        renderedScale: layout.radio.scale * clockScale,
-                        action: onToggleRadio,
-                        editAction: onEditRadio
-                    )
-                    .panelTransform(layout.radio, canvasSize: canvasSize)
-                }
+                radioPanels
             }
             .scaleEffect(clockScale, anchor: .center)
             .foregroundStyle(
@@ -1388,6 +1258,38 @@ private struct DashboardCanvas: View {
             )
             .offset(drift)
             .animation(.easeInOut(duration: 4), value: drift)
+        }
+    }
+
+    @ViewBuilder
+    private var radioPanels: some View {
+        if radioConfigurations.count == 2, layout.radiosGrouped {
+            InternetRadioGroupedPanel(
+                configurations: radioConfigurations,
+                state: radioState,
+                activeChannelID: activeRadioChannelID,
+                isDimmed: isDimmed,
+                dimmedIntensity: dimmedIntensity,
+                showsEditBadge: false,
+                actions: onToggleRadio,
+                editActions: onEditRadio
+            )
+            .panelTransform(layout.radio, canvasSize: canvasSize)
+        } else {
+            ForEach(Array(radioConfigurations.enumerated()), id: \.element.id) { index, configuration in
+                let transform = index == 0 ? layout.radio : layout.secondaryRadio
+                InternetRadioPanel(
+                    configuration: configuration,
+                    state: activeRadioChannelID == configuration.id ? radioState : .idle,
+                    isDimmed: isDimmed,
+                    dimmedIntensity: dimmedIntensity,
+                    showsEditBadge: false,
+                    renderedScale: transform.scale * clockScale,
+                    action: { onToggleRadio(configuration.id) },
+                    editAction: { onEditRadio(configuration.id) }
+                )
+                .panelTransform(transform, canvasSize: canvasSize)
+            }
         }
     }
 }
@@ -1416,10 +1318,36 @@ private struct InternetRadioPanel: View {
     let renderedScale: Double
     let action: () -> Void
     let editAction: () -> Void
+    let drawsSurface: Bool
+    let allowsInteraction: Bool
+
+    init(
+        configuration: InternetRadioConfiguration?,
+        state: InternetRadioPlaybackState,
+        isDimmed: Bool,
+        dimmedIntensity: Double,
+        showsEditBadge: Bool,
+        renderedScale: Double,
+        action: @escaping () -> Void,
+        editAction: @escaping () -> Void,
+        drawsSurface: Bool = true,
+        allowsInteraction: Bool = true
+    ) {
+        self.configuration = configuration
+        self.state = state
+        self.isDimmed = isDimmed
+        self.dimmedIntensity = dimmedIntensity
+        self.showsEditBadge = showsEditBadge
+        self.renderedScale = renderedScale
+        self.action = action
+        self.editAction = editAction
+        self.drawsSurface = drawsSurface
+        self.allowsInteraction = allowsInteraction
+    }
 
     var body: some View {
         Group {
-            if showsEditBadge {
+            if showsEditBadge || !allowsInteraction {
                 panelContent
             } else {
                 panelContent
@@ -1480,13 +1408,15 @@ private struct InternetRadioPanel: View {
             width: InternetRadioPanelMetrics.width,
             height: InternetRadioPanelMetrics.height
         )
-        .background(
-            FlipPanelSurface(
-                isDimmed: isDimmed,
-                cornerRadius: InternetRadioPanelMetrics.cornerRadius,
-                splitGap: 2
-            )
-        )
+        .background {
+            if drawsSurface {
+                FlipPanelSurface(
+                    isDimmed: isDimmed,
+                    cornerRadius: InternetRadioPanelMetrics.cornerRadius,
+                    splitGap: 2
+                )
+            }
+        }
         .overlay(alignment: .topTrailing) {
             if showsEditBadge {
                 Image(systemName: "pencil.circle.fill")
@@ -1515,6 +1445,7 @@ private struct InternetRadioPanel: View {
         guard configuration != nil else { return "radio.fill" }
         return switch state {
         case .loading: "antenna.radiowaves.left.and.right"
+        case .reconnecting: "arrow.clockwise.circle.fill"
         case .playing: "stop.circle.fill"
         case .idle, .failed: "radio.fill"
         }
@@ -1524,10 +1455,11 @@ private struct InternetRadioPanel: View {
         guard configuration != nil else { return "HTTPS 주소 등록" }
         if showsEditBadge { return "채널 편집" }
         return switch state {
-        case .idle: "재생"
-        case .loading: "연결 취소"
-        case .playing: "감지·녹음 중지"
-        case .failed: "연결 실패 · 다시 듣기"
+        case .idle: "대기 중"
+        case .loading: "연결 중"
+        case .playing: "재생 중"
+        case .reconnecting: "자동 재연결 중"
+        case .failed: "연결 실패"
         }
     }
 
@@ -1544,8 +1476,82 @@ private struct InternetRadioPanel: View {
         }
         return switch state {
         case .idle, .failed: "등록한 인터넷 라디오를 재생합니다"
-        case .loading: "인터넷 라디오 연결을 취소합니다"
+        case .loading, .reconnecting: "인터넷 라디오 연결을 취소합니다"
         case .playing: "인터넷 라디오를 끄고 소리 감지와 녹음을 다시 시작합니다"
+        }
+    }
+}
+
+private struct InternetRadioGroupedPanel: View {
+    let configurations: [InternetRadioConfiguration]
+    let state: InternetRadioPlaybackState
+    let activeChannelID: UUID?
+    let isDimmed: Bool
+    let dimmedIntensity: Double
+    let showsEditBadge: Bool
+    let actions: (UUID) -> Void
+    let editActions: (UUID) -> Void
+    let allowsChildInteraction: Bool
+
+    init(
+        configurations: [InternetRadioConfiguration],
+        state: InternetRadioPlaybackState,
+        activeChannelID: UUID?,
+        isDimmed: Bool,
+        dimmedIntensity: Double,
+        showsEditBadge: Bool,
+        actions: @escaping (UUID) -> Void,
+        editActions: @escaping (UUID) -> Void = { _ in },
+        allowsChildInteraction: Bool = true
+    ) {
+        self.configurations = configurations
+        self.state = state
+        self.activeChannelID = activeChannelID
+        self.isDimmed = isDimmed
+        self.dimmedIntensity = dimmedIntensity
+        self.showsEditBadge = showsEditBadge
+        self.actions = actions
+        self.editActions = editActions
+        self.allowsChildInteraction = allowsChildInteraction
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(configurations.prefix(2)) { configuration in
+                InternetRadioPanel(
+                    configuration: configuration,
+                    state: activeChannelID == configuration.id ? state : .idle,
+                    isDimmed: isDimmed,
+                    dimmedIntensity: dimmedIntensity,
+                    showsEditBadge: false,
+                    renderedScale: 1,
+                    action: { actions(configuration.id) },
+                    editAction: { editActions(configuration.id) },
+                    drawsSurface: false,
+                    allowsInteraction: allowsChildInteraction
+                )
+            }
+        }
+        .background(
+            FlipPanelSurface(
+                isDimmed: isDimmed,
+                cornerRadius: InternetRadioPanelMetrics.cornerRadius,
+                splitGap: 2
+            )
+        )
+        .overlay {
+            Rectangle()
+                .fill(.white.opacity(isDimmed ? 0.025 : 0.08))
+                .frame(width: 1)
+        }
+        .overlay(alignment: .topTrailing) {
+            if showsEditBadge {
+                Image(systemName: "link.circle.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.black.opacity(0.72), .orange)
+                    .offset(x: 6, y: -6)
+            }
         }
     }
 }
@@ -2047,11 +2053,13 @@ private struct ScreenEditorView: View {
     @Binding var layout: StandScreenLayout
     let isPortrait: Bool
     @ObservedObject var weather: WeatherService
-    let radioConfiguration: InternetRadioConfiguration?
+    let radioConfigurations: [InternetRadioConfiguration]
+    let availableRadioCount: Int
     @Binding var clockFont: ClockFontChoice
-    @Binding var hourMode: ClockHourMode
+    let hourMode: ClockHourMode
     let batteryText: String
-    let onConfigureRadio: () -> Void
+    let onConfigureRadio: (UUID?) -> Void
+    let onManageRadios: () -> Void
     let onReset: () -> Void
     let onSave: () -> Void
     @State private var showFontPalette = false
@@ -2078,12 +2086,6 @@ private struct ScreenEditorView: View {
                             hourMode: hourMode
                         )
                         .contentShape(Rectangle())
-                        .highPriorityGesture(
-                            TapGesture(count: 2).onEnded {
-                                hourMode.toggle()
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            }
-                        )
                         .onTapGesture { showFontPalette.toggle() }
                     }
                 }
@@ -2121,22 +2123,6 @@ private struct ScreenEditorView: View {
                 }
 
                 EditablePanel(
-                    transform: $layout.status,
-                    canvasSize: proxy.size
-                ) {
-                    Text("오브제 모드")
-                        .font(.caption.weight(.medium))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.58)
-                        .padding(.horizontal, 12)
-                        .frame(
-                            width: StatusPanelMetrics.width(isPortrait: isPortrait),
-                            height: StatusPanelMetrics.height
-                        )
-                        .background(.white.opacity(0.08), in: Capsule())
-                }
-
-                EditablePanel(
                     transform: $layout.battery,
                     canvasSize: proxy.size
                 ) {
@@ -2147,22 +2133,7 @@ private struct ScreenEditorView: View {
                         .background(.white.opacity(0.08), in: Capsule())
                 }
 
-                EditablePanel(
-                    transform: $layout.radio,
-                    canvasSize: proxy.size,
-                    onTap: onConfigureRadio
-                ) {
-                    InternetRadioPanel(
-                        configuration: radioConfiguration,
-                        state: .idle,
-                        isDimmed: false,
-                        dimmedIntensity: 1,
-                        showsEditBadge: true,
-                        renderedScale: layout.radio.scale,
-                        action: onConfigureRadio,
-                        editAction: onConfigureRadio
-                    )
-                }
+                editableRadioPanels(canvasSize: proxy.size)
 
                 if showFontPalette {
                     VStack {
@@ -2211,6 +2182,112 @@ private struct ScreenEditorView: View {
             }
             .foregroundStyle(.white.opacity(0.86))
         }
+    }
+
+    @ViewBuilder
+    private func editableRadioPanels(canvasSize: CGSize) -> some View {
+        if radioConfigurations.count == 2, layout.radiosGrouped {
+            EditablePanel(
+                transform: $layout.radio,
+                canvasSize: canvasSize
+            ) {
+                InternetRadioGroupedPanel(
+                    configurations: radioConfigurations,
+                    state: .idle,
+                    activeChannelID: nil,
+                    isDimmed: false,
+                    dimmedIntensity: 1,
+                    showsEditBadge: true,
+                    actions: { _ in },
+                    allowsChildInteraction: false
+                )
+                .onTapGesture(count: 2, perform: splitRadioPanels)
+            }
+        } else {
+            ForEach(Array(radioConfigurations.enumerated()), id: \.element.id) { index, configuration in
+                EditablePanel(
+                    transform: index == 0 ? $layout.radio : $layout.secondaryRadio,
+                    canvasSize: canvasSize,
+                    onEnded: { mergeRadioPanelsIfNeeded(canvasSize: canvasSize) },
+                    onTap: { onConfigureRadio(configuration.id) }
+                ) {
+                    InternetRadioPanel(
+                        configuration: configuration,
+                        state: .idle,
+                        isDimmed: false,
+                        dimmedIntensity: 1,
+                        showsEditBadge: true,
+                        renderedScale: index == 0 ? layout.radio.scale : layout.secondaryRadio.scale,
+                        action: {},
+                        editAction: { onConfigureRadio(configuration.id) }
+                    )
+                }
+            }
+
+            if radioConfigurations.count == 1, availableRadioCount >= 2 {
+                EditablePanel(
+                    transform: $layout.secondaryRadio,
+                    canvasSize: canvasSize,
+                    onTap: onManageRadios
+                ) {
+                    Label("두 번째 라디오 추가", systemImage: "plus.circle.fill")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .frame(
+                            width: InternetRadioPanelMetrics.width,
+                            height: InternetRadioPanelMetrics.height
+                        )
+                        .background(
+                            FlipPanelSurface(
+                                isDimmed: false,
+                                cornerRadius: InternetRadioPanelMetrics.cornerRadius,
+                                splitGap: 2
+                            )
+                        )
+                }
+            }
+        }
+    }
+
+    private func mergeRadioPanelsIfNeeded(canvasSize: CGSize) {
+        guard radioConfigurations.count == 2, !layout.radiosGrouped else { return }
+        let first = radioBounds(transform: layout.radio, canvasSize: canvasSize)
+        let second = radioBounds(transform: layout.secondaryRadio, canvasSize: canvasSize)
+        guard PanelEditingPolicy.overlapFraction(first, second)
+            >= PanelEditingPolicy.radioMergeOverlapThreshold else { return }
+        var merged = layout.radio
+        merged.x = (layout.radio.x + layout.secondaryRadio.x) / 2
+        merged.y = (layout.radio.y + layout.secondaryRadio.y) / 2
+        merged.scale = min(layout.radio.scale, layout.secondaryRadio.scale)
+        layout.radio = merged
+        layout.secondaryRadio = merged
+        layout.radiosGrouped = true
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    private func splitRadioPanels() {
+        guard layout.radiosGrouped else { return }
+        let center = layout.radio
+        layout.radio = PanelTransform(x: center.x - 0.11, y: center.y, scale: center.scale)
+        layout.secondaryRadio = PanelTransform(x: center.x + 0.11, y: center.y, scale: center.scale)
+        layout.radiosGrouped = false
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func radioBounds(transform: PanelTransform, canvasSize: CGSize) -> CGRect {
+        let size = CGSize(
+            width: InternetRadioPanelMetrics.width * transform.scale,
+            height: InternetRadioPanelMetrics.height * transform.scale
+        )
+        let center = CGPoint(
+            x: canvasSize.width / 2 + transform.x * canvasSize.width,
+            y: canvasSize.height / 2 + transform.y * canvasSize.height
+        )
+        return CGRect(
+            x: center.x - size.width / 2,
+            y: center.y - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
     }
 
     @ViewBuilder
@@ -2493,196 +2570,6 @@ private struct InternetRadioConfigurationView: View {
     }
 }
 
-private struct ControlOrderEditorView: View {
-    @Binding var order: [StandControlKind]
-    let isPortrait: Bool
-    let onReset: () -> Void
-    let onSave: () -> Void
-
-    var body: some View {
-        GeometryReader { proxy in
-            let horizontalPadding: CGFloat = isPortrait ? 14 : 32
-            let availableWidth = max(0, proxy.size.width - horizontalPadding * 2)
-
-            ZStack {
-                Color.black.opacity(0.32).ignoresSafeArea()
-
-                VStack(spacing: 16) {
-                    Spacer(minLength: StandControlLayoutMetrics.editorToolbarHeight + 36)
-
-                    VStack(spacing: 6) {
-                        Image(systemName: "rectangle.3.group.fill")
-                            .font(.system(size: 25, weight: .semibold))
-                            .foregroundStyle(.orange)
-                        Text("버튼을 길게 눌러 원하는 자리로 옮기세요")
-                            .font(.subheadline.weight(.semibold))
-                        Text("이 순서는 홈 화면의 하단 기능 버튼에 적용됩니다.")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.62))
-                    }
-                    .multilineTextAlignment(.center)
-
-                    EditorControlOrderView(
-                        order: $order,
-                        availableWidth: availableWidth,
-                        isPortrait: isPortrait
-                    )
-
-                    Spacer(minLength: 24)
-                }
-                .padding(.horizontal, horizontalPadding)
-
-                VStack {
-                    HStack {
-                        Button("초기화", action: onReset)
-                        Spacer()
-                        Text(isPortrait ? "세로 버튼 편집" : "가로 버튼 편집")
-                            .font(.headline)
-                        Spacer()
-                        Button("저장", action: onSave)
-                            .fontWeight(.semibold)
-                    }
-                    .padding(.horizontal, 20)
-                    .frame(height: StandControlLayoutMetrics.editorToolbarHeight)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    Spacer()
-                }
-                .padding(isPortrait ? 18 : 14)
-                .zIndex(10)
-            }
-            .foregroundStyle(.white.opacity(0.90))
-        }
-    }
-}
-
-extension StandControlKind {
-    var editorTitle: String {
-        switch self {
-        case .flashlight: "플래시"
-        case .brightness: "밝기 기준"
-        case .stopDetection: "자동 기능 끄기"
-        case .recordings: "수면 소리"
-        case .settings: "설정"
-        }
-    }
-
-    var editorSystemImage: String {
-        switch self {
-        case .flashlight: "flashlight.on.fill"
-        case .brightness: "slider.horizontal.3"
-        case .stopDetection: "stop.circle.fill"
-        case .recordings: "waveform"
-        case .settings: "gearshape.fill"
-        }
-    }
-}
-
-private struct EditorControlOrderView: View {
-    @Binding var order: [StandControlKind]
-    let availableWidth: CGFloat
-    let isPortrait: Bool
-    @State private var draggedKind: StandControlKind?
-
-    var body: some View {
-        WrappingControlLayout {
-            ForEach(order) { kind in
-                EditorControlOrderTile(
-                    kind: kind,
-                    width: BottomControlLayoutPolicy.itemWidth(
-                        for: kind,
-                        availableWidth: availableWidth,
-                        isPortrait: isPortrait
-                    )
-                )
-                    .onDrag {
-                        draggedKind = kind
-                        return NSItemProvider(object: kind.rawValue as NSString)
-                    }
-                    .onDrop(
-                        of: [UTType.text],
-                        delegate: ControlOrderDropDelegate(
-                            target: kind,
-                            order: $order,
-                            draggedKind: $draggedKind
-                        )
-                    )
-            }
-        }
-        .frame(
-            width: availableWidth,
-            height: BottomControlLayoutPolicy.height(
-                for: order,
-                availableWidth: availableWidth,
-                isPortrait: isPortrait
-            )
-        )
-        .accessibilityLabel("하단 버튼 순서 편집")
-        .accessibilityHint("버튼을 끌어 순서를 변경합니다")
-    }
-}
-
-private struct EditorControlOrderTile: View {
-    let kind: StandControlKind
-    let width: CGFloat
-
-    var body: some View {
-        VStack(spacing: 3) {
-            Image(systemName: kind.editorSystemImage)
-                .font(.system(size: 15, weight: .semibold))
-            Text(kind.editorTitle)
-                .font(.system(size: StandControlLayoutMetrics.titleFontSize, weight: .semibold))
-                .lineLimit(1)
-        }
-        .foregroundStyle(.white.opacity(StandControlLayoutMetrics.foregroundOpacity))
-        .frame(
-            width: width,
-            height: StandControlLayoutMetrics.itemHeight
-        )
-        .background {
-            FlipPanelSurface(isDimmed: false, cornerRadius: 13, splitGap: 2)
-        }
-        .overlay(alignment: .topTrailing) {
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(.orange.opacity(0.72))
-                .padding(7)
-        }
-        .contentShape(Rectangle())
-        .accessibilityLabel("\(kind.editorTitle), 순서 변경")
-    }
-}
-
-private struct ControlOrderDropDelegate: DropDelegate {
-    let target: StandControlKind
-    @Binding var order: [StandControlKind]
-    @Binding var draggedKind: StandControlKind?
-
-    func dropEntered(info: DropInfo) {
-        guard let draggedKind,
-              draggedKind != target,
-              let sourceIndex = order.firstIndex(of: draggedKind),
-              let targetIndex = order.firstIndex(of: target)
-        else { return }
-
-        withAnimation(.snappy(duration: 0.2)) {
-            order.move(
-                fromOffsets: IndexSet(integer: sourceIndex),
-                toOffset: targetIndex > sourceIndex ? targetIndex + 1 : targetIndex
-            )
-        }
-        UISelectionFeedbackGenerator().selectionChanged()
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        draggedKind = nil
-        return true
-    }
-}
-
 struct PanelEditingRegion: Equatable {
     let frame: CGRect
     let insets: EdgeInsets
@@ -2690,6 +2577,7 @@ struct PanelEditingRegion: Equatable {
 
 enum PanelEditingPolicy {
     static let weatherMergeOverlapThreshold: CGFloat = 0.40
+    static let radioMergeOverlapThreshold: CGFloat = 0.40
     static let minimumPanelScale = 0.30
     static let maximumPanelScale = 2.00
 
@@ -2833,31 +2721,7 @@ enum PanelEditingPolicy {
         insets: EdgeInsets,
         screenScale: Double
     ) -> PanelTransform {
-        guard canvasSize.width > 0, canvasSize.height > 0, panelSize != .zero else {
-            return transform
-        }
-
-        // 편집 화면 자체와 저장 후 전체 확대 화면 중 더 큰 쪽을 기준으로 제한한다.
-        // 전체 화면이 축소된 상태에서도 편집 패널이 버튼 경계를 넘어가지 않는다.
-        let groupScale = max(1, screenScale)
-        let renderedSize = CGSize(
-            width: panelSize.width * transform.scale * groupScale,
-            height: panelSize.height * transform.scale * groupScale
-        )
-        let proposedCenter = CGPoint(
-            x: canvasSize.width / 2 + transform.x * canvasSize.width * groupScale,
-            y: canvasSize.height / 2 + transform.y * canvasSize.height * groupScale
-        )
-        let center = clampedCenter(
-            proposedCenter,
-            panelSize: renderedSize,
-            canvasSize: canvasSize,
-            insets: insets
-        )
-        var result = transform
-        result.x = (center.x - canvasSize.width / 2) / (canvasSize.width * groupScale)
-        result.y = (center.y - canvasSize.height / 2) / (canvasSize.height * groupScale)
-        return result
+        transform
     }
 
     static func maximumScreenScale(
@@ -2868,35 +2732,7 @@ enum PanelEditingPolicy {
         includesRadio: Bool = true,
         hardLimit: Double
     ) -> Double {
-        guard canvasSize.height > 0 else { return hardLimit }
-        let canvasCenterY = canvasSize.height / 2
-        let topRoom = max(0, canvasCenterY - insets.top)
-        let bottomRoom = max(0, canvasSize.height - insets.bottom - canvasCenterY)
-        let weatherHeight: CGFloat = (isPortrait ? 282 : 370) / 3
-        var panels: [(PanelTransform, CGFloat)] = [
-            (layout.weatherIcon, weatherHeight),
-            (layout.weatherTemperature, weatherHeight),
-            (layout.weatherCondition, weatherHeight),
-            (layout.date, 36),
-            (layout.status, StatusPanelMetrics.height),
-            (layout.battery, 36),
-            (layout.clock, isPortrait ? 92 : 116),
-            (layout.seconds, isPortrait ? 36 : 42)
-        ]
-        if includesRadio {
-            panels.append((layout.radio, InternetRadioPanelMetrics.height))
-        }
-
-        var maximum = hardLimit
-        for (transform, baseHeight) in panels {
-            let centerOffset = CGFloat(transform.y) * canvasSize.height
-            let halfHeight = baseHeight * transform.scale / 2
-            let topReach = halfHeight - centerOffset
-            let bottomReach = halfHeight + centerOffset
-            if topReach > 0 { maximum = min(maximum, Double(topRoom / topReach)) }
-            if bottomReach > 0 { maximum = min(maximum, Double(bottomRoom / bottomReach)) }
-        }
-        return max(0.7, maximum)
+        hardLimit
     }
 }
 

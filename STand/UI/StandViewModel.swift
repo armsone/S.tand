@@ -61,14 +61,12 @@ enum EnvironmentDisplayMode: Equatable {
 }
 
 enum SimplifiedBrightnessModePolicy {
-    static let mateUpperBound = 0.3
-    static let mateTapLevel = 0.1
-    static let objectTapLevel = 0.9
+    static let mateUpperBound = 0.4
+    static let mateTapLevel = 0.35
+    static let objectTapLevel = 0.8
     static let verticalDragTravelRatio = 0.5
-    static let verticalDragMinimumDistance: CGFloat = 6
-    static let interactiveMinimum = 0.01
-    static let interactiveMaximum = 0.99
-    static let fixedEdgeHoldDuration: TimeInterval = 1
+    static let objectLockDelay: Duration = .seconds(1)
+    static let objectLockReleaseLevel = 0.95
 
     static func clamped(_ level: Double) -> Double {
         min(1, max(0, level))
@@ -79,35 +77,8 @@ enum SimplifiedBrightnessModePolicy {
         verticalTranslation: CGFloat,
         viewportHeight: CGFloat
     ) -> Double {
-        min(interactiveMaximum, max(interactiveMinimum, rawLevel(
-            startingAt: startingLevel,
-            verticalTranslation: verticalTranslation,
-            viewportHeight: viewportHeight
-        )))
-    }
-
-    static func rawLevel(
-        startingAt startingLevel: Double,
-        verticalTranslation: CGFloat,
-        viewportHeight: CGFloat
-    ) -> Double {
         let travel = max(1, viewportHeight * verticalDragTravelRatio)
-        return startingLevel - Double(verticalTranslation / travel)
-    }
-
-    static func fixedEdge(
-        startingAt startingLevel: Double,
-        verticalTranslation: CGFloat,
-        viewportHeight: CGFloat
-    ) -> BrightnessFixedEdge? {
-        let raw = rawLevel(
-            startingAt: startingLevel,
-            verticalTranslation: verticalTranslation,
-            viewportHeight: viewportHeight
-        )
-        if raw >= 1 { return .object }
-        if raw <= 0 { return .mate }
-        return nil
+        return clamped(startingLevel - Double(verticalTranslation / travel))
     }
 
     static func preference(for level: Double) -> StandModePreference {
@@ -115,6 +86,21 @@ enum SimplifiedBrightnessModePolicy {
         if value >= 1 { return .object }
         if value <= 0 { return .mate }
         return .automatic
+    }
+
+    static func preferenceDuringAdjustment(for level: Double) -> StandModePreference {
+        clamped(level) >= 1 ? .automatic : preference(for: level)
+    }
+
+    static func stabilizedAdjustment(
+        requestedLevel: Double,
+        currentPreference: StandModePreference
+    ) -> (level: Double, preference: StandModePreference) {
+        let requested = clamped(requestedLevel)
+        if currentPreference == .object, requested >= objectLockReleaseLevel {
+            return (1, .object)
+        }
+        return (requested, preferenceDuringAdjustment(for: requested))
     }
 
     static func mode(
@@ -142,18 +128,6 @@ enum AppBrightnessSystemSyncPolicy {
     }
 }
 
-enum BrightnessFixedEdge: Equatable {
-    case mate
-    case object
-
-    var level: Double {
-        switch self {
-        case .mate: 0
-        case .object: 1
-        }
-    }
-}
-
 enum StandExperienceMode: String, Equatable {
     case object
     case mate
@@ -169,7 +143,7 @@ enum StandExperienceMode: String, Equatable {
 
     var systemImage: String {
         switch self {
-        case .object: "lamp.table.fill"
+        case .object: "sun.max.fill"
         case .mate: "moon.stars.fill"
         case .startled: "bolt.fill"
         }
@@ -303,9 +277,10 @@ enum SleepCareMonitoringPolicy {
     static func shouldCaptureAudio(
         isNightSessionActive: Bool,
         environmentDisplayMode: EnvironmentDisplayMode,
-        isSuspended: Bool
+        isSuspended: Bool,
+        isEnabled: Bool = true
     ) -> Bool {
-        shouldMonitor(
+        isEnabled && shouldMonitor(
             isNightSessionActive: isNightSessionActive,
             environmentDisplayMode: environmentDisplayMode
         ) && !isSuspended
@@ -369,13 +344,12 @@ final class StandViewModel: ObservableObject {
     @Published private(set) var isNightSessionActive = false
     @Published private(set) var lampIntensity = 0.0
     @Published private(set) var lampPhase: LampPhase = .off
-    @Published private(set) var orientationPreference: OrientationPreference = .automatic
     @Published private(set) var batteryStatus = DeviceBatteryStatus(
         level: nil,
         powerState: .unknown
     )
     @Published private(set) var batteryProtectionActive = false
-    /// 앱 안의 조명 밝기입니다. 시스템 밝기는 자동 모드의 참고값으로만 읽습니다.
+    /// S.tand가 사용하는 화면 밝기입니다. 실행 중에는 시스템 화면 밝기와 동기화합니다.
     @Published private(set) var displayBrightness = Double(UIScreen.main.brightness)
     @Published private(set) var automaticDimmingPaused = false
     @Published private(set) var manualDimmingHoldActive = false
@@ -405,6 +379,8 @@ final class StandViewModel: ObservableObject {
     private var movementTorchSyncTask: Task<Void, Never>?
     private var controlsTask: Task<Void, Never>?
     private var modeTransitionTask: Task<Void, Never>?
+    private var tapBrightnessTransitionTask: Task<Void, Never>?
+    private var brightnessEndpointLockTask: Task<Void, Never>?
     private var ambientSamplingTask: Task<Void, Never>?
     private var pendingModeTarget: EnvironmentDisplayMode?
     private var settingsSubscription: AnyCancellable?
@@ -424,6 +400,8 @@ final class StandViewModel: ObservableObject {
     private var monitoringSuspensions: Set<MonitoringSuspensionReason> = []
     private var appIsActive = true
     private var isAdjustingBrightness = false
+    private var brightnessBeforeSession: CGFloat?
+    private var brightnessBeforeFaceDown: CGFloat?
     private var activeRecordingSessionID: UUID?
     private var activeStartleEventID: UUID?
 
@@ -435,6 +413,7 @@ final class StandViewModel: ObservableObject {
         weather = WeatherService()
         audio = AudioCaptureService(recordingsDirectory: library.directory)
         radio = InternetRadioPlayer()
+        weather.setLocationEnabled(settings.value.weatherLocationEnabled)
 
         audio.onClap = { [weak self] in
             guard let self,
@@ -472,8 +451,6 @@ final class StandViewModel: ObservableObject {
         postureMonitor.onFaceDownChanged = { [weak self] isFaceDown in
             self?.applyFaceDownState(isFaceDown)
         }
-        orientationPreference = settings.value.orientationPreference
-        OrientationController.shared.setPreference(settings.value.orientationPreference)
         ambientCameraState = settings.value.cameraAmbientSensingEnabled
             ? ambientCamera.currentState
             : .disabled
@@ -483,19 +460,18 @@ final class StandViewModel: ObservableObject {
             .sink { [weak self] value in
                 guard let self else { return }
                 audio.configure(settings: value)
+                weather.setLocationEnabled(value.weatherLocationEnabled)
                 if let activeChannelID = radio.activeChannelID {
                     let activeConfiguration = value.internetRadioChannels.first(where: {
                         $0.id == activeChannelID
                     })
-                    if value.selectedInternetRadioID != activeChannelID
+                    if activeConfiguration == nil
                         || activeConfiguration?.streamURL != radio.activeStreamURL {
                         stopInternetRadioPlayback()
                     }
                 } else if value.internetRadio == nil, radio.state.isActive {
                     stopInternetRadioPlayback()
                 }
-                orientationPreference = value.orientationPreference
-                OrientationController.shared.setPreference(value.orientationPreference)
                 syncTorch(using: value)
                 refreshEnvironmentDisplayMode(
                     preference: value.modePreference,
@@ -511,6 +487,7 @@ final class StandViewModel: ObservableObject {
                     ambientCameraState = ambientCamera.currentState
                     startAmbientSamplingIfNeeded()
                 }
+                syncSleepCareMonitoring()
             }
 
         screenBrightnessSubscription = NotificationCenter.default
@@ -547,6 +524,7 @@ final class StandViewModel: ObservableObject {
         }
         batteryProtectionActive = false
         isNightSessionActive = true
+        rememberScreenBrightnessIfNeeded()
         displayBrightness = Double(UIScreen.main.brightness)
         var initialSettings = settings.value
         initialSettings.modePreference = .automatic
@@ -584,6 +562,9 @@ final class StandViewModel: ObservableObject {
         controlsTask?.cancel()
         controlsVisible = true
         modeTransitionTask?.cancel()
+        tapBrightnessTransitionTask?.cancel()
+        brightnessEndpointLockTask?.cancel()
+        brightnessEndpointLockTask = nil
         pendingModeTarget = nil
         ambientSamplingTask?.cancel()
         ambientSamplingTask = nil
@@ -594,6 +575,7 @@ final class StandViewModel: ObservableObject {
         appIsActive = true
         importSharedInternetRadioIfNeeded()
         manualDimmingHoldActive = false
+        rememberScreenBrightnessIfNeeded()
         displayBrightness = Double(UIScreen.main.brightness)
         if isNightSessionActive, settings.value.modePreference == .automatic {
             applyBaseBrightness(displayBrightness, animated: false)
@@ -625,12 +607,16 @@ final class StandViewModel: ObservableObject {
     func appWillResignActive() {
         appIsActive = false
         isAdjustingBrightness = false
+        brightnessEndpointLockTask?.cancel()
+        brightnessEndpointLockTask = nil
         stopInternetRadioPlayback()
         manualDimmingHoldActive = false
         automaticDimmingPaused = false
         UIApplication.shared.isIdleTimerDisabled = false
+        restoreScreenBrightness()
         postureMonitor.stop()
         isFaceDown = false
+        brightnessBeforeFaceDown = nil
         movementTorchSyncTask?.cancel()
         movementTorchSyncTask = nil
         torch.turnOff()
@@ -831,11 +817,12 @@ final class StandViewModel: ObservableObject {
         startAmbientSamplingIfNeeded()
     }
 
-    func toggleInternetRadioPlayback() {
-        if radio.state.isActive {
+    func toggleInternetRadioPlayback(channelID: UUID) {
+        guard let configuration = settings.value.internetRadioChannel(id: channelID) else { return }
+        if radio.state.isActive, radio.activeChannelID == channelID {
             stopInternetRadioPlayback()
         } else {
-            startInternetRadioPlayback()
+            startInternetRadioPlayback(configuration)
         }
     }
 
@@ -907,6 +894,14 @@ final class StandViewModel: ObservableObject {
     }
 
     @discardableResult
+    func selectSecondaryInternetRadioChannel(id: UUID?) -> Bool {
+        var value = settings.value
+        guard value.selectSecondaryInternetRadioChannel(id: id) else { return false }
+        settings.value = value
+        return true
+    }
+
+    @discardableResult
     func removeInternetRadioChannel(id: UUID) -> InternetRadioConfiguration? {
         var value = settings.value
         guard value.internetRadioChannels.contains(where: { $0.id == id }) else {
@@ -973,11 +968,10 @@ final class StandViewModel: ObservableObject {
         )
     }
 
-    private func startInternetRadioPlayback() {
-        guard let configuration = settings.value.internetRadio else { return }
+    private func startInternetRadioPlayback(_ configuration: InternetRadioConfiguration) {
         monitoringSuspensions.insert(.internetRadio)
         audio.stop()
-        radio.play(configuration)
+        radio.switchChannel(to: configuration)
     }
 
     private func refreshEnvironmentDisplayMode(
@@ -1057,6 +1051,16 @@ final class StandViewModel: ObservableObject {
                 self.startAmbientSamplingIfNeeded()
             }
         }
+    }
+
+    func setSoundSensingEnabled(_ enabled: Bool) {
+        settings.value.soundSensingEnabled = enabled
+        syncSleepCareMonitoring()
+    }
+
+    func setWeatherLocationEnabled(_ enabled: Bool) {
+        settings.value.weatherLocationEnabled = enabled
+        weather.setLocationEnabled(enabled)
     }
 
     func measureAmbientBrightness() {
@@ -1154,7 +1158,8 @@ final class StandViewModel: ObservableObject {
         guard SleepCareMonitoringPolicy.shouldCaptureAudio(
             isNightSessionActive: isNightSessionActive,
             environmentDisplayMode: environmentDisplayMode,
-            isSuspended: !monitoringSuspensions.isEmpty
+            isSuspended: !monitoringSuspensions.isEmpty,
+            isEnabled: settings.value.soundSensingEnabled
         ) else {
             audio.stop()
             return
@@ -1167,17 +1172,41 @@ final class StandViewModel: ObservableObject {
 
         if faceDown {
             guard isNightSessionActive else { return }
+            brightnessBeforeFaceDown = UIScreen.main.brightness
             isFaceDown = true
+            UIScreen.main.brightness = 0
             return
         }
 
         isFaceDown = false
+        if let brightnessBeforeFaceDown {
+            UIScreen.main.brightness = brightnessBeforeFaceDown
+            displayBrightness = Double(brightnessBeforeFaceDown)
+        }
+        self.brightnessBeforeFaceDown = nil
         if isNightSessionActive {
             refreshEnvironmentDisplayMode(performTransition: true)
         }
     }
 
+    private func rememberScreenBrightnessIfNeeded() {
+        if brightnessBeforeSession == nil {
+            brightnessBeforeSession = UIScreen.main.brightness
+        }
+    }
+
+    private func restoreScreenBrightness() {
+        guard let brightnessBeforeSession else { return }
+        UIScreen.main.brightness = brightnessBeforeSession
+        self.brightnessBeforeSession = nil
+    }
+
     func beginBrightnessAdjustment() {
+        guard isNightSessionActive else { return }
+        tapBrightnessTransitionTask?.cancel()
+        tapBrightnessTransitionTask = nil
+        brightnessEndpointLockTask?.cancel()
+        brightnessEndpointLockTask = nil
         isAdjustingBrightness = true
         if settings.value.cameraAmbientSensingEnabled {
             ambientCamera.cancel()
@@ -1190,16 +1219,16 @@ final class StandViewModel: ObservableObject {
         torch.turnOff()
     }
 
-    func previewBrightnessLevel(_ level: Double) {
-        let value = SimplifiedBrightnessModePolicy.clamped(level)
-        displayBrightness = value
-        applyBaseBrightness(value, animated: false)
-    }
-
     func updateBrightnessLevel(_ level: Double) {
-        let value = SimplifiedBrightnessModePolicy.clamped(level)
-        let preference = SimplifiedBrightnessModePolicy.preference(for: value)
+        guard isNightSessionActive else { return }
+        let adjustment = SimplifiedBrightnessModePolicy.stabilizedAdjustment(
+            requestedLevel: level,
+            currentPreference: settings.value.modePreference
+        )
+        let value = adjustment.level
+        let preference = adjustment.preference
         displayBrightness = value
+        UIScreen.main.brightness = CGFloat(value)
 
         var updatedSettings = settings.value
         updatedSettings.modePreference = preference
@@ -1211,18 +1240,66 @@ final class StandViewModel: ObservableObject {
             preference: preference,
             performTransition: true
         )
+
+        if preference == .object {
+            brightnessEndpointLockTask?.cancel()
+            brightnessEndpointLockTask = nil
+        } else if value >= 1 {
+            scheduleObjectModeLock()
+        } else {
+            brightnessEndpointLockTask?.cancel()
+            brightnessEndpointLockTask = nil
+        }
     }
 
     func endBrightnessAdjustment() {
+        guard isNightSessionActive else { return }
         isAdjustingBrightness = false
-        updateBrightnessLevel(displayBrightness)
+        applyBaseBrightness(displayBrightness, animated: false)
     }
 
     func toggleObjectMateMode() {
         guard isNightSessionActive else { return }
+        tapBrightnessTransitionTask?.cancel()
         let target = SimplifiedBrightnessModePolicy.tapLevel(from: environmentDisplayMode)
-        updateBrightnessLevel(target)
+        let start = displayBrightness
+        tapBrightnessTransitionTask = Task { [weak self] in
+            guard let self else { return }
+            let steps = 40
+            for step in 1...steps {
+                guard !Task.isCancelled else { return }
+                let progress = Double(step) / Double(steps)
+                let value = start + (target - start) * progress
+                displayBrightness = value
+                UIScreen.main.brightness = CGFloat(value)
+                applyBaseBrightness(value, animated: false)
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            guard !Task.isCancelled else { return }
+            var updated = settings.value
+            updated.lampIntensity = target
+            updated.modePreference = .automatic
+            settings.value = updated
+            refreshEnvironmentDisplayMode(preference: .automatic, performTransition: true)
+            tapBrightnessTransitionTask = nil
+        }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func scheduleObjectModeLock() {
+        guard brightnessEndpointLockTask == nil else { return }
+        brightnessEndpointLockTask = Task { [weak self] in
+            try? await Task.sleep(for: SimplifiedBrightnessModePolicy.objectLockDelay)
+            guard let self, !Task.isCancelled, displayBrightness >= 1 else { return }
+
+            var updated = settings.value
+            updated.lampIntensity = 1
+            updated.modePreference = .object
+            settings.value = updated
+            refreshEnvironmentDisplayMode(preference: .object, performTransition: true)
+            brightnessEndpointLockTask = nil
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
     }
 
     private func syncTorch(using settingsOverride: AppSettings? = nil) {

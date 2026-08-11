@@ -55,11 +55,16 @@ final class WeatherService: NSObject, ObservableObject {
     @Published private(set) var locationName: String?
     @Published private(set) var availability = WeatherAvailability.idle
     @Published private(set) var lastUpdated: Date?
+    @Published private(set) var isLocationEnabled = true
 
     private let locationManager = CLLocationManager()
     private let geocoder = CLGeocoder()
     private let session: URLSession
     private var refreshTask: Task<Void, Never>?
+
+    var locationAuthorizationStatus: CLAuthorizationStatus {
+        locationManager.authorizationStatus
+    }
 
     init(session: URLSession = .shared) {
         self.session = session
@@ -69,6 +74,7 @@ final class WeatherService: NSObject, ObservableObject {
     }
 
     func refreshIfNeeded(force: Bool = false) {
+        guard isLocationEnabled else { return }
         if !force,
            let lastUpdated,
            Date().timeIntervalSince(lastUpdated) < 30 * 60 {
@@ -86,6 +92,22 @@ final class WeatherService: NSObject, ObservableObject {
             availability = .locationDenied
         @unknown default:
             availability = .failed
+        }
+    }
+
+    func setLocationEnabled(_ enabled: Bool) {
+        guard isLocationEnabled != enabled else {
+            if enabled { refreshIfNeeded() }
+            return
+        }
+        isLocationEnabled = enabled
+        if enabled {
+            refreshIfNeeded(force: true)
+        } else {
+            refreshTask?.cancel()
+            refreshTask = nil
+            geocoder.cancelGeocode()
+            availability = .idle
         }
     }
 
@@ -203,6 +225,10 @@ extension WeatherService: CLLocationManagerDelegate {
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         Task { @MainActor [weak self] in
             guard let self else { return }
+            guard isLocationEnabled else {
+                availability = .idle
+                return
+            }
             switch manager.authorizationStatus {
             case .authorizedAlways, .authorizedWhenInUse:
                 availability = .loading
@@ -223,7 +249,8 @@ extension WeatherService: CLLocationManagerDelegate {
     ) {
         guard let location = locations.last else { return }
         Task { @MainActor [weak self] in
-            self?.loadWeather(at: location)
+            guard let self, isLocationEnabled else { return }
+            loadWeather(at: location)
         }
     }
 

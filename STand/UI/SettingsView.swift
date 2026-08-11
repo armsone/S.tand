@@ -1,4 +1,6 @@
 import Combine
+import AVFoundation
+import CoreLocation
 import SwiftUI
 import UIKit
 
@@ -8,23 +10,28 @@ struct SettingsView: View {
     @ObservedObject private var store: SettingsStore
     @ObservedObject private var library: RecordingLibrary
     @ObservedObject private var weather: WeatherService
-
-    let onEditScreen: () -> Void
+    @ObservedObject private var radio: InternetRadioPlayer
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showsRecordings = false
-    @State private var showsInternetRadioChannels = false
+    @State private var showsRadioBrowser = false
+    @State private var editingRadioChannel: InternetRadioConfiguration?
+    @State private var radioEditorVisible = false
+    @State private var radioDraftName = ""
+    @State private var radioDraftAddress = ""
+    @State private var radioValidationMessage: String?
+    @State private var pendingRadioDeletion: InternetRadioConfiguration?
     @State private var confirmsRestore = false
 
-    init(model: StandViewModel, onEditScreen: @escaping () -> Void) {
+    init(model: StandViewModel) {
         self.model = model
         _runtime = StateObject(wrappedValue: SettingsRuntimeState(model: model))
         _store = ObservedObject(wrappedValue: model.settings)
         _library = ObservedObject(wrappedValue: model.library)
         _weather = ObservedObject(wrappedValue: model.weather)
-        self.onEditScreen = onEditScreen
+        _radio = ObservedObject(wrappedValue: model.radio)
     }
 
     private var accent: Color {
@@ -42,10 +49,11 @@ struct SettingsView: View {
                             SettingsHero(
                                 isNightSessionActive: runtime.isNightSessionActive,
                                 environmentDisplayMode: runtime.environmentDisplayMode,
-                                accent: accent
+                                accent: accent,
+                                onToggleMode: model.toggleObjectMateMode
                             )
 
-                            quickControls
+                            internetRadioCard
 
                             LazyVGrid(
                                 columns: Array(
@@ -55,10 +63,8 @@ struct SettingsView: View {
                                 spacing: 14
                             ) {
                                 screenAndClockCard
-                                lightingCard
+                                permissionsCard
                                 detectionCard
-                                internetRadioCard
-                                weatherAndDeviceCard
                                 informationCard
                             }
                         }
@@ -93,20 +99,41 @@ struct SettingsView: View {
                 theme: store.value.displayTheme
             )
         }
-        .sheet(isPresented: $showsInternetRadioChannels) {
-            InternetRadioChannelManagementView(model: model)
+        .fullScreenCover(isPresented: $showsRadioBrowser) {
+            InternetRadioBrowserView(accent: accent)
+        }
+        .confirmationDialog(
+            "\(pendingRadioDeletion?.displayName ?? "이 채널")을 삭제할까요?",
+            isPresented: Binding(
+                get: { pendingRadioDeletion != nil },
+                set: { if !$0 { pendingRadioDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let channel = pendingRadioDeletion {
+                Button("채널 삭제", role: .destructive) {
+                    _ = model.removeInternetRadioChannel(id: channel.id)
+                    if editingRadioChannel?.id == channel.id {
+                        closeInlineRadioEditor()
+                    }
+                    pendingRadioDeletion = nil
+                }
+            }
+            Button("취소", role: .cancel) { pendingRadioDeletion = nil }
+        } message: {
+            Text("삭제한 채널 주소는 되돌릴 수 없습니다.")
         }
         .confirmationDialog(
             "추천 설정으로 되돌릴까요?",
             isPresented: $confirmsRestore,
             titleVisibility: .visible
         ) {
-            Button("모든 설정과 화면 배치 복원", role: .destructive) {
+            Button("추천 설정 복원", role: .destructive) {
                 store.restoreRecommendedValues()
             }
             Button("취소", role: .cancel) {}
         } message: {
-            Text("저장한 라디오 채널, 세로·가로 화면 배치와 하단 버튼 순서도 처음 모습으로 돌아갑니다.")
+            Text("저장한 라디오 채널을 포함해 앱 설정이 처음 모습으로 돌아갑니다.")
         }
         .onAppear {
             library.reload()
@@ -115,62 +142,10 @@ struct SettingsView: View {
         .animation(.easeInOut(duration: 0.25), value: store.value.displayTheme)
     }
 
-    private var quickControls: some View {
-        StandSettingsCard(
-            title: "바로 제어",
-            subtitle: "돌봄, 화면과 녹음만 간단히 관리합니다",
-            systemImage: "switch.2",
-            accent: accent
-        ) {
-            LazyVGrid(
-                columns: Array(
-                    repeating: GridItem(.flexible(), spacing: 8),
-                    count: dynamicTypeSize.isAccessibilitySize ? 2 : 3
-                ),
-                spacing: 8
-            ) {
-                SettingsActionTile(
-                    title: runtime.isNightSessionActive ? "자동 기능 끄기" : "자동 기능 켜기",
-                    status: runtime.isNightSessionActive ? "전환·감지·녹음" : "시계·날씨만 표시",
-                    systemImage: runtime.isNightSessionActive ? "stop.circle.fill" : "moon.stars.fill",
-                    isActive: runtime.isNightSessionActive,
-                    accent: accent
-                ) {
-                    if runtime.isNightSessionActive {
-                        model.stopNightSession()
-                    } else {
-                        model.startNightSession()
-                    }
-                }
-
-                SettingsActionTile(
-                    title: "화면 꾸미기",
-                    status: "위치·크기",
-                    systemImage: "rectangle.3.group",
-                    isActive: false,
-                    accent: accent,
-                    action: onEditScreen
-                )
-
-                SettingsActionTile(
-                    title: "수면 소리",
-                    status: library.clips.isEmpty ? "녹음 없음" : "\(library.clips.count)개",
-                    systemImage: "waveform",
-                    isActive: !library.clips.isEmpty,
-                    accent: accent
-                ) {
-                    model.pauseMonitoringForPlayback()
-                    showsRecordings = true
-                }
-
-            }
-        }
-    }
-
     private var screenAndClockCard: some View {
         StandSettingsCard(
             title: "화면과 시계",
-            subtitle: "테마, 글꼴과 화면 배치를 바꿉니다",
+            subtitle: "테마와 시계 글꼴을 바꿉니다",
             systemImage: "clock.fill",
             accent: accent
         ) {
@@ -187,35 +162,6 @@ struct SettingsView: View {
                 )
             )
 
-            SettingsFieldLabel("시간 형식")
-            Picker(
-                "시간 표시",
-                selection: Binding(
-                    get: { store.value.clockHourMode },
-                    set: { store.value.clockHourMode = $0 }
-                )
-            ) {
-                Text("12시간").tag(ClockHourMode.twelve)
-                Text("24시간").tag(ClockHourMode.twentyFour)
-            }
-            .pickerStyle(.segmented)
-
-            SettingsFieldLabel("화면 방향")
-            Picker(
-                "화면 방향",
-                selection: Binding(
-                    get: { store.value.orientationPreference },
-                    set: { store.value.orientationPreference = $0 }
-                )
-            ) {
-                ForEach(OrientationPreference.allCases) { preference in
-                    Text(orientationShortTitle(preference))
-                        .accessibilityLabel(preference.title)
-                        .tag(preference)
-                }
-            }
-            .pickerStyle(.segmented)
-
             NavigationLink {
                 ClockFontSelectionView(store: store, accent: accent)
             } label: {
@@ -228,107 +174,80 @@ struct SettingsView: View {
             }
             .buttonStyle(.plain)
 
-            SettingsSliderRow(
-                title: "전체 구성 크기",
-                valueText: "\(Int((store.value.clockScale * 100).rounded()))%",
-                value: $store.value.clockScale,
-                range: 0.7...1.35,
-                step: 0.05,
-                accent: accent
-            )
-
-            HStack(spacing: 8) {
-                SettingsInlineButton(
-                    title: "화면 배치",
-                    systemImage: "move.3d",
-                    accent: accent,
-                    action: onEditScreen
-                )
-
-                NavigationLink {
-                    ControlOrderSettingsView(store: store, accent: accent)
-                } label: {
-                    SettingsInlineButtonLabel(
-                        title: "버튼 배치",
-                        systemImage: "arrow.up.arrow.down",
-                        accent: accent
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-
             SettingsHelpText(
-                "홈 화면을 길게 누르면 정보 패널만 편집합니다. 하단 기능 버튼을 길게 누르면 버튼 순서만 바꿀 수 있으며, 세로와 가로는 따로 저장됩니다."
+                "홈 화면을 길게 누르면 시계와 날씨 같은 정보 패널을 편집할 수 있습니다."
             )
         }
     }
 
-    private var lightingCard: some View {
+    private var permissionsCard: some View {
         StandSettingsCard(
-            title: "밝기와 모드",
-            subtitle: "한 번 누르거나 위아래로 밀어 조절합니다",
-            systemImage: "sun.and.horizon.fill",
+            title: "권한 설정",
+            subtitle: "필요한 기능만 선택해서 사용합니다",
+            systemImage: "checkmark.shield.fill",
             accent: accent
         ) {
-            HStack(spacing: 12) {
-                Label("매이트 0–30%", systemImage: "moon.stars.fill")
-                Spacer(minLength: 8)
-                Label("오브제 31–100%", systemImage: "sun.max.fill")
-            }
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.white.opacity(0.82))
-            .padding(12)
-            .background(.white.opacity(0.095), in: RoundedRectangle(cornerRadius: 15))
-
-            SettingsHelpText(
-                "화면을 한 번 누르면 매이트 10%와 오브제 90%를 전환합니다. 위아래로 화면 높이의 1/4만큼 밀면 밝기 전체 범위를 조절하며, 0%는 매이트 고정, 100%는 오브제 고정입니다."
-            )
-
             SettingsToggleRow(
-                title: "화들짝 플래시",
+                title: "플래시 사용",
                 subtitle: store.value.torchEnabled
-                    ? "화들짝 모드에서만 강하게 켜짐"
-                    : "화들짝 모드에서만 은은하게 켜짐",
+                    ? "화들짝 모드에서만 켜짐"
+                    : "사용하지 않음",
                 systemImage: "flashlight.on.fill",
                 isOn: $store.value.torchEnabled,
                 accent: accent
             )
 
             SettingsToggleRow(
-                title: "방 밝기 감지",
+                title: "카메라 사용",
                 subtitle: cameraAmbientStatusText,
                 systemImage: runtime.ambientCameraState == .measuring
                     ? "camera.metering.center.weighted"
                     : "camera.fill",
                 isOn: Binding(
-                    get: { store.value.cameraAmbientSensingEnabled },
-                    set: { model.setAmbientCameraSensingEnabled($0) }
+                    get: {
+                        store.value.cameraAmbientSensingEnabled
+                            && runtime.ambientCameraState != .denied
+                    },
+                    set: { setCameraPermissionEnabled($0) }
                 ),
                 accent: accent
             )
 
-            if runtime.ambientCameraState == .denied {
-                SettingsInlineButton(
-                    title: "카메라 권한 열기",
-                    systemImage: "gear",
-                    accent: accent
-                ) {
-                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-                    openURL(url)
-                }
-            }
+            SettingsToggleRow(
+                title: "마이크 사용",
+                subtitle: microphonePermissionText,
+                systemImage: "mic.fill",
+                isOn: Binding(
+                    get: {
+                        store.value.soundSensingEnabled
+                            && runtime.microphoneAccess != .denied
+                    },
+                    set: { setMicrophonePermissionEnabled($0) }
+                ),
+                accent: accent
+            )
 
-            SettingsHelpText(
-                "플래시는 매이트에서 움직임을 감지한 화들짝 모드에서만 작동합니다. 방 밝기 감지는 사진이나 영상을 저장하지 않고 약 2초 동안 평균 밝기만 계산합니다. 밝은 상태가 유지되면 플래시 없이 오브제 모드로 전환합니다."
+            SettingsToggleRow(
+                title: "위치 정보 사용",
+                subtitle: locationPermissionText,
+                systemImage: "location.fill",
+                isOn: Binding(
+                    get: {
+                        store.value.weatherLocationEnabled
+                            && weather.availability != .locationDenied
+                    },
+                    set: { setLocationPermissionEnabled($0) }
+                ),
+                accent: accent
             )
         }
     }
 
     private var detectionCard: some View {
         StandSettingsCard(
-            title: "소리 감지",
-            subtitle: "매이트에서 뒤척임을 살피고 필요한 소리만 저장합니다",
-            systemImage: "waveform.badge.mic",
+            title: "잠꼬대와 코골이",
+            subtitle: "매이트 모드에서만 작동합니다",
+            systemImage: "moon.zzz.fill",
             accent: accent
         ) {
             SettingsAudioStatusView(
@@ -374,132 +293,259 @@ struct SettingsView: View {
 
     private var internetRadioCard: some View {
         let channels = store.value.internetRadioChannels
-        let selected = store.value.internetRadio
 
         return StandSettingsCard(
             title: "인터넷 라디오",
             subtitle: channels.isEmpty
-                ? "합법적인 HTTPS 스트림 주소를 직접 관리합니다"
-                : "\(channels.count)개 채널 · \(selected?.displayName ?? "선택 필요")",
+                ? "이 화면에서 채널을 추가하고 바로 재생합니다"
+                : "\(channels.count)개 채널 · 선택과 재생을 한곳에서",
             systemImage: "radio.fill",
             accent: accent
         ) {
-            HStack(spacing: 13) {
-                Image(systemName: channels.isEmpty ? "radio" : "dot.radiowaves.left.and.right")
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(channels.isEmpty ? Color.white.opacity(0.56) : accent)
-                    .frame(width: 48, height: 48)
-                    .background(
-                        (channels.isEmpty ? Color.white.opacity(0.07) : accent.opacity(0.12)),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    )
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(selected?.displayName ?? "등록한 채널이 없습니다")
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    Text(selected.map { "홈에서 재생할 채널 · \($0.streamURL.host ?? $0.urlString)" }
-                        ?? "채널 관리에서 주소를 추가해 주세요.")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.56))
-                        .lineLimit(2)
+            if channels.isEmpty, !radioEditorVisible {
+                Label("등록한 채널이 없습니다", systemImage: "radio")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.68))
+                    .frame(maxWidth: .infinity, minHeight: 58)
+                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 15))
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(channels) { channel in
+                        inlineRadioChannelRow(channel)
+                        if radioEditorVisible, editingRadioChannel?.id == channel.id {
+                            inlineRadioEditor
+                        }
+                    }
                 }
-
-                Spacer(minLength: 0)
             }
-            .accessibilityElement(children: .combine)
 
-            SettingsInlineButton(
-                title: channels.isEmpty ? "첫 채널 추가" : "채널 관리",
-                systemImage: channels.isEmpty ? "plus.circle.fill" : "list.bullet",
-                accent: accent
-            ) {
-                showsInternetRadioChannels = true
+            if radioEditorVisible, editingRadioChannel == nil {
+                inlineRadioEditor
+            } else {
+                if !radioEditorVisible,
+                   channels.count < AppSettings.maximumInternetRadioChannelCount {
+                    SettingsInlineButton(
+                        title: channels.isEmpty ? "첫 채널 추가" : "채널 추가",
+                        systemImage: "plus.circle.fill",
+                        accent: accent,
+                        action: beginAddingRadioChannel
+                    )
+                }
             }
 
             SettingsHelpText(
-                "여러 주소를 저장하고 홈에서 사용할 채널을 고를 수 있습니다. 라디오는 포그라운드에서만 재생되며 재생 중에는 소리 감지와 녹음이 잠시 멈춥니다."
+                "목록의 첫 두 채널이 홈 패널에 순서대로 표시됩니다. 왼쪽 버튼으로 바로 듣고, 연결이 끊기면 자동 재연결합니다. 재생 중에는 소리 감지와 녹음을 잠시 멈춥니다."
             )
         }
     }
 
-    private var weatherAndDeviceCard: some View {
-        StandSettingsCard(
-            title: "날씨와 기기",
-            subtitle: "현재 위치 정보와 밤새 켜둘 기기의 상태입니다",
-            systemImage: "cloud.moon.fill",
-            accent: accent
-        ) {
-            HStack(spacing: 14) {
-                Image(systemName: weather.weather?.systemImage ?? "location.fill")
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.system(size: 34, weight: .medium))
-                    .frame(width: 52, height: 52)
-                    .background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+    private func inlineRadioChannelRow(
+        _ channel: InternetRadioConfiguration
+    ) -> some View {
+        let isActive = radio.activeChannelID == channel.id
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(weather.locationName ?? weatherStatusTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(2)
-                    if let current = weather.weather {
-                        Text("\(Int(current.temperature.rounded()))° · \(current.summary) · 체감 \(Int(current.apparentTemperature.rounded()))°")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.white.opacity(0.58))
-                    } else {
-                        Text("위치 권한을 허용하면 홈 날씨 패널에 표시합니다.")
+        return HStack(spacing: 8) {
+            Button {
+                model.toggleInternetRadioPlayback(channelID: channel.id)
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: radioButtonImage(isActive: isActive))
+                        .symbolRenderingMode(.hierarchical)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(isActive ? accent : .white.opacity(0.72))
+                        .frame(width: 34, height: 34)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(channel.displayName)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        Text(radioStatusText(isActive: isActive))
                             .font(.caption)
-                            .foregroundStyle(.white.opacity(0.52))
+                            .foregroundStyle(.white.opacity(0.54))
+                            .lineLimit(1)
                     }
+                    Spacer(minLength: 2)
                 }
-                Spacer(minLength: 0)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(channel.displayName), \(radioStatusText(isActive: isActive))")
+            .accessibilityHint(isActive ? "라디오를 정지합니다" : "라디오를 재생합니다")
+
+            Button {
+                beginEditingRadioChannel(channel)
+            } label: {
+                Image(systemName: "pencil")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 34, height: 34)
+                    .background(.white.opacity(0.07), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(channel.displayName) 수정")
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: 58)
+        .background(
+            isActive ? accent.opacity(0.15) : Color.white.opacity(0.06),
+            in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(isActive ? accent.opacity(0.30) : .white.opacity(0.08), lineWidth: 1)
+        }
+    }
+
+    private var inlineRadioEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(
+                    editingRadioChannel == nil ? "채널 추가" : "채널 수정",
+                    systemImage: editingRadioChannel == nil ? "plus.circle.fill" : "pencil.circle.fill"
+                )
+                .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("닫기", action: closeInlineRadioEditor)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.64))
+            }
+
+            TextField("이름 (선택)", text: $radioDraftName)
+                .textInputAutocapitalization(.never)
+                .padding(11)
+                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+
+            TextField("https://…", text: $radioDraftAddress, axis: .vertical)
+                .keyboardType(.URL)
+                .textContentType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .lineLimit(1...3)
+                .padding(11)
+                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+
+            if let radioValidationMessage {
+                Label(radioValidationMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
             }
 
             HStack(spacing: 8) {
-                SettingsInlineButton(
-                    title: "날씨 새로고침",
-                    systemImage: "arrow.clockwise",
-                    accent: accent
-                ) {
-                    weather.refreshIfNeeded(force: true)
+                PasteButton(payloadType: String.self) { values in
+                    guard let pasted = values.first else { return }
+                    radioDraftAddress = pasted
+                    radioValidationMessage = nil
                 }
+                .buttonBorderShape(.roundedRectangle(radius: 12))
 
-                if weather.availability == .locationDenied {
-                    SettingsInlineButton(
-                        title: "위치 권한",
-                        systemImage: "location.fill",
-                        accent: accent
-                    ) {
-                        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-                        openURL(url)
-                    }
+                Button {
+                    showsRadioBrowser = true
+                } label: {
+                    Label("웹에서 찾기", systemImage: "safari.fill")
+                        .frame(maxWidth: .infinity, minHeight: 40)
                 }
+                .buttonStyle(.bordered)
             }
 
-            SettingsInfoRow(
-                title: "배터리",
-                value: batteryText,
-                systemImage: batteryImage,
-                accent: accent
+            HStack(spacing: 8) {
+                if let editingRadioChannel {
+                    Button(role: .destructive) {
+                        pendingRadioDeletion = editingRadioChannel
+                    } label: {
+                        Image(systemName: "trash")
+                            .frame(width: 42, height: 42)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("\(editingRadioChannel.displayName) 삭제")
+                }
+
+                Button(action: saveInlineRadioChannel) {
+                    Label("저장", systemImage: "checkmark.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 42)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(accent)
+            }
+        }
+        .padding(12)
+        .background(.black.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+        .onChange(of: radioDraftName) { _, _ in radioValidationMessage = nil }
+        .onChange(of: radioDraftAddress) { _, _ in radioValidationMessage = nil }
+    }
+
+    private func radioButtonImage(isActive: Bool) -> String {
+        guard isActive else { return "play.circle.fill" }
+        return switch radio.state {
+        case .loading, .reconnecting: "xmark.circle.fill"
+        case .playing: "stop.circle.fill"
+        case .idle, .failed: "play.circle.fill"
+        }
+    }
+
+    private func radioStatusText(isActive: Bool) -> String {
+        guard isActive else { return "대기 중" }
+        return switch radio.state {
+        case .idle: "대기 중"
+        case .loading: "연결 중"
+        case .playing: "재생 중"
+        case .reconnecting: "자동 재연결 중"
+        case .failed: "연결 실패"
+        }
+    }
+
+    private func beginAddingRadioChannel() {
+        editingRadioChannel = nil
+        radioDraftName = ""
+        radioDraftAddress = ""
+        radioValidationMessage = nil
+        withAnimation(.easeInOut(duration: 0.22)) { radioEditorVisible = true }
+    }
+
+    private func beginEditingRadioChannel(_ channel: InternetRadioConfiguration) {
+        editingRadioChannel = channel
+        radioDraftName = channel.displayName
+        radioDraftAddress = channel.urlString
+        radioValidationMessage = nil
+        withAnimation(.easeInOut(duration: 0.22)) { radioEditorVisible = true }
+    }
+
+    private func closeInlineRadioEditor() {
+        withAnimation(.easeInOut(duration: 0.22)) { radioEditorVisible = false }
+        editingRadioChannel = nil
+        radioDraftName = ""
+        radioDraftAddress = ""
+        radioValidationMessage = nil
+    }
+
+    private func saveInlineRadioChannel() {
+        do {
+            let saved = try editingRadioChannel?.updated(
+                displayName: radioDraftName,
+                urlString: radioDraftAddress
+            ) ?? InternetRadioConfiguration(
+                displayName: radioDraftName,
+                urlString: radioDraftAddress
             )
 
-            if runtime.batteryProtectionActive || runtime.batteryStatus.shouldProtectBattery {
-                Label(
-                    "배터리가 20% 이하이고 충전 중이 아니어서 감지를 멈췄습니다.",
-                    systemImage: "exclamationmark.triangle.fill"
+            if editingRadioChannel == nil {
+                model.addInternetRadioChannel(
+                    saved,
+                    select: store.value.internetRadioChannels.isEmpty
                 )
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.yellow)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.yellow.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
+            } else if !model.updateInternetRadioChannel(saved) {
+                model.addInternetRadioChannel(saved, select: false)
             }
+            closeInlineRadioEditor()
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } catch {
+            radioValidationMessage = error.localizedDescription
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
         }
     }
 
     private var informationCard: some View {
         StandSettingsCard(
-            title: "연결과 정보",
+            title: "정보",
             subtitle: "개인정보, 저작권과 앱 정보를 확인합니다",
             systemImage: "info.circle.fill",
             accent: accent
@@ -555,61 +601,6 @@ struct SettingsView: View {
         }
     }
 
-    private var lampActionTitle: String {
-        guard runtime.isNightSessionActive else { return "화면 밝히기" }
-        return ScreenTapPolicy.action(for: runtime.lampPhase) == .dim ? "지금 어둡게" : "화면 밝히기"
-    }
-
-    private var lampActionStatus: String {
-        guard runtime.isNightSessionActive else { return "감지도 시작" }
-        return switch runtime.lampPhase {
-        case .off: "매이트"
-        case .holding: "밝은 화면"
-        case .fading: "감광 중"
-        }
-    }
-
-    private var lampActionImage: String {
-        guard runtime.isNightSessionActive else { return "sun.max.fill" }
-        return ScreenTapPolicy.action(for: runtime.lampPhase) == .dim ? "moon.fill" : "sun.max.fill"
-    }
-
-    private func toggleLamp() {
-        if !runtime.isNightSessionActive {
-            model.startNightSession()
-            return
-        }
-
-        switch ScreenTapPolicy.action(for: runtime.lampPhase) {
-        case .brighten: model.activateLamp()
-        case .dim: model.dimLampNow()
-        }
-    }
-
-    private var silhouettePercentText: String {
-        let percent = store.value.silhouetteIntensity * 100
-        return percent < 1 ? String(format: "%.1f%%", percent) : "\(Int(percent.rounded()))%"
-    }
-
-    private var holdDurationText: String {
-        let seconds = Int(store.value.holdDuration.rounded())
-        if seconds < 60 { return "\(seconds)초" }
-        let minutes = seconds / 60
-        let remainder = seconds % 60
-        return remainder == 0 ? "\(minutes)분" : "\(minutes)분 \(remainder)초"
-    }
-
-    private var weatherStatusTitle: String {
-        switch weather.availability {
-        case .idle: "날씨 대기"
-        case .requestingLocation: "위치 확인 중"
-        case .loading: "날씨 불러오는 중"
-        case .available: "현재 위치"
-        case .locationDenied: "위치 권한 필요"
-        case .failed: "날씨를 불러오지 못함"
-        }
-    }
-
     private var cameraAmbientStatusText: String {
         switch runtime.ambientCameraState {
         case .disabled: return "사용 안 함"
@@ -625,80 +616,95 @@ struct SettingsView: View {
         }
     }
 
-    private var batteryText: String {
-        let level = runtime.batteryStatus.level.map { "\(Int(($0 * 100).rounded()))%" } ?? "확인 불가"
-        let state: String = switch runtime.batteryStatus.powerState {
-        case .charging: "충전 중"
-        case .full: "충전 완료"
-        case .unplugged: "배터리 사용"
-        case .unknown: "상태 확인 중"
-        }
-        return "\(level) · \(state)"
-    }
-
-    private var batteryImage: String {
-        switch runtime.batteryStatus.powerState {
-        case .charging: "battery.100percent.bolt"
-        case .full: "battery.100percent"
-        case .unplugged: "battery.50percent"
-        case .unknown: "battery.0percent"
+    private var microphonePermissionText: String {
+        guard store.value.soundSensingEnabled else { return "사용하지 않음" }
+        return switch runtime.microphoneAccess {
+        case .granted: "매이트 모드에서 잠꼬대와 코골이를 감지"
+        case .denied: "권한이 꺼져 있어 시스템 설정에서 허용 필요"
+        case .unknown: "처음 켤 때 마이크 권한을 요청"
         }
     }
 
-    private func orientationShortTitle(_ preference: OrientationPreference) -> String {
-        switch preference {
-        case .automatic: "자동"
-        case .portrait: "세로"
-        case .landscape: "가로"
+    private var locationPermissionText: String {
+        guard store.value.weatherLocationEnabled else { return "사용하지 않음" }
+        return switch weather.locationAuthorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse: "현재 위치의 날씨를 표시"
+        case .denied, .restricted: "권한이 꺼져 있어 시스템 설정에서 허용 필요"
+        case .notDetermined: "처음 켤 때 위치 권한을 요청"
+        @unknown default: "위치 권한 상태를 확인할 수 없음"
         }
     }
+
+    private func setCameraPermissionEnabled(_ enabled: Bool) {
+        if enabled, runtime.ambientCameraState == .denied {
+            openSystemSettings()
+            return
+        }
+        model.setAmbientCameraSensingEnabled(enabled)
+    }
+
+    private func setMicrophonePermissionEnabled(_ enabled: Bool) {
+        guard enabled else {
+            model.setSoundSensingEnabled(false)
+            return
+        }
+        if runtime.microphoneAccess == .denied {
+            openSystemSettings()
+            return
+        }
+        model.audio.requestAccess { granted in
+            if granted {
+                model.setSoundSensingEnabled(true)
+            }
+        }
+    }
+
+    private func setLocationPermissionEnabled(_ enabled: Bool) {
+        if enabled,
+           [.denied, .restricted].contains(weather.locationAuthorizationStatus) {
+            openSystemSettings()
+            return
+        }
+        model.setWeatherLocationEnabled(enabled)
+    }
+
+    private func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        openURL(url)
+    }
+
 }
 
 @MainActor
 private final class SettingsRuntimeState: ObservableObject {
     @Published private(set) var isNightSessionActive: Bool
-    @Published private(set) var lampPhase: LampPhase
     @Published private(set) var environmentDisplayMode: EnvironmentDisplayMode
-    @Published private(set) var batteryStatus: DeviceBatteryStatus
-    @Published private(set) var batteryProtectionActive: Bool
-    @Published private(set) var displayBrightness: Double
     @Published private(set) var ambientCameraState: AmbientCameraState
     @Published private(set) var lastAmbientBrightnessReading: AmbientBrightnessReading?
+    @Published private(set) var microphoneAccess: MicrophoneAccess
 
     init(model: StandViewModel) {
         isNightSessionActive = model.isNightSessionActive
-        lampPhase = model.lampPhase
         environmentDisplayMode = model.environmentDisplayMode
-        batteryStatus = model.batteryStatus
-        batteryProtectionActive = model.batteryProtectionActive
-        displayBrightness = model.displayBrightness
         ambientCameraState = model.ambientCameraState
         lastAmbientBrightnessReading = model.lastAmbientBrightnessReading
+        microphoneAccess = model.audio.microphoneAccess
 
         model.$isNightSessionActive
             .removeDuplicates()
             .assign(to: &$isNightSessionActive)
-        model.$lampPhase
-            .removeDuplicates()
-            .assign(to: &$lampPhase)
         model.$environmentDisplayMode
             .removeDuplicates()
             .assign(to: &$environmentDisplayMode)
-        model.$batteryStatus
-            .removeDuplicates()
-            .assign(to: &$batteryStatus)
-        model.$batteryProtectionActive
-            .removeDuplicates()
-            .assign(to: &$batteryProtectionActive)
-        model.$displayBrightness
-            .removeDuplicates()
-            .assign(to: &$displayBrightness)
         model.$ambientCameraState
             .removeDuplicates()
             .assign(to: &$ambientCameraState)
         model.$lastAmbientBrightnessReading
             .removeDuplicates()
             .assign(to: &$lastAmbientBrightnessReading)
+        model.audio.$microphoneAccess
+            .removeDuplicates()
+            .assign(to: &$microphoneAccess)
     }
 }
 
@@ -800,6 +806,7 @@ private struct SettingsHero: View {
     let isNightSessionActive: Bool
     let environmentDisplayMode: EnvironmentDisplayMode
     let accent: Color
+    let onToggleMode: () -> Void
 
     var body: some View {
         HStack(spacing: 14) {
@@ -808,7 +815,7 @@ private struct SettingsHero: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("S.tand")
                     .font(.system(size: 24, weight: .bold, design: .rounded))
-                Text("낮에는 오브제, 밤에는 매이트")
+                Text("낮에는 오브제\n밤에는 매이트")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.56))
                     .lineLimit(2)
@@ -816,14 +823,19 @@ private struct SettingsHero: View {
 
             Spacer(minLength: 4)
 
-            VStack(alignment: .trailing, spacing: 5) {
+            Button(action: onToggleMode) {
                 StatusPill(
                     title: isNightSessionActive ? environmentText : "S.tand 멈춤",
-                    systemImage: isNightSessionActive ? "waveform" : "waveform.slash",
+                    systemImage: isNightSessionActive
+                        ? (environmentDisplayMode == .stand ? "sun.max.fill" : "moon.stars.fill")
+                        : "pause.circle.fill",
                     active: isNightSessionActive,
                     accent: accent
                 )
             }
+            .buttonStyle(.plain)
+            .disabled(!isNightSessionActive)
+            .accessibilityHint("홈 화면을 한 번 누른 것처럼 오브제와 매이트 모드를 전환합니다")
         }
         .padding(16)
         .background(
@@ -982,56 +994,6 @@ private struct StandSettingsCard<Content: View>: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(.white.opacity(0.16), lineWidth: 1)
         }
-    }
-}
-
-private struct SettingsActionTile: View {
-    let title: String
-    let status: String
-    let systemImage: String
-    let isActive: Bool
-    let accent: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 5) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(isActive ? accent : .white.opacity(0.78))
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                if !status.isEmpty {
-                    Text(status)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.64))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
-                }
-            }
-            .foregroundStyle(.white.opacity(0.84))
-            .frame(maxWidth: .infinity, minHeight: 84)
-            .padding(.horizontal, 4)
-            .background(
-                LinearGradient(
-                    colors: [
-                        isActive ? accent.opacity(0.24) : .white.opacity(0.13),
-                        .white.opacity(0.075)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ),
-                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .stroke(isActive ? accent.opacity(0.40) : .white.opacity(0.14), lineWidth: 1)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(title), \(status)")
     }
 }
 
@@ -1479,87 +1441,6 @@ private struct ClockFontGridTile: View {
     }
 }
 
-private struct ControlOrderSettingsView: View {
-    @ObservedObject var store: SettingsStore
-    let accent: Color
-    @State private var editsPortrait = true
-
-    var body: some View {
-        ZStack {
-            StandSettingsBackground(accent: accent)
-
-            VStack(spacing: 12) {
-                Picker("방향", selection: $editsPortrait) {
-                    Text("세로 화면").tag(true)
-                    Text("가로 화면").tag(false)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 14)
-
-                List {
-                    Section {
-                        ForEach(currentOrder) { kind in
-                            HStack(spacing: 12) {
-                                Image(systemName: kind.editorSystemImage)
-                                    .foregroundStyle(accent)
-                                    .frame(width: 28)
-                                Text(kind.editorTitle)
-                                    .font(.subheadline.weight(.semibold))
-                                Spacer()
-                                Image(systemName: "line.3.horizontal")
-                                    .foregroundStyle(.white.opacity(0.28))
-                            }
-                            .listRowBackground(Color.white.opacity(0.055))
-                        }
-                        .onMove(perform: moveControls)
-                    } header: {
-                        Text("위에서 아래, 왼쪽에서 오른쪽 순서")
-                    } footer: {
-                        Text("밝기 기준 타일은 일반 버튼보다 넓어서 순서에 따라 줄 수가 달라질 수 있습니다.")
-                    }
-                }
-                .scrollContentBackground(.hidden)
-                .environment(\.editMode, .constant(.active))
-            }
-            .padding(.top, 8)
-        }
-        .navigationTitle("하단 버튼 순서")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.black.opacity(0.86), for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("초기화") { setOrder(StandControlKind.defaultOrder) }
-                    .foregroundStyle(accent)
-            }
-        }
-    }
-
-    private var currentOrder: [StandControlKind] {
-        let layout = editsPortrait ? store.value.portraitLayout : store.value.landscapeLayout
-        return StandControlKind.normalizedOrder(layout.controlOrder)
-    }
-
-    private func moveControls(from source: IndexSet, to destination: Int) {
-        var order = currentOrder
-        order.move(fromOffsets: source, toOffset: destination)
-        setOrder(order)
-    }
-
-    private func setOrder(_ order: [StandControlKind]) {
-        let normalized = StandControlKind.normalizedOrder(order)
-        if editsPortrait {
-            var layout = store.value.portraitLayout
-            layout.controlOrder = normalized
-            store.value.portraitLayout = layout
-        } else {
-            var layout = store.value.landscapeLayout
-            layout.controlOrder = normalized
-            store.value.landscapeLayout = layout
-        }
-    }
-}
-
 private extension SleepSoundKind {
     var settingsDisplayName: String {
         switch self {
@@ -1726,9 +1607,9 @@ struct InternetRadioChannelManagementView: View {
                         }
                         .onMove(perform: moveChannels)
                     } header: {
-                        Text("홈에서 사용할 채널을 선택하세요")
+                        Text("목록의 첫 두 채널이 홈에 표시됩니다")
                     } footer: {
-                        Text("채널을 누르면 홈 라디오 패널에서 사용할 주소로 선택됩니다. 편집을 눌러 순서를 바꿀 수 있습니다.")
+                        Text("편집을 눌러 순서를 바꾸면 홈 라디오 패널 순서도 함께 바뀝니다.")
                     }
                 }
 
@@ -1763,12 +1644,14 @@ struct InternetRadioChannelManagementView: View {
                     if channels.count > 1 {
                         EditButton()
                     }
-                    Button {
-                        addChannel()
-                    } label: {
-                        Label("채널 추가", systemImage: "plus")
+                    if channels.count < AppSettings.maximumInternetRadioChannelCount {
+                        Button {
+                            addChannel()
+                        } label: {
+                            Label("채널 추가", systemImage: "plus")
+                        }
+                        .accessibilityHint("이름과 HTTPS 스트림 주소를 직접 입력합니다")
                     }
-                    .accessibilityHint("이름과 HTTPS 스트림 주소를 직접 입력합니다")
                 }
             }
             .navigationDestination(for: InternetRadioManagementDestination.self) { destination in
@@ -1796,14 +1679,12 @@ struct InternetRadioChannelManagementView: View {
     }
 
     private func channelRow(_ channel: InternetRadioConfiguration) -> some View {
-        let isSelected = store.value.selectedInternetRadioID == channel.id
+        let homeIndex = channels.firstIndex(where: { $0.id == channel.id })
+        let isSelected = homeIndex.map { $0 < 2 } ?? false
         let isActive = radio.activeChannelID == channel.id
 
         return HStack(spacing: 8) {
-            Button {
-                guard model.selectInternetRadioChannel(id: channel.id) else { return }
-                UISelectionFeedbackGenerator().selectionChanged()
-            } label: {
+            HStack(spacing: 12) {
                 HStack(spacing: 12) {
                     Image(systemName: isActive ? "antenna.radiowaves.left.and.right" : "radio.fill")
                         .symbolRenderingMode(.hierarchical)
@@ -1823,15 +1704,9 @@ struct InternetRadioChannelManagementView: View {
 
                     Spacer(minLength: 8)
 
-                    if isSelected {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(accent)
-                            .accessibilityHidden(true)
-                    }
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             .accessibilityLabel(
                 channelAccessibilityLabel(
                     channel,
@@ -1874,7 +1749,13 @@ struct InternetRadioChannelManagementView: View {
         isActive: Bool
     ) -> String {
         if isActive {
-            return radio.state == .loading ? "연결 중" : "재생 중"
+            return switch radio.state {
+            case .loading: "연결 중"
+            case .reconnecting: "자동 재연결 중"
+            case .playing: "재생 중"
+            case .idle: "대기 중"
+            case .failed: "연결 실패"
+            }
         }
         return channel.streamURL.host ?? channel.urlString
     }
