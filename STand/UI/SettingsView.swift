@@ -82,7 +82,6 @@ struct SettingsView: View {
         }
         .preferredColorScheme(.dark)
         .tint(accent)
-        .grayscale(store.value.displayTheme == .grayscale ? 1 : 0)
         .sheet(isPresented: $showsRecordings, onDismiss: {
             model.resumeMonitoringAfterPlayback()
         }) {
@@ -170,7 +169,12 @@ struct SettingsView: View {
             systemImage: "clock.fill",
             accent: accent
         ) {
-            SettingsFieldLabel("테마")
+            VStack(alignment: .leading, spacing: 3) {
+                SettingsFieldLabel("테마")
+                Text("시계를 더블 터치하면 테마가 바뀝니다.")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.48))
+            }
             ThemePalettePicker(
                 selection: Binding(
                     get: { store.value.displayTheme },

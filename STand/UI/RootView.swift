@@ -353,6 +353,13 @@ struct RootView: View {
                         .padding(.horizontal, isPortrait ? 20 : 32)
                         .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
 
+                    if brightnessDragState != nil {
+                        AppBrightnessHUD(level: model.displayBrightness)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                            .zIndex(90)
+                    }
+
                     if let clockScaleFeedback {
                         ClockScaleFeedbackView(scale: clockScaleFeedback)
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
@@ -412,6 +419,7 @@ struct RootView: View {
                         .zIndex(100)
                 }
             }
+            .grayscale(settings.value.displayTheme == .grayscale ? 1 : 0)
             .onAppear {
                 currentIsPortrait = isPortrait
                 updateCanvasMetrics(proxy: proxy, isPortrait: isPortrait)
@@ -430,11 +438,10 @@ struct RootView: View {
                 updateCanvasMetrics(proxy: proxy, isPortrait: value)
             }
         }
-        .grayscale(settings.value.displayTheme == .grayscale ? 1 : 0)
         .animation(.easeInOut(duration: 0.28), value: settings.value.displayTheme)
         .contentShape(Rectangle())
         .gesture(screenPressGesture)
-        .simultaneousGesture(screenAdjustmentGesture)
+        .simultaneousGesture(screenAdjustmentGesture, including: .all)
         .simultaneousGesture(clockMagnificationGesture)
         .persistentSystemOverlays(.hidden)
         .sheet(item: $presentedSheet, onDismiss: {
@@ -1075,6 +1082,32 @@ private struct LampBackground: View {
                 Color(red: 0.025, green: 0.075, blue: 0.055).opacity(1 - intensity * 0.18)
             ]
         }
+    }
+}
+
+private struct AppBrightnessHUD: View {
+    let level: Double
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "sun.max.fill")
+                .font(.system(size: 16, weight: .semibold))
+            Text("앱 밝기")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+            Text("\(percent)%")
+                .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
+        }
+        .foregroundStyle(.white.opacity(0.92))
+        .padding(.horizontal, 15)
+        .frame(height: 46)
+        .background(.black.opacity(0.48), in: Capsule())
+        .overlay {
+            Capsule().stroke(.white.opacity(0.14), lineWidth: 1)
+        }
+    }
+
+    private var percent: Int {
+        Int((min(1, max(0, level)) * 100).rounded())
     }
 }
 

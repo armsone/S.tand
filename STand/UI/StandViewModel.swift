@@ -313,6 +313,7 @@ final class StandViewModel: ObservableObject {
         powerState: .unknown
     )
     @Published private(set) var batteryProtectionActive = false
+    /// 앱 안의 조명 밝기입니다. 시스템 밝기는 자동 모드의 참고값으로만 읽습니다.
     @Published private(set) var displayBrightness = Double(UIScreen.main.brightness)
     @Published private(set) var automaticDimmingPaused = false
     @Published private(set) var manualDimmingHoldActive = false
@@ -360,9 +361,7 @@ final class StandViewModel: ObservableObject {
 
     private var monitoringSuspensions: Set<MonitoringSuspensionReason> = []
     private var appIsActive = true
-    private var brightnessBeforeSession: CGFloat?
     private var isAdjustingBrightness = false
-    private var brightnessBeforeFaceDown: CGFloat?
     private var activeRecordingSessionID: UUID?
     private var activeStartleEventID: UUID?
 
@@ -476,7 +475,6 @@ final class StandViewModel: ObservableObject {
         }
         batteryProtectionActive = false
         isNightSessionActive = true
-        rememberScreenBrightnessIfNeeded()
         displayBrightness = Double(UIScreen.main.brightness)
         var initialSettings = settings.value
         initialSettings.modePreference = .automatic
@@ -524,7 +522,6 @@ final class StandViewModel: ObservableObject {
         appIsActive = true
         importSharedInternetRadioIfNeeded()
         manualDimmingHoldActive = false
-        rememberScreenBrightnessIfNeeded()
         displayBrightness = Double(UIScreen.main.brightness)
         if isNightSessionActive, settings.value.modePreference == .automatic {
             applyBaseBrightness(displayBrightness, animated: false)
@@ -560,10 +557,8 @@ final class StandViewModel: ObservableObject {
         manualDimmingHoldActive = false
         automaticDimmingPaused = false
         UIApplication.shared.isIdleTimerDisabled = false
-        restoreScreenBrightness()
         postureMonitor.stop()
         isFaceDown = false
-        brightnessBeforeFaceDown = nil
         movementTorchSyncTask?.cancel()
         movementTorchSyncTask = nil
         torch.turnOff()
@@ -973,35 +968,16 @@ final class StandViewModel: ObservableObject {
         audio.requestAccessAndStart()
     }
 
-    private func rememberScreenBrightnessIfNeeded() {
-        if brightnessBeforeSession == nil {
-            brightnessBeforeSession = UIScreen.main.brightness
-        }
-    }
-
-    private func restoreScreenBrightness() {
-        guard let brightnessBeforeSession else { return }
-        UIScreen.main.brightness = brightnessBeforeSession
-        self.brightnessBeforeSession = nil
-    }
-
     private func applyFaceDownState(_ faceDown: Bool) {
         guard faceDown != isFaceDown else { return }
 
         if faceDown {
             guard isNightSessionActive else { return }
-            brightnessBeforeFaceDown = UIScreen.main.brightness
             isFaceDown = true
-            UIScreen.main.brightness = 0
             return
         }
 
         isFaceDown = false
-        if let brightnessBeforeFaceDown {
-            UIScreen.main.brightness = brightnessBeforeFaceDown
-            displayBrightness = Double(brightnessBeforeFaceDown)
-        }
-        self.brightnessBeforeFaceDown = nil
         if isNightSessionActive {
             refreshEnvironmentDisplayMode(performTransition: true)
         }
@@ -1023,7 +999,6 @@ final class StandViewModel: ObservableObject {
     func previewBrightnessLevel(_ level: Double) {
         let value = SimplifiedBrightnessModePolicy.clamped(level)
         displayBrightness = value
-        UIScreen.main.brightness = CGFloat(value)
         applyBaseBrightness(value, animated: false)
     }
 
@@ -1031,7 +1006,6 @@ final class StandViewModel: ObservableObject {
         let value = SimplifiedBrightnessModePolicy.clamped(level)
         let preference = SimplifiedBrightnessModePolicy.preference(for: value)
         displayBrightness = value
-        UIScreen.main.brightness = CGFloat(value)
 
         var updatedSettings = settings.value
         updatedSettings.modePreference = preference
