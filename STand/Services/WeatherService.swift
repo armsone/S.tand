@@ -66,8 +66,16 @@ final class WeatherService: NSObject, ObservableObject {
         locationManager.authorizationStatus
     }
 
-    init(session: URLSession = .shared) {
+    init(
+        session: URLSession = .shared,
+        initialWeather: CurrentWeather? = nil,
+        initialLocationName: String? = nil,
+        initialLastUpdated: Date? = nil
+    ) {
         self.session = session
+        weather = initialWeather
+        locationName = initialLocationName
+        lastUpdated = initialLastUpdated
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
@@ -107,12 +115,16 @@ final class WeatherService: NSObject, ObservableObject {
             refreshTask?.cancel()
             refreshTask = nil
             geocoder.cancelGeocode()
+            weather = nil
+            locationName = nil
+            lastUpdated = nil
             availability = .idle
         }
     }
 
     private func loadWeather(at location: CLLocation) {
         refreshTask?.cancel()
+        locationName = nil
         refreshTask = Task { [weak self] in
             guard let self else { return }
             do {

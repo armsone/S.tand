@@ -170,8 +170,9 @@ struct AmbientBrightnessReading: Equatable {
 enum AmbientCameraModePolicy {
     static let darkThreshold = 0.16
     static let brightThreshold = 0.28
-    static let maximumReadingAge: TimeInterval = 20
-    static let minimumObservationDuration: TimeInterval = 2
+    static let maximumReadingAge: TimeInterval = 60
+    static let minimumObservationDuration: TimeInterval = 1
+    static let samplingInterval: Duration = .seconds(45)
 
     static func target(
         current: EnvironmentDisplayMode,
@@ -232,7 +233,8 @@ enum AutomaticModeTransitionPolicy {
             return .sleeping
         case .automatic:
             if let cameraReading,
-               now.timeIntervalSince(cameraReading.measuredAt) < 90 {
+               now.timeIntervalSince(cameraReading.measuredAt)
+                <= AmbientCameraModePolicy.maximumReadingAge {
                 return cameraReading.isDark ? .sleeping : .stand
             }
             return EnvironmentDisplayMode.resolve(
@@ -248,7 +250,7 @@ enum AutomaticModeTransitionPolicy {
         hasCameraReading: Bool
     ) -> TimeInterval {
         guard current != target else { return 0 }
-        if hasCameraReading { return 4 }
+        if hasCameraReading, current == .stand, target == .sleeping { return 4 }
         return switch (current, target) {
         case (.stand, .sleeping): objectToMateDelay
         case (.sleeping, .stand): mateToObjectDelay
@@ -349,7 +351,7 @@ final class StandViewModel: ObservableObject {
         powerState: .unknown
     )
     @Published private(set) var batteryProtectionActive = false
-    /// S.tand가 사용하는 화면 밝기입니다. 실행 중에는 시스템 화면 밝기와 동기화합니다.
+    /// S.tand 화면 안에만 적용하는 조명 밝기입니다.
     @Published private(set) var displayBrightness = Double(UIScreen.main.brightness)
     @Published private(set) var automaticDimmingPaused = false
     @Published private(set) var manualDimmingHoldActive = false
@@ -400,8 +402,6 @@ final class StandViewModel: ObservableObject {
     private var monitoringSuspensions: Set<MonitoringSuspensionReason> = []
     private var appIsActive = true
     private var isAdjustingBrightness = false
-    private var brightnessBeforeSession: CGFloat?
-    private var brightnessBeforeFaceDown: CGFloat?
     private var activeRecordingSessionID: UUID?
     private var activeStartleEventID: UUID?
 
@@ -524,7 +524,6 @@ final class StandViewModel: ObservableObject {
         }
         batteryProtectionActive = false
         isNightSessionActive = true
-        rememberScreenBrightnessIfNeeded()
         displayBrightness = Double(UIScreen.main.brightness)
         var initialSettings = settings.value
         initialSettings.modePreference = .automatic
@@ -569,14 +568,20 @@ final class StandViewModel: ObservableObject {
         ambientSamplingTask?.cancel()
         ambientSamplingTask = nil
         ambientCamera.cancel()
+        UIApplication.shared.isIdleTimerDisabled = false
     }
 
     func appDidBecomeActive() {
         appIsActive = true
         importSharedInternetRadioIfNeeded()
         manualDimmingHoldActive = false
-        rememberScreenBrightnessIfNeeded()
-        displayBrightness = Double(UIScreen.main.brightness)
+        if settings.value.modePreference == .automatic {
+            displayBrightness = Double(UIScreen.main.brightness)
+        } else {
+            displayBrightness = SimplifiedBrightnessModePolicy.clamped(
+                settings.value.lampIntensity
+            )
+        }
         if isNightSessionActive, settings.value.modePreference == .automatic {
             applyBaseBrightness(displayBrightness, animated: false)
             refreshEnvironmentDisplayMode(
@@ -589,9 +594,12 @@ final class StandViewModel: ObservableObject {
             pauseForLowBattery()
             return
         }
-        UIApplication.shared.isIdleTimerDisabled = true
         OrientationController.shared.reapply()
-        guard isNightSessionActive else { return }
+        guard isNightSessionActive else {
+            UIApplication.shared.isIdleTimerDisabled = false
+            return
+        }
+        UIApplication.shared.isIdleTimerDisabled = true
         postureMonitor.start()
         syncSleepCareMonitoring()
         weather.refreshIfNeeded()
@@ -613,10 +621,8 @@ final class StandViewModel: ObservableObject {
         manualDimmingHoldActive = false
         automaticDimmingPaused = false
         UIApplication.shared.isIdleTimerDisabled = false
-        restoreScreenBrightness()
         postureMonitor.stop()
         isFaceDown = false
-        brightnessBeforeFaceDown = nil
         movementTorchSyncTask?.cancel()
         movementTorchSyncTask = nil
         torch.turnOff()
@@ -979,28 +985,75 @@ final class StandViewModel: ObservableObject {
         performTransition: Bool
     ) {
         let resolvedPreference = preference ?? settings.value.modePreference
-        let fallbackMode = SimplifiedBrightnessModePolicy.mode(
-            for: displayBrightness,
-            preference: resolvedPreference
-        )
-        let newMode = resolvedPreference == .automatic
-            && settings.value.cameraAmbientSensingEnabled
-            ? AmbientCameraModePolicy.target(
-                current: environmentDisplayMode,
-                fallback: fallbackMode,
-                reading: lastAmbientBrightnessReading
-            )
-            : fallbackMode
+        let decision = environmentDisplayModeDecision(preference: resolvedPreference)
+        let newMode = decision.mode
         guard newMode != environmentDisplayMode else {
             modeTransitionTask?.cancel()
             modeTransitionTask = nil
             pendingModeTarget = nil
             return
         }
+
+        guard performTransition, resolvedPreference == .automatic else {
+            modeTransitionTask?.cancel()
+            modeTransitionTask = nil
+            pendingModeTarget = nil
+            applyEnvironmentDisplayMode(newMode, performTransition: performTransition)
+            return
+        }
+
+        let delay = AutomaticModeTransitionPolicy.confirmationDelay(
+            from: environmentDisplayMode,
+            to: newMode,
+            hasCameraReading: decision.hasFreshCameraReading
+        )
+        guard delay > 0 else {
+            applyEnvironmentDisplayMode(newMode, performTransition: performTransition)
+            return
+        }
+        if pendingModeTarget == newMode, modeTransitionTask != nil { return }
+
         modeTransitionTask?.cancel()
-        modeTransitionTask = nil
-        pendingModeTarget = nil
-        applyEnvironmentDisplayMode(newMode, performTransition: performTransition)
+        pendingModeTarget = newMode
+        modeTransitionTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, !Task.isCancelled, self.pendingModeTarget == newMode else { return }
+            let confirmed = self.environmentDisplayModeDecision(preference: .automatic).mode
+            guard confirmed == newMode else {
+                self.pendingModeTarget = nil
+                self.modeTransitionTask = nil
+                return
+            }
+            self.pendingModeTarget = nil
+            self.modeTransitionTask = nil
+            self.applyEnvironmentDisplayMode(newMode, performTransition: true)
+        }
+    }
+
+    private func environmentDisplayModeDecision(
+        preference: StandModePreference
+    ) -> (mode: EnvironmentDisplayMode, hasFreshCameraReading: Bool) {
+        let fallbackMode = SimplifiedBrightnessModePolicy.mode(
+            for: displayBrightness,
+            preference: preference
+        )
+        let freshCameraReading = lastAmbientBrightnessReading.flatMap { reading in
+            Date().timeIntervalSince(reading.measuredAt) <= AmbientCameraModePolicy.maximumReadingAge
+                ? reading
+                : nil
+        }
+        let usesCameraReading = preference == .automatic
+            && settings.value.cameraAmbientSensingEnabled
+            && freshCameraReading != nil
+        let mode = preference == .automatic
+            && settings.value.cameraAmbientSensingEnabled
+            ? AmbientCameraModePolicy.target(
+                current: environmentDisplayMode,
+                fallback: fallbackMode,
+                reading: freshCameraReading
+            )
+            : fallbackMode
+        return (mode, usesCameraReading)
     }
 
     private func applyEnvironmentDisplayMode(
@@ -1078,8 +1131,6 @@ final class StandViewModel: ObservableObject {
             self.ambientCameraState = state
             guard let result else { return }
             self.lastAmbientBrightnessReading = result
-            self.modeTransitionTask?.cancel()
-            self.pendingModeTarget = nil
             self.refreshEnvironmentDisplayMode(performTransition: true)
             self.syncTorch()
         }
@@ -1112,7 +1163,7 @@ final class StandViewModel: ObservableObject {
         }
         ambientSamplingTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(3))
+                try? await Task.sleep(for: AmbientCameraModePolicy.samplingInterval)
                 guard let self, !Task.isCancelled else { return }
                 if !self.isAdjustingBrightness,
                    self.ambientCameraState != .measuring,
@@ -1172,33 +1223,16 @@ final class StandViewModel: ObservableObject {
 
         if faceDown {
             guard isNightSessionActive else { return }
-            brightnessBeforeFaceDown = UIScreen.main.brightness
             isFaceDown = true
-            UIScreen.main.brightness = 0
+            applyBaseBrightness(0, animated: false)
             return
         }
 
         isFaceDown = false
-        if let brightnessBeforeFaceDown {
-            UIScreen.main.brightness = brightnessBeforeFaceDown
-            displayBrightness = Double(brightnessBeforeFaceDown)
-        }
-        self.brightnessBeforeFaceDown = nil
         if isNightSessionActive {
+            applyBaseBrightness(displayBrightness, animated: false)
             refreshEnvironmentDisplayMode(performTransition: true)
         }
-    }
-
-    private func rememberScreenBrightnessIfNeeded() {
-        if brightnessBeforeSession == nil {
-            brightnessBeforeSession = UIScreen.main.brightness
-        }
-    }
-
-    private func restoreScreenBrightness() {
-        guard let brightnessBeforeSession else { return }
-        UIScreen.main.brightness = brightnessBeforeSession
-        self.brightnessBeforeSession = nil
     }
 
     func beginBrightnessAdjustment() {
@@ -1228,7 +1262,6 @@ final class StandViewModel: ObservableObject {
         let value = adjustment.level
         let preference = adjustment.preference
         displayBrightness = value
-        UIScreen.main.brightness = CGFloat(value)
 
         var updatedSettings = settings.value
         updatedSettings.modePreference = preference
@@ -1271,7 +1304,6 @@ final class StandViewModel: ObservableObject {
                 let progress = Double(step) / Double(steps)
                 let value = start + (target - start) * progress
                 displayBrightness = value
-                UIScreen.main.brightness = CGFloat(value)
                 applyBaseBrightness(value, animated: false)
                 try? await Task.sleep(for: .milliseconds(50))
             }
@@ -1498,7 +1530,7 @@ private final class AmbientCameraBrightnessService: NSObject,
                 }
             }
             timeoutWorkItem = timeout
-            queue.asyncAfter(deadline: .now() + 3, execute: timeout)
+            queue.asyncAfter(deadline: .now() + 1.5, execute: timeout)
         } catch {
             finish(reading: nil, state: .unavailable)
         }

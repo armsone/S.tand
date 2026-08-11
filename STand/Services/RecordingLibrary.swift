@@ -381,41 +381,70 @@ final class RecordingLibrary: ObservableObject {
         clips.sort { $0.createdAt > $1.createdAt }
     }
 
-    func delete(_ clip: RecordingClip) {
-        try? FileManager.default.removeItem(at: clip.url)
-        removeSessionReferences(to: [clip.url])
+    func delete(_ clip: RecordingClip) throws {
+        do {
+            try FileManager.default.removeItem(at: clip.url)
+            removeSessionReferences(to: [clip.url])
+        } catch {
+            // Keep the session association if the audio itself remains on disk.
+            reload()
+            throw error
+        }
         reload()
     }
 
     func delete(_ selectedClips: [RecordingClip]) throws {
         let availableURLs = Set(clips.map(\.url))
+        var deletedURLs: [URL] = []
+        var firstError: Error?
         for clip in selectedClips where availableURLs.contains(clip.url) {
-            try FileManager.default.removeItem(at: clip.url)
+            do {
+                try FileManager.default.removeItem(at: clip.url)
+                deletedURLs.append(clip.url)
+            } catch {
+                if firstError == nil { firstError = error }
+            }
         }
-        removeSessionReferences(to: selectedClips.map(\.url))
+        removeSessionReferences(to: deletedURLs)
         reload()
+        if let firstError { throw firstError }
     }
 
-    func deleteAll(at date: Date = Date()) {
+    func deleteAll(at date: Date = Date()) throws {
         // clips 배열에 아직 반영되지 않은 저장 완료 콜백도 빠짐없이 지운다.
         let storedAudioURLs = (try? FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
         ))?.filter { $0.pathExtension.lowercased() == "m4a" } ?? []
+        var deletedNames = Set<String>()
+        var firstError: Error?
         for url in storedAudioURLs {
-            try? FileManager.default.removeItem(at: url)
+            do {
+                try FileManager.default.removeItem(at: url)
+                deletedNames.insert(url.lastPathComponent)
+            } catch {
+                // Failed files and their session associations remain visible after reload.
+                if firstError == nil { firstError = error }
+            }
         }
         let pendingDirectory = directory.appendingPathComponent(".Pending", isDirectory: true)
-        try? FileManager.default.removeItem(at: pendingDirectory)
+        if FileManager.default.fileExists(atPath: pendingDirectory.path) {
+            do {
+                try FileManager.default.removeItem(at: pendingDirectory)
+            } catch {
+                if firstError == nil { firstError = error }
+            }
+        }
         // 파일 삭제가 잠자기 모드 이력을 바꾸면 안 된다. 열린 세션과 30분 안에
         // 재개할 수 있는 최근 종료 세션은 비어 있어도 남기고, 오래된 빈 이력만 정리한다.
         for index in sleepSessions.indices {
-            sleepSessions[index].clipFileNames.removeAll()
+            sleepSessions[index].clipFileNames.removeAll { deletedNames.contains($0) }
         }
         _ = removeExpiredEmptySessions(at: date)
         persistSleepSessions()
         reload()
+        if let firstError { throw firstError }
     }
 
     func merge(

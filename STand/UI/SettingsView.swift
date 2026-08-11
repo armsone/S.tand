@@ -611,7 +611,7 @@ struct SettingsView: View {
             if let reading = runtime.lastAmbientBrightnessReading {
                 return "최근 확인 · \(reading.isDark ? "어두움" : "밝음") · 사진 저장 안 함"
             }
-            return "판단이 애매할 때만 잠깐 확인"
+            return "자동 매이트 모드에서 주기적으로 잠깐 확인"
         case .unavailable: return "이 기기에서는 사용할 수 없어 다른 신호만 사용합니다"
         }
     }

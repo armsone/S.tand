@@ -12,8 +12,13 @@ struct InternetRadioBrowserView: View {
     @State private var addressText: String
     @State private var showsFavorites = false
     @FocusState private var addressFieldIsFocused: Bool
+    @ScaledMetric(relativeTo: .body) private var scaledAddressBarHeight: CGFloat = 44
 
     let accent: Color
+
+    private var addressBarHeight: CGFloat {
+        min(56, max(44, scaledAddressBarHeight))
+    }
 
     init(accent: Color = .orange) {
         let homepage = InternetRadioBrowserAddress.defaultHomepage
@@ -65,7 +70,7 @@ struct InternetRadioBrowserView: View {
             browserBackOrCloseButton
 
             TextField("웹 주소 입력", text: $addressText)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.callout.weight(.semibold))
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -73,7 +78,7 @@ struct InternetRadioBrowserView: View {
                 .focused($addressFieldIsFocused)
                 .onSubmit(loadAddress)
                 .padding(.horizontal, 10)
-                .frame(height: 32)
+                .frame(height: addressBarHeight)
                 .background(browserPanelFill.opacity(0.72), in: Capsule())
                 .overlay {
                     Capsule()
@@ -131,9 +136,9 @@ struct InternetRadioBrowserView: View {
                 ? "xmark"
                 : "chevron.left"
         )
-        .font(.system(size: 13, weight: .semibold))
+        .font(.callout.weight(.semibold))
         .foregroundStyle(.white.opacity(0.68))
-        .frame(width: 32, height: 32)
+        .frame(width: 44, height: 44)
         .background(browserPanelFill.opacity(0.90), in: Circle())
         .overlay {
             Circle().stroke(.white.opacity(0.14), lineWidth: 1)
@@ -175,9 +180,9 @@ struct InternetRadioBrowserView: View {
 
     private var browserFavoritesButton: some View {
         Image(systemName: showsFavorites ? "star.fill" : "star")
-            .font(.system(size: 13, weight: .semibold))
+            .font(.callout.weight(.semibold))
             .foregroundStyle(showsFavorites ? accent : .white.opacity(0.68))
-            .frame(width: 32, height: 32)
+            .frame(width: 44, height: 44)
             .background(browserPanelFill.opacity(0.90), in: Circle())
             .overlay {
                 Circle().stroke(.white.opacity(0.14), lineWidth: 1)
@@ -202,9 +207,9 @@ struct InternetRadioBrowserView: View {
         isPrimary: Bool = false
     ) -> some View {
         Image(systemName: systemName)
-            .font(.system(size: 13, weight: .semibold))
+            .font(.callout.weight(.semibold))
             .foregroundStyle(isPrimary ? Color.white : .white.opacity(0.68))
-            .frame(width: 32, height: 32)
+            .frame(width: 44, height: 44)
             .background(
                 isPrimary ? accent : browserPanelFill.opacity(0.90),
                 in: Circle()
@@ -302,7 +307,7 @@ struct InternetRadioBrowserView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label("즐겨찾기", systemImage: "star.fill")
-                    .font(.system(size: 14, weight: .bold))
+                    .font(.headline)
                     .foregroundStyle(.white.opacity(0.88))
                 Spacer()
                 Button {
@@ -326,15 +331,15 @@ struct InternetRadioBrowserView: View {
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: favorite.isHomepage ? "house.fill" : "globe")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(favorite.isHomepage ? accent : .white.opacity(0.58))
                             .frame(width: 24, height: 24)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(favorite.title)
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.white.opacity(0.88))
                             Text(favorite.url.absoluteString)
-                                .font(.system(size: 10, weight: .medium))
+                                .font(.caption)
                                 .foregroundStyle(.white.opacity(0.52))
                                 .lineLimit(1)
                         }
@@ -344,7 +349,7 @@ struct InternetRadioBrowserView: View {
                             .foregroundStyle(.white.opacity(0.36))
                     }
                     .padding(.horizontal, 8)
-                    .frame(height: 50)
+                    .frame(minHeight: 56)
                     .background(browserPanelFill.opacity(0.84), in: RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
@@ -352,7 +357,7 @@ struct InternetRadioBrowserView: View {
             }
 
             Text("웹사이트만 열며 스트리밍 주소를 자동으로 감지하거나 채널에 입력하지 않습니다.")
-                .font(.system(size: 10.5, weight: .semibold))
+                .font(.footnote.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.52))
                 .padding(.horizontal, 4)
         }
@@ -372,7 +377,7 @@ struct InternetRadioBrowserView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
             Text(message)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.footnote.weight(.semibold))
                 .lineLimit(3)
             Spacer(minLength: 4)
             Button {

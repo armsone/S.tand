@@ -18,6 +18,7 @@ struct RecordingsView: View {
     @State private var isMerging = false
     @State private var mergeErrorMessage: String?
     @State private var mergeStatusMessage: String?
+    @State private var pendingClipDeletion: RecordingClip?
 
     init(
         library: RecordingLibrary,
@@ -152,9 +153,13 @@ struct RecordingsView: View {
                 Button("모두 삭제", role: .destructive) {
                     guard !isMerging else { return }
                     player.stop()
-                    selectedClipURLs.removeAll()
-                    expandedSessionIDs.removeAll()
-                    library.deleteAll()
+                    do {
+                        try library.deleteAll()
+                        selectedClipURLs.removeAll()
+                        expandedSessionIDs.removeAll()
+                    } catch {
+                        mergeErrorMessage = error.localizedDescription
+                    }
                 }
                 Button("취소", role: .cancel) {}
             } message: {
@@ -184,6 +189,23 @@ struct RecordingsView: View {
                 Button("취소", role: .cancel) {}
             } message: {
                 Text("합본은 남지만 선택한 원본 녹음은 복구할 수 없습니다.")
+            }
+            .confirmationDialog(
+                "이 녹음을 삭제할까요?",
+                isPresented: Binding(
+                    get: { pendingClipDeletion != nil },
+                    set: { if !$0 { pendingClipDeletion = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let clip = pendingClipDeletion {
+                    Button("녹음 삭제", role: .destructive) {
+                        deleteClip(clip)
+                    }
+                }
+                Button("취소", role: .cancel) { pendingClipDeletion = nil }
+            } message: {
+                Text("삭제한 녹음은 복구할 수 없습니다.")
             }
             .alert(
                 "작업을 완료하지 못했습니다",
@@ -458,11 +480,20 @@ struct RecordingsView: View {
             toggleSelection: { toggleSelection(of: clip) },
             play: { player.toggle(clip) },
             delete: {
-                if player.playingURL == clip.url { player.stop() }
-                selectedClipURLs.remove(clip.url)
-                library.delete(clip)
+                pendingClipDeletion = clip
             }
         )
+    }
+
+    private func deleteClip(_ clip: RecordingClip) {
+        if player.playingURL == clip.url { player.stop() }
+        pendingClipDeletion = nil
+        do {
+            try library.delete(clip)
+            selectedClipURLs.remove(clip.url)
+        } catch {
+            mergeErrorMessage = error.localizedDescription
+        }
     }
 
     private var mergedClips: [RecordingClip] {

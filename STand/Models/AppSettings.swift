@@ -802,9 +802,11 @@ final class SettingsStore: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
-        let saved = defaults.data(forKey: storageKey)
-            .flatMap { try? JSONDecoder().decode(AppSettings.self, from: $0) }
-            ?? .recommended
+        let savedData = defaults.data(forKey: storageKey)
+        let decodedSettings = savedData.flatMap {
+            try? JSONDecoder().decode(AppSettings.self, from: $0)
+        }
+        let saved = decodedSettings ?? .recommended
         let hasMigratedTorchDefault = defaults.bool(
             forKey: SettingsMigration.torchEnabledByDefaultKey
         )
@@ -830,6 +832,9 @@ final class SettingsStore: ObservableObject {
             hasMigrated: hasMigratedCurrentExperienceDefaults
         )
 
+        // Preserve an unreadable payload until the user explicitly changes a setting.
+        // A launch from an older build must not overwrite recoverable newer-version data.
+        guard savedData == nil || decodedSettings != nil else { return }
         guard !hasMigratedTorchDefault
                 || !hasMigratedHoldDuration
                 || !hasMigratedInternetRadioChannels
@@ -868,7 +873,7 @@ enum AppVersion {
     }
 
     static var build: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.23.3"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.24.0"
     }
 
     static var display: String { "\(marketing) (\(build))" }

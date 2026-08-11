@@ -25,6 +25,17 @@ struct DevicePosturePolicy {
     }
 }
 
+enum DeviceMotionUpdatePolicy {
+    static func shouldDeliver(
+        capturedGeneration: UUID,
+        currentGeneration: UUID,
+        isActive: Bool
+    ) -> Bool {
+        isActive && capturedGeneration == currentGeneration
+    }
+}
+
+@MainActor
 final class DevicePostureMonitor {
     var onFaceDownChanged: ((Bool) -> Void)?
 
@@ -37,23 +48,36 @@ final class DevicePostureMonitor {
         return queue
     }()
     private var isFaceDown = false
+    private var generation = UUID()
 
     func start() {
         guard manager.isDeviceMotionAvailable, !manager.isDeviceMotionActive else { return }
+        generation = UUID()
+        let generation = generation
         manager.deviceMotionUpdateInterval = 0.25
         manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: queue) { [weak self] motion, _ in
-            guard let self, let motion else { return }
-            let nextValue = DevicePosturePolicy.isFaceDown(
-                gravityZ: motion.gravity.z,
-                currentlyFaceDown: isFaceDown
-            )
-            guard nextValue != isFaceDown else { return }
-            isFaceDown = nextValue
-            DispatchQueue.main.async { self.onFaceDownChanged?(nextValue) }
+            guard let motion else { return }
+            let gravityZ = motion.gravity.z
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      DeviceMotionUpdatePolicy.shouldDeliver(
+                          capturedGeneration: generation,
+                          currentGeneration: self.generation,
+                          isActive: self.manager.isDeviceMotionActive
+                      ) else { return }
+                let nextValue = DevicePosturePolicy.isFaceDown(
+                    gravityZ: gravityZ,
+                    currentlyFaceDown: self.isFaceDown
+                )
+                guard nextValue != self.isFaceDown else { return }
+                self.isFaceDown = nextValue
+                self.onFaceDownChanged?(nextValue)
+            }
         }
     }
 
     func stop() {
+        generation = UUID()
         manager.stopDeviceMotionUpdates()
         isFaceDown = false
     }

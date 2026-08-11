@@ -372,6 +372,7 @@ final class AudioCaptureService: ObservableObject {
         case .ended:
             guard shouldResumeAfterInterruption else { return }
             shouldResumeAfterInterruption = false
+            guard AudioInterruptionResumePolicy.shouldResume(notification) else { return }
             startEngine()
         @unknown default:
             break
@@ -426,6 +427,15 @@ private enum AudioCaptureError: LocalizedError {
 
     var errorDescription: String? {
         "마이크 입력을 사용할 수 없습니다."
+    }
+}
+
+enum AudioInterruptionResumePolicy {
+    static func shouldResume(_ notification: Notification) -> Bool {
+        guard let rawValue = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt else {
+            return false
+        }
+        return AVAudioSession.InterruptionOptions(rawValue: rawValue).contains(.shouldResume)
     }
 }
 
@@ -526,6 +536,7 @@ final class ClipSegmentRecorder {
     private let preRollDuration: TimeInterval
     private let postRollDuration: TimeInterval
     private let maximumClipDuration: TimeInterval
+    private let maximumPendingSegmentCount: Int
 
     private var preRoll: [BufferedAudio] = []
     private var preRollLength: TimeInterval = 0
@@ -543,7 +554,8 @@ final class ClipSegmentRecorder {
         onFailure: @escaping (String) -> Void = { _ in },
         preRollDuration: TimeInterval = 0.8,
         postRollDuration: TimeInterval = 1.4,
-        maximumClipDuration: TimeInterval = 90
+        maximumClipDuration: TimeInterval = 90,
+        maximumPendingSegmentCount: Int = 4
     ) {
         self.directory = directory
         stagingDirectory = directory.appendingPathComponent(".Pending", isDirectory: true)
@@ -553,6 +565,7 @@ final class ClipSegmentRecorder {
         self.preRollDuration = preRollDuration
         self.postRollDuration = postRollDuration
         self.maximumClipDuration = maximumClipDuration
+        self.maximumPendingSegmentCount = max(1, maximumPendingSegmentCount)
         removeStalePendingFiles()
     }
 
@@ -588,8 +601,11 @@ final class ClipSegmentRecorder {
 
         if let startedAt, now - startedAt >= maximumClipDuration {
             rollCurrentClip()
-            if detection.isAboveSoundThreshold {
+            if detection.isAboveSoundThreshold,
+               pendingSegmentURLs.count < maximumPendingSegmentCount {
                 startClip(format: buffer.format, now: now)
+            } else if pendingSegmentURLs.count >= maximumPendingSegmentCount {
+                discardCurrentClip()
             } else {
                 finalizeApprovedOrDiscard()
             }

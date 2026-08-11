@@ -417,6 +417,10 @@ struct RootView: View {
                         .zIndex(100)
                 }
 
+                if !isEditingScreen, model.isNightSessionActive {
+                    homeAccessibilityControls
+                }
+
             }
             .grayscale(settings.value.displayTheme == .grayscale ? 1 : 0)
             .onAppear {
@@ -729,6 +733,48 @@ struct RootView: View {
         model.revealControls()
     }
 
+    private var homeAccessibilityControls: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .accessibilityElement()
+            .accessibilityLabel("홈 화면 제어")
+            .accessibilityValue(
+                "\(model.experienceMode.title), 앱 밝기 \(Int((model.displayBrightness * 100).rounded()))퍼센트"
+            )
+            .accessibilityHint("위아래로 쓸어 앱 밝기를 조절하거나 동작 메뉴에서 모드, 테마와 편집을 선택합니다")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: adjustBrightnessForAccessibility(by: 0.1)
+                case .decrement: adjustBrightnessForAccessibility(by: -0.1)
+                @unknown default: break
+                }
+            }
+            .accessibilityAction(named: Text("오브제와 매이트 전환"), handleScreenTap)
+            .accessibilityAction(named: Text("테마 전환"), toggleDisplayTheme)
+            .accessibilityAction(named: Text("화면 편집 열기")) {
+                enterScreenEditing(isPortrait: currentIsPortrait)
+            }
+            .accessibilityAction(named: Text("시계 크게")) {
+                adjustClockScaleForAccessibility(by: 0.1)
+            }
+            .accessibilityAction(named: Text("시계 작게")) {
+                adjustClockScaleForAccessibility(by: -0.1)
+            }
+    }
+
+    private func adjustBrightnessForAccessibility(by amount: Double) {
+        let value = min(1, max(0, model.displayBrightness + amount))
+        model.beginBrightnessAdjustment()
+        model.updateBrightnessLevel(value)
+        model.endBrightnessAdjustment()
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    private func adjustClockScaleForAccessibility(by amount: Double) {
+        settings.value.clockScale = min(1.35, max(0.7, settings.value.clockScale + amount))
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
     private var clockMagnificationGesture: some Gesture {
         MagnificationGesture()
             .onChanged { magnification in
@@ -801,7 +847,7 @@ struct RootView: View {
             .frame(height: StandControlLayoutMetrics.hiddenControlRevealHeight)
             .contentShape(Rectangle())
             .accessibilityLabel("하단 기능 버튼 열기")
-            .accessibilityHint("두 번 누르면 플래시, 밝기 기준, 녹음 및 설정 버튼이 나타납니다")
+            .accessibilityHint("두 번 누르면 녹음 및 설정 버튼이 나타납니다")
         } else {
             WrappingControlLayout {
                 ForEach(visibleControlOrder(isPortrait: isPortrait)) { kind in
@@ -2074,7 +2120,9 @@ private struct ScreenEditorView: View {
 
                 EditablePanel(
                     transform: $layout.clock,
-                    canvasSize: proxy.size
+                    canvasSize: proxy.size,
+                    accessibilityName: "시계 패널",
+                    onTap: { showFontPalette.toggle() }
                 ) {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         FlipClockFace(
@@ -2092,7 +2140,8 @@ private struct ScreenEditorView: View {
 
                 EditablePanel(
                     transform: $layout.seconds,
-                    canvasSize: proxy.size
+                    canvasSize: proxy.size,
+                    accessibilityName: "초 패널"
                 ) {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         ClockSecondsPanel(
@@ -2115,7 +2164,8 @@ private struct ScreenEditorView: View {
 
                 EditablePanel(
                     transform: $layout.date,
-                    canvasSize: proxy.size
+                    canvasSize: proxy.size,
+                    accessibilityName: "날짜 패널"
                 ) {
                     StandDatePanel(date: .now, isPortrait: isPortrait)
                         .padding(.horizontal, 12).padding(.vertical, 8)
@@ -2124,7 +2174,8 @@ private struct ScreenEditorView: View {
 
                 EditablePanel(
                     transform: $layout.battery,
-                    canvasSize: proxy.size
+                    canvasSize: proxy.size,
+                    accessibilityName: "배터리 패널"
                 ) {
                     Label(batteryText, systemImage: "battery.100percent.bolt")
                         .font(.caption.monospacedDigit())
@@ -2189,7 +2240,9 @@ private struct ScreenEditorView: View {
         if radioConfigurations.count == 2, layout.radiosGrouped {
             EditablePanel(
                 transform: $layout.radio,
-                canvasSize: canvasSize
+                canvasSize: canvasSize,
+                accessibilityName: "인터넷 라디오 묶음 패널",
+                onTap: splitRadioPanels
             ) {
                 InternetRadioGroupedPanel(
                     configurations: radioConfigurations,
@@ -2208,6 +2261,7 @@ private struct ScreenEditorView: View {
                 EditablePanel(
                     transform: index == 0 ? $layout.radio : $layout.secondaryRadio,
                     canvasSize: canvasSize,
+                    accessibilityName: "\(configuration.displayName) 라디오 패널",
                     onEnded: { mergeRadioPanelsIfNeeded(canvasSize: canvasSize) },
                     onTap: { onConfigureRadio(configuration.id) }
                 ) {
@@ -2228,6 +2282,7 @@ private struct ScreenEditorView: View {
                 EditablePanel(
                     transform: $layout.secondaryRadio,
                     canvasSize: canvasSize,
+                    accessibilityName: "두 번째 라디오 패널",
                     onTap: onManageRadios
                 ) {
                     Label("두 번째 라디오 추가", systemImage: "plus.circle.fill")
@@ -2302,6 +2357,7 @@ private struct ScreenEditorView: View {
             EditablePanel(
                 transform: weatherBinding(for: groupID),
                 canvasSize: canvasSize,
+                accessibilityName: "날씨 패널",
                 onEnded: { mergeWeatherGroup(groupID, canvasSize: canvasSize) }
             ) {
                 WeatherGroupPanel(
@@ -2427,6 +2483,7 @@ private struct InternetRadioConfigurationView: View {
     @State private var address: String
     @State private var validationMessage: String?
     @State private var showsBrowser = false
+    @State private var confirmsDeletion = false
 
     let configuration: InternetRadioConfiguration?
     let accent: Color
@@ -2522,8 +2579,7 @@ private struct InternetRadioConfigurationView: View {
                 if allowsDeletion {
                     Section {
                         Button("채널 삭제", role: .destructive) {
-                            onDelete()
-                            dismiss()
+                            confirmsDeletion = true
                         }
                     }
                 }
@@ -2544,6 +2600,19 @@ private struct InternetRadioConfigurationView: View {
             }
             .fullScreenCover(isPresented: $showsBrowser) {
                 InternetRadioBrowserView(accent: accent)
+            }
+            .confirmationDialog(
+                "이 채널을 삭제할까요?",
+                isPresented: $confirmsDeletion,
+                titleVisibility: .visible
+            ) {
+                Button("채널 삭제", role: .destructive) {
+                    onDelete()
+                    dismiss()
+                }
+                Button("취소", role: .cancel) {}
+            } message: {
+                Text("삭제한 채널 주소는 되돌릴 수 없습니다.")
             }
         }
         .preferredColorScheme(.dark)
@@ -2747,6 +2816,7 @@ private struct EditablePanelSizeKey: PreferenceKey {
 private struct EditablePanel<Content: View>: View {
     @Binding var transform: PanelTransform
     let canvasSize: CGSize
+    var accessibilityName = "편집 패널"
     var onEnded: () -> Void = {}
     var onTap: (() -> Void)? = nil
     @ViewBuilder let content: () -> Content
@@ -2882,6 +2952,51 @@ private struct EditablePanel<Content: View>: View {
                     }
                     .onEnded { _ in scaleStart = nil }
             )
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityName)
+            .accessibilityValue("크기 \(Int((transform.scale * 100).rounded()))퍼센트")
+            .accessibilityHint("동작 메뉴로 패널을 이동하고 위아래로 쓸어 크기를 조절합니다")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment:
+                    transform.scale = min(
+                        PanelEditingPolicy.maximumPanelScale,
+                        transform.scale + 0.1
+                    )
+                case .decrement:
+                    transform.scale = max(
+                        PanelEditingPolicy.minimumPanelScale,
+                        transform.scale - 0.1
+                    )
+                @unknown default:
+                    return
+                }
+                onEnded()
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
+            .accessibilityAction(named: Text("위로 이동")) {
+                moveForAccessibility(x: 0, y: -1)
+            }
+            .accessibilityAction(named: Text("아래로 이동")) {
+                moveForAccessibility(x: 0, y: 1)
+            }
+            .accessibilityAction(named: Text("왼쪽으로 이동")) {
+                moveForAccessibility(x: -1, y: 0)
+            }
+            .accessibilityAction(named: Text("오른쪽으로 이동")) {
+                moveForAccessibility(x: 1, y: 0)
+            }
+            .accessibilityAction(named: Text("패널 열기")) {
+                onTap?()
+            }
+    }
+
+    private func moveForAccessibility(x: Double, y: Double) {
+        let step: Double = 0.05
+        transform.x += x * step
+        transform.y += y * step
+        onEnded()
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 
 

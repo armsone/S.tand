@@ -20,9 +20,15 @@ enum InternetRadioPlaybackState: Equatable {
 }
 
 enum InternetRadioReconnectPolicy {
+    static let maximumAttempts = 5
+
     static func delay(forAttempt attempt: Int) -> TimeInterval {
         let delays: [TimeInterval] = [2, 4, 8, 15, 30]
         return delays[min(max(0, attempt - 1), delays.count - 1)]
+    }
+
+    static func shouldRetry(attempt: Int) -> Bool {
+        attempt <= maximumAttempts
     }
 }
 
@@ -208,7 +214,7 @@ final class InternetRadioPlayer: ObservableObject {
                 case .began:
                     self?.stopForInterruption()
                 case .ended:
-                    self?.finishInterruption()
+                    self?.finishInterruption(notification)
                 @unknown default:
                     break
                 }
@@ -259,13 +265,17 @@ final class InternetRadioPlayer: ObservableObject {
         }
     }
 
-    private func scheduleReconnect(after _: String) {
+    private func scheduleReconnect(after message: String) {
         guard activeURL != nil else { return }
         tearDownPlayer()
         deactivateAudioSessionIfOwned()
         reconnectTask?.cancel()
         reconnectAttempt += 1
         let attempt = reconnectAttempt
+        guard InternetRadioReconnectPolicy.shouldRetry(attempt: attempt) else {
+            stopWithFailure(message)
+            return
+        }
         state = .reconnecting(attempt)
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(InternetRadioReconnectPolicy.delay(forAttempt: attempt)))
@@ -300,9 +310,13 @@ final class InternetRadioPlayer: ObservableObject {
         state = .reconnecting(max(1, reconnectAttempt))
     }
 
-    private func finishInterruption() {
+    private func finishInterruption(_ notification: Notification) {
         guard isWaitingForInterruptionToEnd else { return }
         isWaitingForInterruptionToEnd = false
+        guard AudioInterruptionResumePolicy.shouldResume(notification) else {
+            stopWithFailure("오디오 중단 후 라디오를 자동으로 다시 시작하지 않았습니다.")
+            return
+        }
         guard activeURL != nil else {
             onPlaybackBecameInactive?()
             return
