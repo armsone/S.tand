@@ -449,8 +449,7 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.28), value: settings.value.displayTheme)
         .contentShape(Rectangle())
-        .gesture(screenPressGesture)
-        .simultaneousGesture(screenAdjustmentGesture, including: .all)
+        .gesture(screenAdjustmentGesture.exclusively(before: screenPressGesture))
         .simultaneousGesture(clockMagnificationGesture)
         .persistentSystemOverlays(.hidden)
         .sheet(item: $presentedSheet, onDismiss: {
