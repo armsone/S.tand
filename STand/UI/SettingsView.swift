@@ -27,7 +27,7 @@ struct SettingsView: View {
     }
 
     private var accent: Color {
-        store.value.displayTheme == .color ? .orange : .white
+        store.value.displayTheme.accentColor
     }
 
     var body: some View {
@@ -126,8 +126,8 @@ struct SettingsView: View {
                 spacing: 8
             ) {
                 SettingsActionTile(
-                    title: runtime.isNightSessionActive ? "자동 돌봄 끄기" : "자동 돌봄 시작",
-                    status: runtime.isNightSessionActive ? model.experienceMode.title : "꺼짐",
+                    title: runtime.isNightSessionActive ? "자동 기능 끄기" : "자동 기능 켜기",
+                    status: runtime.isNightSessionActive ? "전환·감지·녹음" : "시계·날씨만 표시",
                     systemImage: runtime.isNightSessionActive ? "stop.circle.fill" : "moon.stars.fill",
                     isActive: runtime.isNightSessionActive,
                     accent: accent
@@ -171,19 +171,12 @@ struct SettingsView: View {
             accent: accent
         ) {
             SettingsFieldLabel("테마")
-            Picker(
-                "테마",
+            ThemePalettePicker(
                 selection: Binding(
                     get: { store.value.displayTheme },
                     set: { store.value.displayTheme = $0 }
                 )
-            ) {
-                Label("오렌지", systemImage: "sun.max.fill")
-                    .tag(StandDisplayTheme.color)
-                Label("그레이", systemImage: "circle.lefthalf.filled")
-                    .tag(StandDisplayTheme.grayscale)
-            }
-            .pickerStyle(.segmented)
+            )
 
             SettingsFieldLabel("시간 형식")
             Picker(
@@ -269,9 +262,9 @@ struct SettingsView: View {
             accent: accent
         ) {
             HStack(spacing: 12) {
-                Label("매이트 0–20%", systemImage: "moon.stars.fill")
+                Label("매이트 0–30%", systemImage: "moon.stars.fill")
                 Spacer(minLength: 8)
-                Label("오브제 21–100%", systemImage: "sun.max.fill")
+                Label("오브제 31–100%", systemImage: "sun.max.fill")
             }
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.white.opacity(0.82))
@@ -279,7 +272,7 @@ struct SettingsView: View {
             .background(.white.opacity(0.095), in: RoundedRectangle(cornerRadius: 15))
 
             SettingsHelpText(
-                "화면을 한 번 누르면 매이트 10%와 오브제 90%를 전환합니다. 위아래로 화면 절반을 밀면 밝기 전체 범위를 조절하며, 0%는 매이트 고정, 100%는 오브제 고정입니다."
+                "화면을 한 번 누르면 매이트 10%와 오브제 90%를 전환합니다. 위아래로 화면 높이의 1/4만큼 밀면 밝기 전체 범위를 조절하며, 0%는 매이트 고정, 100%는 오브제 고정입니다."
             )
 
             SettingsToggleRow(
@@ -292,8 +285,32 @@ struct SettingsView: View {
                 accent: accent
             )
 
+            SettingsToggleRow(
+                title: "방 밝기 감지",
+                subtitle: cameraAmbientStatusText,
+                systemImage: runtime.ambientCameraState == .measuring
+                    ? "camera.metering.center.weighted"
+                    : "camera.fill",
+                isOn: Binding(
+                    get: { store.value.cameraAmbientSensingEnabled },
+                    set: { model.setAmbientCameraSensingEnabled($0) }
+                ),
+                accent: accent
+            )
+
+            if runtime.ambientCameraState == .denied {
+                SettingsInlineButton(
+                    title: "카메라 권한 열기",
+                    systemImage: "gear",
+                    accent: accent
+                ) {
+                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                    openURL(url)
+                }
+            }
+
             SettingsHelpText(
-                "플래시는 오브제·매이트 전환, 화면 터치와 밝기 조절에는 사용하지 않습니다. 매이트에서 움직임을 감지한 화들짝 모드에서만 작동합니다."
+                "플래시는 매이트에서 움직임을 감지한 화들짝 모드에서만 작동합니다. 방 밝기 감지는 사진이나 영상을 저장하지 않고 약 2초 동안 평균 밝기만 계산합니다. 밝은 상태가 유지되면 플래시 없이 오브제 모드로 전환합니다."
             )
         }
     }
@@ -786,6 +803,56 @@ private struct StatusPill: View {
                 (active ? accent.opacity(0.15) : Color.white.opacity(0.07)),
                 in: Capsule()
             )
+    }
+}
+
+private struct ThemePalettePicker: View {
+    @Binding var selection: StandDisplayTheme
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ForEach(StandDisplayTheme.allCases, id: \.self) { theme in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.25)) { selection = theme }
+                    UISelectionFeedbackGenerator().selectionChanged()
+                } label: {
+                    VStack(spacing: 7) {
+                        ZStack {
+                            Circle()
+                                .fill(theme.accentColor)
+                            Circle()
+                                .fill(.white.opacity(theme == .grayscale ? 0.12 : 0.18))
+                                .frame(width: 14, height: 14)
+                                .offset(x: -7, y: -7)
+                            if selection == theme {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(theme == .grayscale ? .black : .white)
+                            }
+                        }
+                        .frame(width: 38, height: 38)
+                        .overlay {
+                            Circle()
+                                .stroke(.white.opacity(selection == theme ? 0.9 : 0.18), lineWidth: selection == theme ? 2 : 1)
+                        }
+
+                        Text(theme.title)
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+                    .background(
+                        selection == theme ? theme.accentColor.opacity(0.12) : .white.opacity(0.04),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(theme.title) 테마")
+                .accessibilityAddTraits(selection == theme ? .isSelected : [])
+            }
+        }
     }
 }
 

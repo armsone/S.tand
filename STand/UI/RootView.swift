@@ -295,6 +295,9 @@ struct RootView: View {
     @State private var brightnessDragState: BrightnessDragState?
     @State private var brightnessFeedback: BrightnessFeedback?
     @State private var brightnessFeedbackTask: Task<Void, Never>?
+    @State private var brightnessFixedEdge: BrightnessFixedEdge?
+    @State private var brightnessCommittedEdge: BrightnessFixedEdge?
+    @State private var brightnessFixedEdgeTask: Task<Void, Never>?
     @State private var clockScaleGestureStart: Double?
     @State private var clockScaleFeedback: Double?
     @State private var clockScaleFeedbackTask: Task<Void, Never>?
@@ -320,7 +323,10 @@ struct RootView: View {
             let isPortrait = proxy.size.height > proxy.size.width
 
             ZStack {
-                LampBackground(intensity: model.lampIntensity)
+                LampBackground(
+                    intensity: model.lampIntensity,
+                    theme: settings.value.displayTheme
+                )
 
                 if !isEditingScreen {
                     if model.isDisplayDark, didInitialize {
@@ -357,6 +363,7 @@ struct RootView: View {
                     if let brightnessFeedback {
                         BrightnessFeedbackView(feedback: brightnessFeedback)
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                            .zIndex(90)
                     }
 
                     if let clockScaleFeedback {
@@ -507,12 +514,16 @@ struct RootView: View {
 
     private func resetTransientInterface() {
         brightnessFeedbackTask?.cancel()
+        brightnessFixedEdgeTask?.cancel()
         clockScaleFeedbackTask?.cancel()
 
         brightnessFeedbackTask = nil
+        brightnessFixedEdgeTask = nil
         clockScaleFeedbackTask = nil
 
         brightnessDragState = nil
+        brightnessFixedEdge = nil
+        brightnessCommittedEdge = nil
         brightnessFeedback = nil
         clockScaleGestureStart = nil
         clockScaleFeedback = nil
@@ -690,12 +701,20 @@ struct RootView: View {
                     model.beginBrightnessAdjustment()
                 }
 
-                let adjustedValue = SimplifiedBrightnessModePolicy.level(
+                let fixedEdge = SimplifiedBrightnessModePolicy.fixedEdge(
+                    startingAt: state.startingValue,
+                    verticalTranslation: value.translation.height,
+                    viewportHeight: currentCanvasSize.height
+                )
+                let adjustedValue = brightnessCommittedEdge == fixedEdge
+                    ? (fixedEdge?.level ?? model.displayBrightness)
+                    : SimplifiedBrightnessModePolicy.level(
                     startingAt: state.startingValue,
                     verticalTranslation: value.translation.height,
                     viewportHeight: currentCanvasSize.height
                 )
                 model.updateBrightnessLevel(adjustedValue)
+                updateFixedEdgeHold(fixedEdge)
 
                 brightnessFeedbackTask?.cancel()
                 withAnimation(.easeOut(duration: 0.12)) {
@@ -705,11 +724,40 @@ struct RootView: View {
             .onEnded { _ in
                 guard !isEditingScreen else { return }
                 if brightnessDragState != nil {
+                    cancelFixedEdgeHold()
                     model.endBrightnessAdjustment()
                     brightnessDragState = nil
                     scheduleBrightnessFeedbackHide()
                 }
             }
+    }
+
+    private func updateFixedEdgeHold(_ edge: BrightnessFixedEdge?) {
+        guard edge != brightnessFixedEdge else { return }
+        brightnessFixedEdgeTask?.cancel()
+        if edge != brightnessCommittedEdge { brightnessCommittedEdge = nil }
+        brightnessFixedEdge = edge
+        brightnessFixedEdgeTask = nil
+
+        guard let edge else { return }
+        brightnessFixedEdgeTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(SimplifiedBrightnessModePolicy.fixedEdgeHoldDuration))
+            guard !Task.isCancelled, brightnessFixedEdge == edge else { return }
+            model.updateBrightnessLevel(edge.level)
+            brightnessCommittedEdge = edge
+            withAnimation(.easeOut(duration: 0.16)) {
+                brightnessFeedback = BrightnessFeedback(value: edge.level)
+            }
+            brightnessFixedEdgeTask = nil
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+    }
+
+    private func cancelFixedEdgeHold() {
+        brightnessFixedEdgeTask?.cancel()
+        brightnessFixedEdgeTask = nil
+        brightnessFixedEdge = nil
+        brightnessCommittedEdge = nil
     }
 
     private var screenPressGesture: some Gesture {
@@ -918,9 +966,10 @@ struct RootView: View {
             )
         case .stopDetection:
             ControlButton(
-                title: "자동 돌봄 끄기",
+                title: "자동 기능 끄기",
                 systemImage: "stop.circle.fill",
-                hint: "자동 모드 전환과 소리·움직임 감지, 수면 녹음을 종료합니다",
+                status: "전환·감지·녹음",
+                hint: "시계와 날씨는 유지하고 자동 모드 전환, 소리와 움직임 감지, 수면 녹음을 종료합니다",
                 width: width
             ) {
                 model.stopNightSession()
@@ -1013,16 +1062,13 @@ struct RootView: View {
 
 private struct LampBackground: View {
     let intensity: Double
+    let theme: StandDisplayTheme
 
     var body: some View {
         ZStack {
             Color.black
             RadialGradient(
-                colors: [
-                    Color(red: 1.0, green: 0.62, blue: 0.28).opacity(intensity),
-                    Color(red: 0.95, green: 0.27, blue: 0.06).opacity(intensity * 0.72),
-                    Color.black.opacity(1 - intensity * 0.22)
-                ],
+                colors: gradientColors,
                 center: .center,
                 startRadius: 20,
                 endRadius: 700
@@ -1030,6 +1076,36 @@ private struct LampBackground: View {
         }
         .ignoresSafeArea()
         .animation(.linear(duration: 0.08), value: intensity)
+        .animation(.easeInOut(duration: 0.28), value: theme)
+    }
+
+    private var gradientColors: [Color] {
+        switch theme {
+        case .color:
+            [
+                Color(red: 1.0, green: 0.62, blue: 0.28).opacity(intensity),
+                Color(red: 0.95, green: 0.27, blue: 0.06).opacity(intensity * 0.72),
+                Color.black.opacity(1 - intensity * 0.22)
+            ]
+        case .grayscale:
+            [
+                Color(white: 0.72).opacity(intensity * 0.72),
+                Color(white: 0.30).opacity(intensity * 0.64),
+                Color.black.opacity(1 - intensity * 0.18)
+            ]
+        case .midnight:
+            [
+                Color(red: 0.28, green: 0.58, blue: 1.0).opacity(intensity * 0.86),
+                Color(red: 0.08, green: 0.20, blue: 0.58).opacity(intensity * 0.78),
+                Color(red: 0.01, green: 0.02, blue: 0.09).opacity(1 - intensity * 0.18)
+            ]
+        case .sage:
+            [
+                Color(red: 0.60, green: 0.82, blue: 0.64).opacity(intensity * 0.80),
+                Color(red: 0.20, green: 0.43, blue: 0.30).opacity(intensity * 0.72),
+                Color(red: 0.025, green: 0.075, blue: 0.055).opacity(1 - intensity * 0.18)
+            ]
+        }
     }
 }
 
@@ -1037,28 +1113,85 @@ private struct BrightnessFeedbackView: View {
     let feedback: BrightnessFeedback
 
     var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: feedback.value <= SimplifiedBrightnessModePolicy.mateUpperBound
-                ? "moon.stars.fill"
-                : "sun.max.fill")
-                .font(.title2)
+        VStack(spacing: 12) {
+            Image(systemName: "sun.max.fill")
+                .font(.system(size: 24, weight: .semibold))
 
-            Text(modeTitle)
-                .font(.caption.weight(.semibold))
+            GeometryReader { proxy in
+                ZStack(alignment: .bottom) {
+                    Capsule()
+                        .fill(.black.opacity(0.26))
 
-            ProgressView(value: feedback.value)
-                .tint(.white.opacity(0.82))
-                .frame(width: 120)
+                    Rectangle()
+                        .fill(.white.opacity(0.92))
+                        .frame(height: proxy.size.height * CGFloat(clampedValue))
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .mask(Capsule())
 
-            Text("\(displayPercent)%")
-                .font(.caption2.monospacedDigit())
+                    Capsule()
+                        .stroke(.white.opacity(0.34), lineWidth: 1)
+
+                    Rectangle()
+                        .fill(.white.opacity(0.44))
+                        .frame(width: proxy.size.width, height: 1)
+                        .position(
+                            x: proxy.size.width / 2,
+                            y: proxy.size.height
+                                * CGFloat(1 - SimplifiedBrightnessModePolicy.mateUpperBound)
+                        )
+                }
+            }
+            .frame(width: 64, height: 176)
+
+            VStack(spacing: 2) {
+                Text(modeTitle)
+                    .font(.caption.weight(.semibold))
+                Text("\(displayPercent)%")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.62))
+            }
+            .lineLimit(1)
+
+            HStack(spacing: 12) {
+                Label("0–30% 매이트", systemImage: "moon.fill")
+                Label("31–99% 오브제", systemImage: "sun.max.fill")
+            }
+            .font(.system(size: 9.5, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.72))
+
+            Text(edgeHint)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.88))
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .background(.white.opacity(0.09), in: Capsule())
+                .lineLimit(1)
         }
-        .foregroundStyle(.white.opacity(0.86))
+        .foregroundStyle(.white.opacity(feedbackVisibility))
         .padding(.horizontal, 22)
-        .padding(.vertical, 16)
-        .background(.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.vertical, 20)
+        .background {
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(.black.opacity(0.34))
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .stroke(.white.opacity(0.12), lineWidth: 1)
+        }
         .allowsHitTesting(false)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("화면 밝기")
+        .accessibilityValue("\(modeTitle), \(displayPercent)퍼센트")
+    }
+
+    private var feedbackVisibility: Double {
+        // 매이트 모드의 낮은 물리 밝기에서도 현황판은 실루엣 명도에 묻히지 않는다.
+        0.90 + (1 - clampedValue) * 0.10
+    }
+
+    private var clampedValue: Double {
+        min(1, max(0, feedback.value))
     }
 
     private var modeTitle: String {
@@ -1071,6 +1204,18 @@ private struct BrightnessFeedbackView: View {
 
     private var displayPercent: Int {
         Int((feedback.value * 100).rounded())
+    }
+
+    private var edgeHint: String {
+        if feedback.value >= 1 { return "오브제 모드 고정됨" }
+        if feedback.value <= 0 { return "매이트 모드 고정됨" }
+        if feedback.value >= SimplifiedBrightnessModePolicy.interactiveMaximum {
+            return "위 끝에서 1초 유지 · 오브제 고정"
+        }
+        if feedback.value <= SimplifiedBrightnessModePolicy.interactiveMinimum {
+            return "아래 끝에서 1초 유지 · 매이트 고정"
+        }
+        return "끝에서 1초 유지하면 모드 고정"
     }
 }
 
@@ -1283,6 +1428,19 @@ private struct DashboardCanvas: View {
                     hourMode: hourMode
                 )
                 .panelTransform(layout.clock, canvasSize: canvasSize)
+
+                ClockSecondsPanel(
+                    date: context.date,
+                    isPortrait: isPortrait,
+                    isDimmed: isDimmed,
+                    clockFont: clockFont,
+                    showsBackground: !ClockSecondsPlacement.isOverlappingClock(
+                        layout: layout,
+                        canvasSize: canvasSize,
+                        isPortrait: isPortrait
+                    )
+                )
+                .panelTransform(layout.seconds, canvasSize: canvasSize)
 
                 StandDatePanel(date: context.date, isPortrait: isPortrait)
                     .panelTransform(layout.date, canvasSize: canvasSize)
@@ -2012,6 +2170,25 @@ private struct ScreenEditorView: View {
                     }
                 }
 
+                EditablePanel(
+                    transform: $layout.seconds,
+                    canvasSize: proxy.size
+                ) {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        ClockSecondsPanel(
+                            date: context.date,
+                            isPortrait: isPortrait,
+                            isDimmed: false,
+                            clockFont: clockFont,
+                            showsBackground: !ClockSecondsPlacement.isOverlappingClock(
+                                layout: layout,
+                                canvasSize: proxy.size,
+                                isPortrait: isPortrait
+                            )
+                        )
+                    }
+                }
+
                 editableWeatherPanels(
                     canvasSize: proxy.size
                 )
@@ -2439,7 +2616,7 @@ extension StandControlKind {
         switch self {
         case .flashlight: "플래시"
         case .brightness: "밝기 기준"
-        case .stopDetection: "자동 돌봄 끄기"
+        case .stopDetection: "자동 기능 끄기"
         case .recordings: "수면 소리"
         case .settings: "설정"
         }
@@ -2759,7 +2936,8 @@ enum PanelEditingPolicy {
             (layout.date, 36),
             (layout.status, StatusPanelMetrics.height),
             (layout.battery, 36),
-            (layout.clock, isPortrait ? 92 : 116)
+            (layout.clock, isPortrait ? 92 : 116),
+            (layout.seconds, isPortrait ? 36 : 42)
         ]
         if includesRadio {
             panels.append((layout.radio, InternetRadioPanelMetrics.height))
@@ -3033,7 +3211,7 @@ private struct FlipClockFace: View {
     var hourMode: ClockHourMode = .twentyFour
 
     var body: some View {
-        let components = Calendar.current.dateComponents([.hour, .minute, .second], from: date)
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
         let rawHour = components.hour ?? 0
         let displayHour = hourMode == .twelve ? (rawHour % 12 == 0 ? 12 : rawHour % 12) : rawHour
         HStack(spacing: isPortrait ? 8 : 12) {
@@ -3047,30 +3225,71 @@ private struct FlipClockFace: View {
                     .font(clockFont.font(size: isPortrait ? 48 : 62))
                     .opacity(isDimmed ? 0.42 : 0.72)
                     .offset(y: clockFont.clockVerticalOffset(size: isPortrait ? 48 : 62))
-                ZStack(alignment: .bottomTrailing) {
-                    FlipClockCard(
-                        value: String(format: "%02d", components.minute ?? 0),
-                        isPortrait: isPortrait,
-                        isDimmed: isDimmed,
-                        clockFont: clockFont
-                    )
-
-                    Text(String(format: "%02d", components.second ?? 0))
-                        .font(clockFont.font(size: isPortrait ? 13 : 16))
-                        .monospacedDigit()
-                        .foregroundStyle(
-                            .white.opacity(FlipClockSecondStyle.opacity(isDimmed: isDimmed))
-                        )
-                        .contentTransition(.numericText())
-                        .frame(width: isPortrait ? 24 : 30)
-                        .padding(.trailing, isPortrait ? 20 : 26)
-                        .padding(.bottom, isPortrait ? 7 : 9)
-                }
+                FlipClockCard(
+                    value: String(format: "%02d", components.minute ?? 0),
+                    isPortrait: isPortrait,
+                    isDimmed: isDimmed,
+                    clockFont: clockFont
+                )
         }
         .scaleEffect(clockScale)
         .frame(height: (isPortrait ? 92 : 116) * clockScale)
         .animation(.snappy(duration: 0.42), value: components.minute)
-        .animation(.easeInOut(duration: 0.18), value: components.second)
+    }
+}
+
+enum ClockSecondsPlacement {
+    static func isOverlappingClock(
+        layout: StandScreenLayout,
+        canvasSize: CGSize,
+        isPortrait: Bool
+    ) -> Bool {
+        let clockWidth: CGFloat = isPortrait ? 288 : 374
+        let clockHeight: CGFloat = isPortrait ? 92 : 116
+        let clockCenter = CGPoint(
+            x: canvasSize.width / 2 + CGFloat(layout.clock.x) * canvasSize.width,
+            y: canvasSize.height / 2 + CGFloat(layout.clock.y) * canvasSize.height
+        )
+        let secondsCenter = CGPoint(
+            x: canvasSize.width / 2 + CGFloat(layout.seconds.x) * canvasSize.width,
+            y: canvasSize.height / 2 + CGFloat(layout.seconds.y) * canvasSize.height
+        )
+        let clockBounds = CGRect(
+            x: clockCenter.x - clockWidth * CGFloat(layout.clock.scale) / 2,
+            y: clockCenter.y - clockHeight * CGFloat(layout.clock.scale) / 2,
+            width: clockWidth * CGFloat(layout.clock.scale),
+            height: clockHeight * CGFloat(layout.clock.scale)
+        )
+        return clockBounds.insetBy(dx: -8, dy: -8).contains(secondsCenter)
+    }
+}
+
+private struct ClockSecondsPanel: View {
+    let date: Date
+    let isPortrait: Bool
+    let isDimmed: Bool
+    let clockFont: ClockFontChoice
+    let showsBackground: Bool
+
+    var body: some View {
+        Text(date, format: .dateTime.second(.twoDigits))
+            .font(clockFont.font(size: showsBackground ? (isPortrait ? 18 : 22) : (isPortrait ? 13 : 16)))
+            .monospacedDigit()
+            .foregroundStyle(.white.opacity(FlipClockSecondStyle.opacity(isDimmed: isDimmed)))
+            .contentTransition(.numericText())
+            .offset(y: clockFont.clockVerticalOffset(size: showsBackground ? (isPortrait ? 18 : 22) : (isPortrait ? 13 : 16)))
+            .frame(width: isPortrait ? 48 : 58, height: isPortrait ? 36 : 42)
+            .background {
+                if showsBackground {
+                    FlipPanelSurface(
+                        isDimmed: isDimmed,
+                        cornerRadius: isPortrait ? 11 : 13,
+                        splitGap: isPortrait ? 2 : 2.5
+                    )
+                }
+            }
+            .animation(.easeInOut(duration: 0.18), value: date)
+            .accessibilityLabel("초 (date.formatted(.dateTime.second(.twoDigits)))")
     }
 }
 

@@ -77,7 +77,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(settings.clockHourMode, .twelve)
         XCTAssertEqual(settings.portraitLayout, .portrait)
         XCTAssertEqual(settings.landscapeLayout, .landscape)
-        XCTAssertEqual(settings.brightnessModeThreshold, 0.2)
+        XCTAssertEqual(settings.brightnessModeThreshold, 0.3)
         XCTAssertEqual(settings.modePreference, .automatic)
         XCTAssertFalse(settings.cameraAmbientSensingEnabled)
         XCTAssertNil(settings.internetRadio)
@@ -666,6 +666,21 @@ final class AudioAnalysisTests: XCTestCase {
         let legacyData = try JSONSerialization.data(withJSONObject: legacyValues)
         let legacyDecoded = try JSONDecoder().decode(AppSettings.self, from: legacyData)
         XCTAssertEqual(legacyDecoded.displayTheme, .color)
+        XCTAssertEqual(Set(StandDisplayTheme.allCases), Set([.color, .grayscale, .midnight, .sage]))
+    }
+
+    func testLegacyScreenLayoutWithoutSecondsUsesClockOverlayPlacement() throws {
+        let encoded = try JSONEncoder().encode(StandScreenLayout.portrait)
+        var legacy = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        legacy.removeValue(forKey: "seconds")
+
+        let decoded = try JSONDecoder().decode(
+            StandScreenLayout.self,
+            from: JSONSerialization.data(withJSONObject: legacy)
+        )
+        XCTAssertEqual(decoded.seconds, PanelTransform(x: 0.27, y: 0.036, scale: 1))
     }
 
     func testWeatherPanelsMergeAtFortyPercentOverlap() {
@@ -1232,11 +1247,11 @@ final class AudioAnalysisTests: XCTestCase {
 
     func testSimplifiedBrightnessModeBoundariesAndTapTargets() {
         XCTAssertEqual(
-            SimplifiedBrightnessModePolicy.mode(for: 0.2, preference: .automatic),
+            SimplifiedBrightnessModePolicy.mode(for: 0.3, preference: .automatic),
             .sleeping
         )
         XCTAssertEqual(
-            SimplifiedBrightnessModePolicy.mode(for: 0.201, preference: .automatic),
+            SimplifiedBrightnessModePolicy.mode(for: 0.301, preference: .automatic),
             .stand
         )
         XCTAssertEqual(SimplifiedBrightnessModePolicy.preference(for: 0), .mate)
@@ -1247,22 +1262,112 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(SimplifiedBrightnessModePolicy.tapLevel(from: .sleeping), 0.9)
     }
 
-    func testHalfScreenVerticalDragCoversTheFullBrightnessRange() {
+    func testCameraBrightnessUsesSustainedBrightReadingWithoutReactingToAmbiguousLight() {
+        let now = Date()
+        XCTAssertEqual(AmbientCameraModePolicy.minimumObservationDuration, 2)
+        XCTAssertEqual(
+            AmbientCameraModePolicy.target(
+                current: .sleeping,
+                fallback: .sleeping,
+                reading: AmbientBrightnessReading(
+                    value: AmbientCameraModePolicy.brightThreshold,
+                    measuredAt: now,
+                    cameraPosition: .front
+                ),
+                now: now
+            ),
+            .stand
+        )
+        XCTAssertEqual(
+            AmbientCameraModePolicy.target(
+                current: .sleeping,
+                fallback: .sleeping,
+                reading: AmbientBrightnessReading(
+                    value: 0.22,
+                    measuredAt: now,
+                    cameraPosition: .front
+                ),
+                now: now
+            ),
+            .sleeping
+        )
+        XCTAssertEqual(
+            AmbientCameraModePolicy.target(
+                current: .stand,
+                fallback: .stand,
+                reading: AmbientBrightnessReading(
+                    value: AmbientCameraModePolicy.darkThreshold,
+                    measuredAt: now,
+                    cameraPosition: .front
+                ),
+                now: now
+            ),
+            .sleeping
+        )
+    }
+
+    func testQuarterScreenVerticalDragStopsAtInteractiveEdgeUntilHeld() {
+        XCTAssertEqual(SimplifiedBrightnessModePolicy.verticalDragTravelRatio, 0.25)
+        XCTAssertEqual(SimplifiedBrightnessModePolicy.fixedEdgeHoldDuration, 1)
         XCTAssertEqual(
             SimplifiedBrightnessModePolicy.level(
                 startingAt: 0.5,
-                verticalTranslation: -400,
+                verticalTranslation: -200,
                 viewportHeight: 800
             ),
-            1
+            0.99
         )
         XCTAssertEqual(
             SimplifiedBrightnessModePolicy.level(
                 startingAt: 0.5,
-                verticalTranslation: 400,
+                verticalTranslation: 200,
                 viewportHeight: 800
             ),
-            0
+            0.01
+        )
+        XCTAssertEqual(
+            SimplifiedBrightnessModePolicy.fixedEdge(
+                startingAt: 0.5,
+                verticalTranslation: -200,
+                viewportHeight: 800
+            ),
+            .object
+        )
+        XCTAssertEqual(
+            SimplifiedBrightnessModePolicy.fixedEdge(
+                startingAt: 0.5,
+                verticalTranslation: 200,
+                viewportHeight: 800
+            ),
+            .mate
+        )
+        XCTAssertNil(
+            SimplifiedBrightnessModePolicy.fixedEdge(
+                startingAt: 0.5,
+                verticalTranslation: -90,
+                viewportHeight: 800
+            )
+        )
+        XCTAssertEqual(SimplifiedBrightnessModePolicy.preference(for: 0.99), .automatic)
+        XCTAssertEqual(SimplifiedBrightnessModePolicy.preference(for: 0.01), .automatic)
+    }
+
+    func testSecondsPanelLosesItsBackgroundWhenPlacedOnClock() {
+        var layout = StandScreenLayout.portrait
+        XCTAssertTrue(
+            ClockSecondsPlacement.isOverlappingClock(
+                layout: layout,
+                canvasSize: CGSize(width: 393, height: 852),
+                isPortrait: true
+            )
+        )
+        layout.seconds = PanelTransform(x: -0.4, y: -0.35, scale: 1)
+        XCTAssertFalse(
+            ClockSecondsPlacement.isOverlappingClock(
+                layout: layout,
+                canvasSize: CGSize(width: 393, height: 852),
+                isPortrait: true
+            )
         )
     }
 

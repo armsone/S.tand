@@ -61,9 +61,13 @@ enum EnvironmentDisplayMode: Equatable {
 }
 
 enum SimplifiedBrightnessModePolicy {
-    static let mateUpperBound = 0.2
+    static let mateUpperBound = 0.3
     static let mateTapLevel = 0.1
     static let objectTapLevel = 0.9
+    static let verticalDragTravelRatio = 0.25
+    static let interactiveMinimum = 0.01
+    static let interactiveMaximum = 0.99
+    static let fixedEdgeHoldDuration: TimeInterval = 1
 
     static func clamped(_ level: Double) -> Double {
         min(1, max(0, level))
@@ -74,8 +78,35 @@ enum SimplifiedBrightnessModePolicy {
         verticalTranslation: CGFloat,
         viewportHeight: CGFloat
     ) -> Double {
-        let travel = max(1, viewportHeight * 0.5)
-        return clamped(startingLevel - Double(verticalTranslation / travel))
+        min(interactiveMaximum, max(interactiveMinimum, rawLevel(
+            startingAt: startingLevel,
+            verticalTranslation: verticalTranslation,
+            viewportHeight: viewportHeight
+        )))
+    }
+
+    static func rawLevel(
+        startingAt startingLevel: Double,
+        verticalTranslation: CGFloat,
+        viewportHeight: CGFloat
+    ) -> Double {
+        let travel = max(1, viewportHeight * verticalDragTravelRatio)
+        return startingLevel - Double(verticalTranslation / travel)
+    }
+
+    static func fixedEdge(
+        startingAt startingLevel: Double,
+        verticalTranslation: CGFloat,
+        viewportHeight: CGFloat
+    ) -> BrightnessFixedEdge? {
+        let raw = rawLevel(
+            startingAt: startingLevel,
+            verticalTranslation: verticalTranslation,
+            viewportHeight: viewportHeight
+        )
+        if raw >= 1 { return .object }
+        if raw <= 0 { return .mate }
+        return nil
     }
 
     static func preference(for level: Double) -> StandModePreference {
@@ -98,6 +129,18 @@ enum SimplifiedBrightnessModePolicy {
 
     static func tapLevel(from mode: EnvironmentDisplayMode) -> Double {
         mode == .stand ? mateTapLevel : objectTapLevel
+    }
+}
+
+enum BrightnessFixedEdge: Equatable {
+    case mate
+    case object
+
+    var level: Double {
+        switch self {
+        case .mate: 0
+        case .object: 1
+        }
     }
 }
 
@@ -138,6 +181,27 @@ struct AmbientBrightnessReading: Equatable {
     let cameraPosition: AVCaptureDevice.Position
 
     var isDark: Bool { value < AutomaticModeTransitionPolicy.cameraDarkThreshold }
+}
+
+enum AmbientCameraModePolicy {
+    static let darkThreshold = 0.16
+    static let brightThreshold = 0.28
+    static let maximumReadingAge: TimeInterval = 20
+    static let minimumObservationDuration: TimeInterval = 2
+
+    static func target(
+        current: EnvironmentDisplayMode,
+        fallback: EnvironmentDisplayMode,
+        reading: AmbientBrightnessReading?,
+        now: Date = Date()
+    ) -> EnvironmentDisplayMode {
+        guard let reading,
+              now.timeIntervalSince(reading.measuredAt) <= maximumReadingAge
+        else { return fallback }
+        if reading.value >= brightThreshold { return .stand }
+        if reading.value <= darkThreshold { return .sleeping }
+        return current
+    }
 }
 
 enum AutomaticModeTransitionPolicy {
@@ -417,7 +481,6 @@ final class StandViewModel: ObservableObject {
         initialSettings.lampIntensity = displayBrightness
         initialSettings.brightnessModeThreshold = SimplifiedBrightnessModePolicy.mateUpperBound
         initialSettings.automaticDimmingEnabled = false
-        initialSettings.cameraAmbientSensingEnabled = false
         settings.value = initialSettings
         applyEnvironmentDisplayMode(.stand, performTransition: false)
         UIApplication.shared.isIdleTimerDisabled = true
@@ -428,6 +491,10 @@ final class StandViewModel: ObservableObject {
         controlsTask?.cancel()
         controlsVisible = true
         applyBaseBrightness(displayBrightness, animated: false)
+        if settings.value.cameraAmbientSensingEnabled {
+            measureAmbientBrightnessIfNeeded()
+            startAmbientSamplingIfNeeded()
+        }
     }
 
     func stopNightSession() {
@@ -478,6 +545,10 @@ final class StandViewModel: ObservableObject {
         controlsTask?.cancel()
         controlsVisible = true
         applyBaseBrightness(displayBrightness, animated: false)
+        if settings.value.cameraAmbientSensingEnabled {
+            measureAmbientBrightnessIfNeeded()
+            startAmbientSamplingIfNeeded()
+        }
     }
 
     func appWillResignActive() {
@@ -740,10 +811,18 @@ final class StandViewModel: ObservableObject {
         performTransition: Bool
     ) {
         let resolvedPreference = preference ?? settings.value.modePreference
-        let newMode = SimplifiedBrightnessModePolicy.mode(
+        let fallbackMode = SimplifiedBrightnessModePolicy.mode(
             for: displayBrightness,
             preference: resolvedPreference
         )
+        let newMode = resolvedPreference == .automatic
+            && settings.value.cameraAmbientSensingEnabled
+            ? AmbientCameraModePolicy.target(
+                current: environmentDisplayMode,
+                fallback: fallbackMode,
+                reading: lastAmbientBrightnessReading
+            )
+            : fallbackMode
         guard newMode != environmentDisplayMode else {
             modeTransitionTask?.cancel()
             modeTransitionTask = nil
@@ -836,7 +915,7 @@ final class StandViewModel: ObservableObject {
         }
         ambientSamplingTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(30))
+                try? await Task.sleep(for: .seconds(3))
                 guard let self, !Task.isCancelled else { return }
                 if self.ambientCameraState != .measuring,
                    self.experienceMode != .startled {
@@ -1047,6 +1126,7 @@ private final class AmbientCameraBrightnessService: NSObject,
     private var completion: ((AmbientBrightnessReading?, AmbientCameraState) -> Void)?
     private var samples: [Double] = []
     private var receivedFrameCount = 0
+    private var measurementStartedAt: TimeInterval?
     private var timeoutWorkItem: DispatchWorkItem?
 
     var currentState: AmbientCameraState {
@@ -1111,6 +1191,7 @@ private final class AmbientCameraBrightnessService: NSObject,
         self.completion = completion
         samples = []
         receivedFrameCount = 0
+        measurementStartedAt = ProcessInfo.processInfo.systemUptime
 
         let position = preferredCameraPosition()
         guard let device = AVCaptureDevice.default(
@@ -1171,7 +1252,12 @@ private final class AmbientCameraBrightnessService: NSObject,
 
         if activeDevice?.isAdjustingExposure == true, receivedFrameCount < 20 { return }
         samples.append(sceneBrightness(pixelBuffer: buffer))
-        guard samples.count >= 5, let reading = makeReading() else { return }
+        let observedDuration = ProcessInfo.processInfo.systemUptime
+            - (measurementStartedAt ?? ProcessInfo.processInfo.systemUptime)
+        guard observedDuration >= AmbientCameraModePolicy.minimumObservationDuration,
+              samples.count >= 5,
+              let reading = makeReading()
+        else { return }
         finish(reading: reading, state: .ready)
     }
 
@@ -1233,6 +1319,7 @@ private final class AmbientCameraBrightnessService: NSObject,
         activeDevice = nil
         samples = []
         receivedFrameCount = 0
+        measurementStartedAt = nil
         let callback = completion
         completion = nil
         guard notify, let callback else { return }

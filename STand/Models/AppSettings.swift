@@ -121,9 +121,31 @@ enum ClockHourMode: String, Codable, CaseIterable {
 enum StandDisplayTheme: String, Codable, CaseIterable {
     case color
     case grayscale
+    case midnight
+    case sage
 
     mutating func toggle() {
-        self = self == .color ? .grayscale : .color
+        let themes = Self.allCases
+        let index = themes.firstIndex(of: self) ?? 0
+        self = themes[(index + 1) % themes.count]
+    }
+
+    var title: String {
+        switch self {
+        case .color: "오렌지"
+        case .grayscale: "그레이"
+        case .midnight: "미드나이트"
+        case .sage: "세이지"
+        }
+    }
+
+    var accentColor: Color {
+        switch self {
+        case .color: .orange
+        case .grayscale: .white
+        case .midnight: Color(red: 0.38, green: 0.68, blue: 1.0)
+        case .sage: Color(red: 0.55, green: 0.78, blue: 0.62)
+        }
     }
 }
 
@@ -188,6 +210,7 @@ struct StandScreenLayout: Codable, Equatable {
     )
 
     var clock: PanelTransform
+    var seconds: PanelTransform
     var weatherIcon: PanelTransform
     var weatherTemperature: PanelTransform
     var weatherCondition: PanelTransform
@@ -201,6 +224,7 @@ struct StandScreenLayout: Codable, Equatable {
 
     init(
         clock: PanelTransform = .init(x: 0, y: 0),
+        seconds: PanelTransform = .init(x: 0.27, y: 0.036),
         weatherIcon: PanelTransform,
         weatherTemperature: PanelTransform,
         weatherCondition: PanelTransform,
@@ -213,6 +237,7 @@ struct StandScreenLayout: Codable, Equatable {
         controlOrder: [StandControlKind] = StandControlKind.defaultOrder
     ) {
         self.clock = clock
+        self.seconds = seconds
         self.weatherIcon = weatherIcon
         self.weatherTemperature = weatherTemperature
         self.weatherCondition = weatherCondition
@@ -226,7 +251,7 @@ struct StandScreenLayout: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case clock
+        case clock, seconds
         case weatherIcon, weatherTemperature, weatherCondition
         case date, status, brightnessRule, battery, radio, weatherGroupIDs, controlOrder
     }
@@ -235,6 +260,8 @@ struct StandScreenLayout: Codable, Equatable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         clock = try values.decodeIfPresent(PanelTransform.self, forKey: .clock)
             ?? .init(x: 0, y: 0)
+        seconds = try values.decodeIfPresent(PanelTransform.self, forKey: .seconds)
+            ?? .init(x: 0.27, y: 0.036)
         weatherIcon = try values.decode(PanelTransform.self, forKey: .weatherIcon)
         weatherTemperature = try values.decode(PanelTransform.self, forKey: .weatherTemperature)
         weatherCondition = try values.decode(PanelTransform.self, forKey: .weatherCondition)
@@ -254,6 +281,7 @@ struct StandScreenLayout: Codable, Equatable {
 
     static let portrait = StandScreenLayout(
         clock: .init(x: 0, y: 0),
+        seconds: .init(x: 0.27, y: 0.036),
         weatherIcon: .init(x: 0, y: -0.22811053984575841, scale: 0.86922719107523572),
         weatherTemperature: .init(x: 0, y: -0.22811053984575841, scale: 0.86922719107523572),
         weatherCondition: .init(x: 0, y: -0.22811053984575841, scale: 0.86922719107523572),
@@ -270,6 +298,7 @@ struct StandScreenLayout: Codable, Equatable {
 
     static let landscape = StandScreenLayout(
         clock: .init(x: 0, y: 0.07155322862129146, scale: 1.2810187063251741),
+        seconds: .init(x: 0.176, y: 0.17, scale: 1.1),
         weatherIcon: .init(x: 0, y: -0.25582024432809763, scale: 0.68640335461830571),
         weatherTemperature: .init(x: 0, y: -0.25582024432809763, scale: 0.68640335461830571),
         weatherCondition: .init(x: 0, y: -0.25582024432809763, scale: 0.68640335461830571),
@@ -294,7 +323,7 @@ struct AppSettings: Codable, Equatable {
     var displayTheme = StandDisplayTheme.color
     var portraitLayout = StandScreenLayout.portrait
     var landscapeLayout = StandScreenLayout.landscape
-    var brightnessModeThreshold = 0.2
+    var brightnessModeThreshold = 0.3
     var holdDuration = 5.0
     var fadeDuration = 30.0
     var automaticDimmingEnabled = false
@@ -321,7 +350,7 @@ struct AppSettings: Codable, Equatable {
         displayTheme: StandDisplayTheme = .color,
         portraitLayout: StandScreenLayout = .portrait,
         landscapeLayout: StandScreenLayout = .landscape,
-        brightnessModeThreshold: Double = 0.2,
+        brightnessModeThreshold: Double = 0.3,
         holdDuration: Double = 5,
         fadeDuration: Double = 30,
         automaticDimmingEnabled: Bool = false,
@@ -421,7 +450,7 @@ struct AppSettings: Codable, Equatable {
         ) ?? .landscape
         brightnessModeThreshold = min(1, max(
             0,
-            try container.decodeIfPresent(Double.self, forKey: .brightnessModeThreshold) ?? 0.2
+            try container.decodeIfPresent(Double.self, forKey: .brightnessModeThreshold) ?? 0.3
         ))
         holdDuration = min(300, max(
             5,
@@ -547,7 +576,7 @@ enum AppVersion {
     }
 
     static var build: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.10.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.19.0"
     }
 
     static var display: String { "\(marketing) (\(build))" }

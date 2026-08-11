@@ -204,7 +204,7 @@ struct RecordingsView: View {
         .grayscale(theme == .grayscale ? 1 : 0)
     }
 
-    private var accent: Color { .orange }
+    private var accent: Color { theme.accentColor }
 
     private var summaryCard: some View {
         HStack(spacing: 14) {
