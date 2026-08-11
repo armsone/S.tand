@@ -72,12 +72,12 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(settings.clockScale, 1)
         XCTAssertEqual(settings.clockFont, .tenada)
         XCTAssertTrue(settings.preventAutoDimmingWhenScreenBright)
-        XCTAssertTrue(settings.automaticDimmingEnabled)
+        XCTAssertFalse(settings.automaticDimmingEnabled)
         XCTAssertTrue(settings.multiStimulusWakeEnabled)
         XCTAssertEqual(settings.clockHourMode, .twelve)
         XCTAssertEqual(settings.portraitLayout, .portrait)
         XCTAssertEqual(settings.landscapeLayout, .landscape)
-        XCTAssertEqual(settings.brightnessModeThreshold, 0.35)
+        XCTAssertEqual(settings.brightnessModeThreshold, 0.2)
         XCTAssertEqual(settings.modePreference, .automatic)
         XCTAssertFalse(settings.cameraAmbientSensingEnabled)
         XCTAssertNil(settings.internetRadio)
@@ -317,7 +317,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(portrait.radio, StandScreenLayout.defaultRadioPanelTransform)
         XCTAssertEqual(
             portrait.controlOrder,
-            [.flashlight, .brightness, .stopDetection, .recordings, .settings]
+            [.stopDetection, .recordings, .settings]
         )
 
         let landscape = AppSettings.recommended.landscapeLayout
@@ -347,7 +347,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(landscape.radio, StandScreenLayout.defaultRadioPanelTransform)
         XCTAssertEqual(
             landscape.controlOrder,
-            [.flashlight, .stopDetection, .brightness, .recordings, .settings]
+            [.stopDetection, .recordings, .settings]
         )
     }
 
@@ -355,12 +355,12 @@ final class AudioAnalysisTests: XCTestCase {
         var portrait = StandScreenLayout.portrait
         portrait.radio = PanelTransform(x: -0.18, y: 0.24, scale: 0.52)
         portrait.controlOrder = [
-            .settings, .recordings, .flashlight, .brightness, .stopDetection
+            .settings, .recordings, .stopDetection
         ]
         var landscape = StandScreenLayout.landscape
         landscape.radio = PanelTransform(x: 0.31, y: -0.12, scale: 1.35)
         landscape.controlOrder = [
-            .brightness, .flashlight, .stopDetection, .settings, .recordings
+            .recordings, .stopDetection, .settings
         ]
 
         let decoded = try JSONDecoder().decode(
@@ -393,7 +393,7 @@ final class AudioAnalysisTests: XCTestCase {
 
         XCTAssertEqual(
             decoded.controlOrder,
-            [.settings, .flashlight, .brightness, .stopDetection, .recordings]
+            [.settings, .stopDetection, .recordings]
         )
     }
 
@@ -419,7 +419,7 @@ final class AudioAnalysisTests: XCTestCase {
                 availableWidth: 381,
                 isPortrait: true
             ).count,
-            2
+            1
         )
         XCTAssertEqual(
             BottomControlLayoutPolicy.rows(
@@ -500,7 +500,7 @@ final class AudioAnalysisTests: XCTestCase {
                 availableWidth: availableWidth,
                 isPortrait: true
             ).count,
-            2
+            1
         )
         XCTAssertEqual(
             BottomControlLayoutPolicy.rows(
@@ -508,7 +508,7 @@ final class AudioAnalysisTests: XCTestCase {
                 availableWidth: availableWidth,
                 isPortrait: true
             ).count,
-            2
+            1
         )
         XCTAssertEqual(
             BottomControlLayoutPolicy.height(
@@ -516,7 +516,7 @@ final class AudioAnalysisTests: XCTestCase {
                 availableWidth: availableWidth,
                 isPortrait: true
             ),
-            126
+            60
         )
 
         let region = PanelEditingPolicy.editingRegion(
@@ -526,8 +526,8 @@ final class AudioAnalysisTests: XCTestCase {
             controlOrder: StandControlKind.defaultOrder,
             bottomAvailableWidth: availableWidth
         )
-        XCTAssertEqual(region.insets.bottom, 184)
-        XCTAssertEqual(region.frame.maxY, 668)
+        XCTAssertEqual(region.insets.bottom, 118)
+        XCTAssertEqual(region.frame.maxY, 734)
     }
 
     func testOrientationPreferenceRoundTripsThroughSettingsEncoding() throws {
@@ -1203,14 +1203,14 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
-    func testTouchWakeUsesFullTorchWhenLinkedAndNoTorchWhenUnlinked() {
+    func testTorchOnlyRunsForMovementTriggeredStartleMode() {
         XCTAssertEqual(
             LampTorchLightingPolicy.maximumLevel(
                 torchEnabled: true,
                 isMovementTriggered: false,
                 environmentDisplayMode: .sleeping
             ),
-            1
+            0
         )
         XCTAssertEqual(
             LampTorchLightingPolicy.maximumLevel(
@@ -1230,18 +1230,49 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
-    @MainActor
-    func testBrightnessThresholdChangeUsesTheNewPublishedValueImmediately() {
-        let model = StandViewModel()
-        let originalThreshold = model.settings.value.brightnessModeThreshold
-        defer { model.settings.value.brightnessModeThreshold = originalThreshold }
+    func testSimplifiedBrightnessModeBoundariesAndTapTargets() {
+        XCTAssertEqual(
+            SimplifiedBrightnessModePolicy.mode(for: 0.2, preference: .automatic),
+            .sleeping
+        )
+        XCTAssertEqual(
+            SimplifiedBrightnessModePolicy.mode(for: 0.201, preference: .automatic),
+            .stand
+        )
+        XCTAssertEqual(SimplifiedBrightnessModePolicy.preference(for: 0), .mate)
+        XCTAssertEqual(SimplifiedBrightnessModePolicy.preference(for: 0.1), .automatic)
+        XCTAssertEqual(SimplifiedBrightnessModePolicy.preference(for: 0.9), .automatic)
+        XCTAssertEqual(SimplifiedBrightnessModePolicy.preference(for: 1), .object)
+        XCTAssertEqual(SimplifiedBrightnessModePolicy.tapLevel(from: .stand), 0.1)
+        XCTAssertEqual(SimplifiedBrightnessModePolicy.tapLevel(from: .sleeping), 0.9)
+    }
 
-        let brightness = model.displayBrightness
-        model.settings.value.brightnessModeThreshold = brightness - 0.1
-        XCTAssertEqual(model.environmentDisplayMode, .sleeping)
+    func testHalfScreenVerticalDragCoversTheFullBrightnessRange() {
+        XCTAssertEqual(
+            SimplifiedBrightnessModePolicy.level(
+                startingAt: 0.5,
+                verticalTranslation: -400,
+                viewportHeight: 800
+            ),
+            1
+        )
+        XCTAssertEqual(
+            SimplifiedBrightnessModePolicy.level(
+                startingAt: 0.5,
+                verticalTranslation: 400,
+                viewportHeight: 800
+            ),
+            0
+        )
+    }
 
-        model.settings.value.brightnessModeThreshold = brightness + 0.1
-        XCTAssertEqual(model.environmentDisplayMode, .stand)
+    func testSimplifiedControlOrderDropsLegacyBrightnessAndFlashTiles() {
+        XCTAssertEqual(
+            StandControlKind.normalizedOrder([
+                .flashlight, .settings, .brightness, .recordings, .stopDetection
+            ]),
+            [.settings, .recordings, .stopDetection]
+        )
     }
 
     func testAdaptiveNoiseFloorMakesQuietRoomsMoreSensitiveAndNoisyRoomsRelative() {

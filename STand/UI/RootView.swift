@@ -83,24 +83,12 @@ private enum PresentedSheet: String, Identifiable {
     var id: String { rawValue }
 }
 
-private enum BrightnessTarget: Equatable {
-    case lamp
-    case silhouette
-}
-
 private struct BrightnessDragState {
-    let target: BrightnessTarget
     let startingValue: Double
 }
 
 private struct BrightnessFeedback: Equatable {
-    let target: BrightnessTarget
     let value: Double
-}
-
-private enum ScreenAdjustmentAxis {
-    case vertical
-    case horizontal
 }
 
 enum HomeEditorMode: Equatable {
@@ -307,10 +295,6 @@ struct RootView: View {
     @State private var brightnessDragState: BrightnessDragState?
     @State private var brightnessFeedback: BrightnessFeedback?
     @State private var brightnessFeedbackTask: Task<Void, Never>?
-    @State private var screenAdjustmentAxis: ScreenAdjustmentAxis?
-    @State private var holdDurationGestureStart: Double?
-    @State private var holdDurationFeedback: Double?
-    @State private var holdDurationFeedbackTask: Task<Void, Never>?
     @State private var clockScaleGestureStart: Double?
     @State private var clockScaleFeedback: Double?
     @State private var clockScaleFeedbackTask: Task<Void, Never>?
@@ -380,10 +364,6 @@ struct RootView: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
 
-                    if let holdDurationFeedback {
-                        HoldDurationFeedbackView(duration: holdDurationFeedback)
-                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                    }
                 }
 
                 if isEditingScreen {
@@ -528,17 +508,12 @@ struct RootView: View {
     private func resetTransientInterface() {
         brightnessFeedbackTask?.cancel()
         clockScaleFeedbackTask?.cancel()
-        holdDurationFeedbackTask?.cancel()
 
         brightnessFeedbackTask = nil
         clockScaleFeedbackTask = nil
-        holdDurationFeedbackTask = nil
 
         brightnessDragState = nil
         brightnessFeedback = nil
-        screenAdjustmentAxis = nil
-        holdDurationGestureStart = nil
-        holdDurationFeedback = nil
         clockScaleGestureStart = nil
         clockScaleFeedback = nil
     }
@@ -669,21 +644,7 @@ struct RootView: View {
     }
 
     private var dashboardStatusText: String {
-        if model.experienceMode == .startled {
-            return "현재 상태 · 화들짝 모드"
-        }
-        if model.environmentDisplayMode == .sleeping {
-            return switch model.lampPhase {
-            case .off: "현재 상태 · 매이트 모드"
-            case .holding: "현재 상태 · 매이트 전환 대기"
-            case .fading: "현재 상태 · 매이트 감광 중"
-            }
-        }
-        return switch model.lampPhase {
-        case .off: "현재 상태 · 매이트 모드"
-        case .holding: "현재 상태 · 오브제 모드"
-        case .fading: "현재 상태 · 오브제 감광 중"
-        }
+        model.experienceMode.title
     }
 
     private var internetRadioEditorIdentity: String {
@@ -718,68 +679,36 @@ struct RootView: View {
         DragGesture(minimumDistance: 10)
             .onChanged { value in
                 guard !isEditingScreen else { return }
-                if screenAdjustmentAxis == nil {
-                    screenAdjustmentAxis = abs(value.translation.height) > abs(value.translation.width)
-                        ? .vertical
-                        : .horizontal
-                }
-
-                guard screenAdjustmentAxis == .vertical else {
-                    updateHoldDuration(with: value.translation.width)
-                    return
-                }
+                guard abs(value.translation.height) > abs(value.translation.width) else { return }
 
                 let state: BrightnessDragState
                 if let brightnessDragState {
                     state = brightnessDragState
                 } else {
-                    let target: BrightnessTarget = model.isDisplayDark ? .silhouette : .lamp
-                    let startingValue = target == .silhouette
-                        ? settings.value.silhouetteIntensity
-                        : settings.value.lampIntensity
-                    state = BrightnessDragState(target: target, startingValue: startingValue)
+                    state = BrightnessDragState(startingValue: model.displayBrightness)
                     brightnessDragState = state
-                    if target == .lamp {
-                        model.beginManualLampAdjustment()
-                    }
+                    model.beginBrightnessAdjustment()
                 }
 
-                let change = -value.translation.height / 280
-                let adjustedValue: Double
-                switch state.target {
-                case .lamp:
-                    adjustedValue = min(1, max(0.15, state.startingValue + change))
-                    model.updateManualLampBrightness(adjustedValue)
-                case .silhouette:
-                    adjustedValue = min(0.2, max(0.005, state.startingValue + change * 0.2))
-                    settings.value.silhouetteIntensity = adjustedValue
-                }
+                let adjustedValue = SimplifiedBrightnessModePolicy.level(
+                    startingAt: state.startingValue,
+                    verticalTranslation: value.translation.height,
+                    viewportHeight: currentCanvasSize.height
+                )
+                model.updateBrightnessLevel(adjustedValue)
 
                 brightnessFeedbackTask?.cancel()
                 withAnimation(.easeOut(duration: 0.12)) {
-                    brightnessFeedback = BrightnessFeedback(
-                        target: state.target,
-                        value: adjustedValue
-                    )
+                    brightnessFeedback = BrightnessFeedback(value: adjustedValue)
                 }
             }
             .onEnded { _ in
                 guard !isEditingScreen else { return }
-                switch screenAdjustmentAxis {
-                case .vertical:
-                    if brightnessDragState?.target == .lamp {
-                        model.endManualLampAdjustment()
-                    }
+                if brightnessDragState != nil {
+                    model.endBrightnessAdjustment()
                     brightnessDragState = nil
                     scheduleBrightnessFeedbackHide()
-                case .horizontal:
-                    holdDurationGestureStart = nil
-                    model.activateLamp()
-                    scheduleHoldDurationFeedbackHide()
-                case nil:
-                    break
                 }
-                screenAdjustmentAxis = nil
             }
     }
 
@@ -817,35 +746,9 @@ struct RootView: View {
     }
 
     private func handleScreenTap() {
-                guard !isEditingScreen else { return }
-                if model.isNightSessionActive {
-                    if ScreenTapPolicy.action(for: model.lampPhase) == .brighten {
-                        model.activateLamp()
-                        model.revealControls()
-                    } else {
-                        model.dimLampNow()
-                    }
-                }
-    }
-
-    private func updateHoldDuration(with horizontalTranslation: CGFloat) {
-        let startingValue: Double
-        if let holdDurationGestureStart {
-            startingValue = holdDurationGestureStart
-        } else {
-            startingValue = settings.value.holdDuration
-            holdDurationGestureStart = startingValue
-        }
-
-        let duration = HoldDurationAdjustment.value(
-            startingAt: startingValue,
-            translation: horizontalTranslation
-        )
-        settings.value.holdDuration = duration
-        holdDurationFeedbackTask?.cancel()
-        withAnimation(.easeOut(duration: 0.12)) {
-            holdDurationFeedback = duration
-        }
+        guard !isEditingScreen, model.isNightSessionActive else { return }
+        model.toggleObjectMateMode()
+        model.revealControls()
     }
 
     private var clockMagnificationGesture: some Gesture {
@@ -929,19 +832,6 @@ struct RootView: View {
         }
     }
 
-    private func scheduleHoldDurationFeedbackHide() {
-        holdDurationFeedbackTask?.cancel()
-        holdDurationFeedbackTask = Task {
-            try? await Task.sleep(for: .seconds(1.2))
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.25)) {
-                    holdDurationFeedback = nil
-                }
-            }
-        }
-    }
-
     @ViewBuilder
     private func bottomControls(isPortrait: Bool, availableWidth: CGFloat) -> some View {
         if model.isNightSessionActive, !model.controlsVisible {
@@ -993,8 +883,9 @@ struct RootView: View {
         let order = isPortrait
             ? settings.value.portraitLayout.controlOrder
             : settings.value.landscapeLayout.controlOrder
-        guard !model.isNightSessionActive else { return order }
-        return order.filter { ![.flashlight, .brightness, .stopDetection].contains($0) }
+        let simplifiedOrder = order.filter { ![.flashlight, .brightness].contains($0) }
+        guard !model.isNightSessionActive else { return simplifiedOrder }
+        return simplifiedOrder.filter { $0 != .stopDetection }
     }
 
     @ViewBuilder
@@ -1147,20 +1038,22 @@ private struct BrightnessFeedbackView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: feedback.target == .lamp ? "sun.max.fill" : "moon.stars.fill")
+            Image(systemName: feedback.value <= SimplifiedBrightnessModePolicy.mateUpperBound
+                ? "moon.stars.fill"
+                : "sun.max.fill")
                 .font(.title2)
 
-            Text(feedback.target == .lamp ? "화면 조명 밝기" : "슬리핑 모드 밝기")
+            Text(modeTitle)
                 .font(.caption.weight(.semibold))
 
-            ProgressView(value: normalizedValue)
+            ProgressView(value: feedback.value)
                 .tint(.white.opacity(0.82))
                 .frame(width: 120)
 
             Text("\(displayPercent)%")
                 .font(.caption2.monospacedDigit())
         }
-        .foregroundStyle(.white.opacity(feedback.target == .lamp ? 0.86 : 0.34))
+        .foregroundStyle(.white.opacity(0.86))
         .padding(.horizontal, 22)
         .padding(.vertical, 16)
         .background(.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -1168,15 +1061,16 @@ private struct BrightnessFeedbackView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var normalizedValue: Double {
-        switch feedback.target {
-        case .lamp: (feedback.value - 0.15) / 0.85
-        case .silhouette: (feedback.value - 0.005) / 0.195
-        }
+    private var modeTitle: String {
+        if feedback.value >= 1 { return "오브제 모드 고정" }
+        if feedback.value <= 0 { return "매이트 모드 고정" }
+        return feedback.value <= SimplifiedBrightnessModePolicy.mateUpperBound
+            ? "매이트 모드"
+            : "오브제 모드"
     }
 
     private var displayPercent: Int {
-        Int((normalizedValue * 100).rounded())
+        Int((feedback.value * 100).rounded())
     }
 }
 
@@ -2135,7 +2029,7 @@ private struct ScreenEditorView: View {
                     transform: $layout.status,
                     canvasSize: proxy.size
                 ) {
-                    Text("현재 상태 · 오브제 모드")
+                    Text("오브제 모드")
                         .font(.caption.weight(.medium))
                         .lineLimit(1)
                         .minimumScaleFactor(0.58)
@@ -3108,18 +3002,18 @@ private struct NightClock: View {
 
     private var statusText: String {
         if manualDimmingHoldActive {
-            return "현재 상태 · 롱 터치 밝기 고정 중"
+            return "밝기 고정 중"
         }
         if !automaticDimmingEnabled {
-            return "현재 상태 · 자동 디밍 꺼짐 · 화면 밝기 유지 중"
+            return "화면 밝기 유지 중"
         }
         if automaticDimmingPaused {
-            return "현재 상태 · 밝은 환경으로 판단해 자동 감광 보류 중"
+            return "밝은 환경 · 화면 밝기 유지 중"
         }
         return switch phase {
         case .off: "매이트 모드 · 뒤척임 또는 화면 탭을 기다리는 중"
-        case .holding: "현재 상태 · 조명 켜짐 · 탭하면 자연스럽게 어두워짐"
-        case .fading: "현재 상태 · 화면 조명이 서서히 어두워지는 중"
+        case .holding: "오브제 모드"
+        case .fading: "화들짝 모드 · 다시 매이트 모드로 돌아가는 중"
         }
     }
 }

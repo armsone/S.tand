@@ -165,8 +165,6 @@ enum StandControlKind: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     static let defaultOrder: [StandControlKind] = [
-        .flashlight,
-        .brightness,
         .stopDetection,
         .recordings,
         .settings
@@ -174,7 +172,8 @@ enum StandControlKind: String, Codable, CaseIterable, Identifiable {
 
     static func normalizedOrder(_ order: [StandControlKind]?) -> [StandControlKind] {
         var result: [StandControlKind] = []
-        for kind in (order ?? []) + defaultOrder where !result.contains(kind) {
+        for kind in (order ?? []) + defaultOrder
+        where defaultOrder.contains(kind) && !result.contains(kind) {
             result.append(kind)
         }
         return result
@@ -295,10 +294,10 @@ struct AppSettings: Codable, Equatable {
     var displayTheme = StandDisplayTheme.color
     var portraitLayout = StandScreenLayout.portrait
     var landscapeLayout = StandScreenLayout.landscape
-    var brightnessModeThreshold = 0.35
+    var brightnessModeThreshold = 0.2
     var holdDuration = 5.0
     var fadeDuration = 30.0
-    var automaticDimmingEnabled = true
+    var automaticDimmingEnabled = false
     var preventAutoDimmingWhenScreenBright = true
     var soundThresholdDB: Float = -36
     var recordingEnabled = true
@@ -322,10 +321,10 @@ struct AppSettings: Codable, Equatable {
         displayTheme: StandDisplayTheme = .color,
         portraitLayout: StandScreenLayout = .portrait,
         landscapeLayout: StandScreenLayout = .landscape,
-        brightnessModeThreshold: Double = 0.35,
+        brightnessModeThreshold: Double = 0.2,
         holdDuration: Double = 5,
         fadeDuration: Double = 30,
-        automaticDimmingEnabled: Bool = true,
+        automaticDimmingEnabled: Bool = false,
         preventAutoDimmingWhenScreenBright: Bool = true,
         soundThresholdDB: Float = -36,
         recordingEnabled: Bool = true,
@@ -422,7 +421,7 @@ struct AppSettings: Codable, Equatable {
         ) ?? .landscape
         brightnessModeThreshold = min(1, max(
             0,
-            try container.decodeIfPresent(Double.self, forKey: .brightnessModeThreshold) ?? 0.35
+            try container.decodeIfPresent(Double.self, forKey: .brightnessModeThreshold) ?? 0.2
         ))
         holdDuration = min(300, max(
             5,
@@ -432,7 +431,7 @@ struct AppSettings: Codable, Equatable {
         automaticDimmingEnabled = try container.decodeIfPresent(
             Bool.self,
             forKey: .automaticDimmingEnabled
-        ) ?? true
+        ) ?? false
         preventAutoDimmingWhenScreenBright = try container.decodeIfPresent(
             Bool.self,
             forKey: .preventAutoDimmingWhenScreenBright

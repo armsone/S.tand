@@ -60,6 +60,47 @@ enum EnvironmentDisplayMode: Equatable {
     }
 }
 
+enum SimplifiedBrightnessModePolicy {
+    static let mateUpperBound = 0.2
+    static let mateTapLevel = 0.1
+    static let objectTapLevel = 0.9
+
+    static func clamped(_ level: Double) -> Double {
+        min(1, max(0, level))
+    }
+
+    static func level(
+        startingAt startingLevel: Double,
+        verticalTranslation: CGFloat,
+        viewportHeight: CGFloat
+    ) -> Double {
+        let travel = max(1, viewportHeight * 0.5)
+        return clamped(startingLevel - Double(verticalTranslation / travel))
+    }
+
+    static func preference(for level: Double) -> StandModePreference {
+        let value = clamped(level)
+        if value >= 1 { return .object }
+        if value <= 0 { return .mate }
+        return .automatic
+    }
+
+    static func mode(
+        for level: Double,
+        preference: StandModePreference
+    ) -> EnvironmentDisplayMode {
+        switch preference {
+        case .object: .stand
+        case .mate: .sleeping
+        case .automatic: clamped(level) <= mateUpperBound ? .sleeping : .stand
+        }
+    }
+
+    static func tapLevel(from mode: EnvironmentDisplayMode) -> Double {
+        mode == .stand ? mateTapLevel : objectTapLevel
+    }
+}
+
 enum StandExperienceMode: String, Equatable {
     case object
     case mate
@@ -189,14 +230,11 @@ enum LampTorchLightingPolicy {
         isMovementTriggered: Bool,
         environmentDisplayMode: EnvironmentDisplayMode
     ) -> Double {
-        guard environmentDisplayMode == .sleeping else { return 0 }
-        if isMovementTriggered {
-            return SleepMovementLightingPolicy.torchLevel(
-                torchEnabled: torchEnabled,
-                environmentDisplayMode: environmentDisplayMode
-            )
-        }
-        return torchEnabled ? 1 : 0
+        guard environmentDisplayMode == .sleeping, isMovementTriggered else { return 0 }
+        return SleepMovementLightingPolicy.torchLevel(
+            torchEnabled: torchEnabled,
+            environmentDisplayMode: environmentDisplayMode
+        )
     }
 }
 
@@ -326,7 +364,6 @@ final class StandViewModel: ObservableObject {
                 OrientationController.shared.setPreference(value.orientationPreference)
                 syncTorch(using: value)
                 refreshEnvironmentDisplayMode(
-                    threshold: value.brightnessModeThreshold,
                     preference: value.modePreference,
                     performTransition: isNightSessionActive
                 )
@@ -351,7 +388,12 @@ final class StandViewModel: ObservableObject {
                 guard !isFaceDown else { return }
                 let newBrightness = Double(screen.brightness)
                 displayBrightness = newBrightness
-                refreshEnvironmentDisplayMode(performTransition: true)
+                guard settings.value.modePreference == .automatic else { return }
+                applyBaseBrightness(newBrightness, animated: false)
+                refreshEnvironmentDisplayMode(
+                    preference: .automatic,
+                    performTransition: true
+                )
             }
 
         startBatteryMonitoring()
@@ -369,16 +411,23 @@ final class StandViewModel: ObservableObject {
         batteryProtectionActive = false
         isNightSessionActive = true
         rememberScreenBrightnessIfNeeded()
-        refreshEnvironmentDisplayMode(performTransition: true)
+        displayBrightness = Double(UIScreen.main.brightness)
+        var initialSettings = settings.value
+        initialSettings.modePreference = .automatic
+        initialSettings.lampIntensity = displayBrightness
+        initialSettings.brightnessModeThreshold = SimplifiedBrightnessModePolicy.mateUpperBound
+        initialSettings.automaticDimmingEnabled = false
+        initialSettings.cameraAmbientSensingEnabled = false
+        settings.value = initialSettings
+        applyEnvironmentDisplayMode(.stand, performTransition: false)
         UIApplication.shared.isIdleTimerDisabled = true
         audio.configure(settings: settings.value)
         syncSleepCareMonitoring()
         postureMonitor.start()
         weather.refreshIfNeeded()
         controlsTask?.cancel()
-        controlsVisible = false
-        activateLamp()
-        startAmbientSamplingIfNeeded()
+        controlsVisible = true
+        applyBaseBrightness(displayBrightness, animated: false)
     }
 
     func stopNightSession() {
@@ -408,7 +457,13 @@ final class StandViewModel: ObservableObject {
         manualDimmingHoldActive = false
         rememberScreenBrightnessIfNeeded()
         displayBrightness = Double(UIScreen.main.brightness)
-        refreshEnvironmentDisplayMode(performTransition: false)
+        if isNightSessionActive, settings.value.modePreference == .automatic {
+            applyBaseBrightness(displayBrightness, animated: false)
+            refreshEnvironmentDisplayMode(
+                preference: .automatic,
+                performTransition: false
+            )
+        }
         batteryStatus = .current()
         if batteryStatus.shouldProtectBattery {
             pauseForLowBattery()
@@ -421,9 +476,8 @@ final class StandViewModel: ObservableObject {
         syncSleepCareMonitoring()
         weather.refreshIfNeeded()
         controlsTask?.cancel()
-        controlsVisible = false
-        activateLamp()
-        startAmbientSamplingIfNeeded()
+        controlsVisible = true
+        applyBaseBrightness(displayBrightness, animated: false)
     }
 
     func appWillResignActive() {
@@ -456,20 +510,24 @@ final class StandViewModel: ObservableObject {
     }
 
     func activateLamp() {
-        activateLamp(triggeredBySleepMovement: false)
+        applyBaseBrightness(displayBrightness, animated: true)
     }
 
     private func activateLamp(triggeredBySleepMovement: Bool) {
         guard isNightSessionActive else { return }
+        guard triggeredBySleepMovement else {
+            applyBaseBrightness(displayBrightness, animated: true)
+            return
+        }
         lampTask?.cancel()
-        if !triggeredBySleepMovement { finishStartleEvent() }
 
         let now = ProcessInfo.processInfo.systemUptime
         let holdDuration = settings.value.holdDuration
         let fadeDuration = max(0.1, settings.value.fadeDuration)
-        let maximumIntensity = settings.value.lampIntensity
+        let baseIntensity = SimplifiedBrightnessModePolicy.clamped(displayBrightness)
+        let maximumIntensity = max(0.7, baseIntensity)
         activeLampMaximumIntensity = maximumIntensity
-        isMovementTriggeredLamp = triggeredBySleepMovement
+        isMovementTriggeredLamp = true
         automaticDimmingPaused = false
 
         lampPhase = .holding
@@ -477,18 +535,6 @@ final class StandViewModel: ObservableObject {
             lampIntensity = maximumIntensity
         }
         syncTorch()
-
-        if manualDimmingHoldActive {
-            automaticDimmingPaused = true
-            return
-        }
-
-        // 스탠드 모드는 사용자가 직접 어둡게 할 때까지 밝은 화면을 유지한다.
-        // 타이머를 만들지 않아 이전 잠자기 모드의 감광 작업이 다시 이어지지 않는다.
-        if environmentDisplayMode == .stand {
-            automaticDimmingPaused = settings.value.automaticDimmingEnabled
-            return
-        }
 
         lampTask = Task { [weak self] in
             var fadeStartedAt: TimeInterval?
@@ -503,36 +549,42 @@ final class StandViewModel: ObservableObject {
                     continue
                 }
 
-                if !StandAutomaticDimmingPolicy.shouldFade(
-                    automaticDimmingEnabled: settings.value.automaticDimmingEnabled,
-                    environmentDisplayMode: environmentDisplayMode
-                ) {
-                    fadeStartedAt = nil
-                    automaticDimmingPaused = settings.value.automaticDimmingEnabled
-                        && environmentDisplayMode == .stand
-                    lampPhase = .holding
-                    lampIntensity = maximumIntensity
-                    syncTorch()
-                    continue
-                }
-
-                automaticDimmingPaused = false
                 let start = fadeStartedAt ?? currentTime
                 fadeStartedAt = start
                 let progress = min(1, max(0, (currentTime - start) / fadeDuration))
                 lampPhase = .fading
-                lampIntensity = maximumIntensity * (1 - progress)
+                lampIntensity = baseIntensity + (maximumIntensity - baseIntensity) * (1 - progress)
                 syncTorch()
 
                 if progress >= 1 {
-                    lampIntensity = 0
-                    lampPhase = .off
+                    lampIntensity = baseIntensity
+                    lampPhase = .holding
                     torch.turnOff()
                     isMovementTriggeredLamp = false
                     finishStartleEvent()
                     return
                 }
             }
+        }
+    }
+
+    private func applyBaseBrightness(_ level: Double, animated: Bool) {
+        guard isNightSessionActive else { return }
+        let value = SimplifiedBrightnessModePolicy.clamped(level)
+        lampTask?.cancel()
+        movementTorchSyncTask?.cancel()
+        movementTorchSyncTask = nil
+        isMovementTriggeredLamp = false
+        finishStartleEvent()
+        automaticDimmingPaused = false
+        manualDimmingHoldActive = false
+        activeLampMaximumIntensity = max(value, 0.01)
+        lampPhase = .holding
+        torch.turnOff()
+        if animated {
+            withAnimation(.easeOut(duration: 0.25)) { lampIntensity = value }
+        } else {
+            lampIntensity = value
         }
     }
 
@@ -684,16 +736,13 @@ final class StandViewModel: ObservableObject {
     }
 
     private func refreshEnvironmentDisplayMode(
-        threshold: Double? = nil,
         preference: StandModePreference? = nil,
         performTransition: Bool
     ) {
         let resolvedPreference = preference ?? settings.value.modePreference
-        let newMode = AutomaticModeTransitionPolicy.target(
-            preference: resolvedPreference,
-            screenBrightness: displayBrightness,
-            threshold: threshold ?? settings.value.brightnessModeThreshold,
-            cameraReading: lastAmbientBrightnessReading
+        let newMode = SimplifiedBrightnessModePolicy.mode(
+            for: displayBrightness,
+            preference: resolvedPreference
         )
         guard newMode != environmentDisplayMode else {
             modeTransitionTask?.cancel()
@@ -701,31 +750,10 @@ final class StandViewModel: ObservableObject {
             pendingModeTarget = nil
             return
         }
-
-        let isForced = resolvedPreference != .automatic
-        guard performTransition, isNightSessionActive, !isForced else {
-            applyEnvironmentDisplayMode(newMode, performTransition: performTransition)
-            return
-        }
-
-        if settings.value.cameraAmbientSensingEnabled {
-            measureAmbientBrightnessIfNeeded()
-        }
-
-        guard pendingModeTarget != newMode else { return }
         modeTransitionTask?.cancel()
-        pendingModeTarget = newMode
-        let delay = AutomaticModeTransitionPolicy.confirmationDelay(
-            from: environmentDisplayMode,
-            to: newMode,
-            hasCameraReading: lastAmbientBrightnessReading != nil
-        )
-        modeTransitionTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
-            guard let self, !Task.isCancelled, self.pendingModeTarget == newMode else { return }
-            self.pendingModeTarget = nil
-            self.applyEnvironmentDisplayMode(newMode, performTransition: true)
-        }
+        modeTransitionTask = nil
+        pendingModeTarget = nil
+        applyEnvironmentDisplayMode(newMode, performTransition: performTransition)
     }
 
     private func applyEnvironmentDisplayMode(
@@ -738,18 +766,15 @@ final class StandViewModel: ObservableObject {
         if isNightSessionActive { syncRecordingSessionForDisplayMode() }
         guard performTransition, changed, isNightSessionActive else { return }
         syncSleepCareMonitoring()
-        switch newMode {
-        case .sleeping:
-            if lampPhase == .holding { activateLamp() }
-        case .stand:
-            activateLamp()
-        }
+        applyBaseBrightness(displayBrightness, animated: true)
     }
 
     func setModePreference(_ preference: StandModePreference) {
         settings.value.modePreference = preference
-        refreshEnvironmentDisplayMode(performTransition: true)
-        startAmbientSamplingIfNeeded()
+        refreshEnvironmentDisplayMode(
+            preference: preference,
+            performTransition: true
+        )
     }
 
     func setAmbientCameraSensingEnabled(_ enabled: Bool) {
@@ -898,48 +923,45 @@ final class StandViewModel: ObservableObject {
         }
     }
 
-    func toggleManualDimmingHold() {
-        guard isNightSessionActive else { return }
-        if manualDimmingHoldActive {
-            manualDimmingHoldActive = false
-            automaticDimmingPaused = false
-            activateLamp()
-            return
-        }
-
-        lampTask?.cancel()
-        manualDimmingHoldActive = true
-        automaticDimmingPaused = true
-        activeLampMaximumIntensity = settings.value.lampIntensity
-        lampPhase = .holding
-        withAnimation(.easeOut(duration: 0.3)) {
-            lampIntensity = settings.value.lampIntensity
-        }
-        syncTorch()
-    }
-
-    func beginManualLampAdjustment() {
+    func beginBrightnessAdjustment() {
         guard isNightSessionActive else { return }
         lampTask?.cancel()
-        lampPhase = .holding
-        activeLampMaximumIntensity = settings.value.lampIntensity
-        lampIntensity = settings.value.lampIntensity
-        syncTorch()
+        movementTorchSyncTask?.cancel()
+        movementTorchSyncTask = nil
+        isMovementTriggeredLamp = false
+        finishStartleEvent()
+        torch.turnOff()
     }
 
-    func updateManualLampBrightness(_ value: Double) {
+    func updateBrightnessLevel(_ level: Double) {
         guard isNightSessionActive else { return }
-        let intensity = min(1, max(0.15, value))
-        settings.value.lampIntensity = intensity
-        activeLampMaximumIntensity = intensity
-        lampPhase = .holding
-        lampIntensity = intensity
-        syncTorch()
+        let value = SimplifiedBrightnessModePolicy.clamped(level)
+        let preference = SimplifiedBrightnessModePolicy.preference(for: value)
+        displayBrightness = value
+        UIScreen.main.brightness = CGFloat(value)
+
+        var updatedSettings = settings.value
+        updatedSettings.modePreference = preference
+        updatedSettings.lampIntensity = value
+        settings.value = updatedSettings
+
+        applyBaseBrightness(value, animated: false)
+        refreshEnvironmentDisplayMode(
+            preference: preference,
+            performTransition: true
+        )
     }
 
-    func endManualLampAdjustment() {
+    func endBrightnessAdjustment() {
         guard isNightSessionActive else { return }
-        activateLamp()
+        applyBaseBrightness(displayBrightness, animated: false)
+    }
+
+    func toggleObjectMateMode() {
+        guard isNightSessionActive else { return }
+        let target = SimplifiedBrightnessModePolicy.tapLevel(from: environmentDisplayMode)
+        updateBrightnessLevel(target)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     private func syncTorch(using settingsOverride: AppSettings? = nil) {
@@ -965,7 +987,6 @@ final class StandViewModel: ObservableObject {
 
     func revealControls() {
         controlsVisible = true
-        scheduleControlsHide()
     }
 
     private func startBatteryMonitoring() {
@@ -1012,14 +1033,8 @@ final class StandViewModel: ObservableObject {
 
     private func scheduleControlsHide() {
         controlsTask?.cancel()
-        guard isNightSessionActive else { return }
-        controlsTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(8))
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.35)) {
-                self?.controlsVisible = false
-            }
-        }
+        controlsTask = nil
+        controlsVisible = true
     }
 }
 

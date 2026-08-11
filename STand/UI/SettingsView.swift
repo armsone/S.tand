@@ -114,27 +114,10 @@ struct SettingsView: View {
     private var quickControls: some View {
         StandSettingsCard(
             title: "바로 제어",
-            subtitle: "자주 쓰는 기능을 바로 실행합니다",
+            subtitle: "돌봄, 화면과 녹음만 간단히 관리합니다",
             systemImage: "switch.2",
             accent: accent
         ) {
-            VStack(alignment: .leading, spacing: 8) {
-                Picker(
-                    "S.tand 모드",
-                    selection: Binding(
-                        get: { store.value.modePreference },
-                        set: { model.setModePreference($0) }
-                    )
-                ) {
-                    ForEach(StandModePreference.allCases) { preference in
-                        Text(preference.title).tag(preference)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-            .padding(12)
-            .background(.white.opacity(0.095), in: RoundedRectangle(cornerRadius: 15))
-
             LazyVGrid(
                 columns: Array(
                     repeating: GridItem(.flexible(), spacing: 8),
@@ -153,31 +136,6 @@ struct SettingsView: View {
                         model.stopNightSession()
                     } else {
                         model.startNightSession()
-                    }
-                }
-
-                SettingsActionTile(
-                    title: lampActionTitle,
-                    status: lampActionStatus,
-                    systemImage: lampActionImage,
-                    isActive: runtime.lampPhase == .holding,
-                    accent: accent
-                ) {
-                    toggleLamp()
-                }
-
-                SettingsActionTile(
-                    title: "플래시",
-                    status: store.value.torchEnabled
-                        ? "강하게"
-                        : "은은하게",
-                    systemImage: store.value.torchEnabled ? "flashlight.on.fill" : "flashlight.off.fill",
-                    isActive: store.value.torchEnabled,
-                    accent: accent
-                ) {
-                    store.value.torchEnabled.toggle()
-                    if store.value.torchEnabled, runtime.isNightSessionActive {
-                        model.activateLamp()
                     }
                 }
 
@@ -305,115 +263,37 @@ struct SettingsView: View {
 
     private var lightingCard: some View {
         StandSettingsCard(
-            title: "빛과 모드",
-            subtitle: "주변 밝기에 맞춰 오브제와 매이트를 전환합니다",
+            title: "밝기와 모드",
+            subtitle: "한 번 누르거나 위아래로 밀어 조절합니다",
             systemImage: "sun.and.horizon.fill",
             accent: accent
         ) {
-            SettingsBrightnessRuleControl(
-                currentBrightness: runtime.displayBrightness,
-                threshold: $store.value.brightnessModeThreshold,
-                accent: accent
-            )
-
-            SettingsSliderRow(
-                title: "오브제 최대 밝기",
-                valueText: "\(Int((store.value.lampIntensity * 100).rounded()))%",
-                value: $store.value.lampIntensity,
-                range: 0.15...1,
-                accent: accent
-            )
-
-            SettingsSliderRow(
-                title: "매이트 모드 밝기",
-                valueText: silhouettePercentText,
-                value: $store.value.silhouetteIntensity,
-                range: 0.005...0.2,
-                step: 0.005,
-                accent: accent
-            )
-
-            SettingsToggleRow(
-                title: "자동으로 어두워지기",
-                subtitle: store.value.automaticDimmingEnabled ? "대기 후 부드럽게 감광" : "밝은 화면 계속 유지",
-                systemImage: "moon.zzz.fill",
-                isOn: $store.value.automaticDimmingEnabled,
-                accent: accent
-            )
-
-            SettingsToggleRow(
-                title: "카메라 밝기 보조",
-                subtitle: cameraAmbientStatusText,
-                systemImage: runtime.ambientCameraState == .measuring
-                    ? "camera.metering.center.weighted"
-                    : "camera.fill",
-                isOn: Binding(
-                    get: { store.value.cameraAmbientSensingEnabled },
-                    set: { model.setAmbientCameraSensingEnabled($0) }
-                ),
-                accent: accent
-            )
-
-            if store.value.cameraAmbientSensingEnabled {
-                HStack(spacing: 8) {
-                    SettingsInlineButton(
-                        title: runtime.ambientCameraState == .measuring ? "확인 중" : "지금 확인",
-                        systemImage: "camera.metering.center.weighted",
-                        accent: accent
-                    ) {
-                        model.measureAmbientBrightness()
-                    }
-                    .disabled(runtime.ambientCameraState == .measuring)
-
-                    if runtime.ambientCameraState == .denied {
-                        SettingsInlineButton(
-                            title: "카메라 권한",
-                            systemImage: "gear",
-                            accent: accent
-                        ) {
-                            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-                            openURL(url)
-                        }
-                    }
-                }
-
-                SettingsHelpText(
-                    "판단이 애매할 때 약 1초 동안 밝기만 계산합니다. 사진과 영상은 저장하거나 전송하지 않습니다."
-                )
+            HStack(spacing: 12) {
+                Label("매이트 0–20%", systemImage: "moon.stars.fill")
+                Spacer(minLength: 8)
+                Label("오브제 21–100%", systemImage: "sun.max.fill")
             }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white.opacity(0.82))
+            .padding(12)
+            .background(.white.opacity(0.095), in: RoundedRectangle(cornerRadius: 15))
 
-            if store.value.automaticDimmingEnabled {
-                SettingsSliderRow(
-                    title: "어두워지기까지",
-                    valueText: holdDurationText,
-                    value: $store.value.holdDuration,
-                    range: 5...300,
-                    step: 5,
-                    accent: accent
-                )
-
-                SettingsSliderRow(
-                    title: "감광 시간",
-                    valueText: "\(Int(store.value.fadeDuration.rounded()))초",
-                    value: $store.value.fadeDuration,
-                    range: 5...120,
-                    step: 5,
-                    accent: accent
-                )
-            }
+            SettingsHelpText(
+                "화면을 한 번 누르면 매이트 10%와 오브제 90%를 전환합니다. 위아래로 화면 절반을 밀면 밝기 전체 범위를 조절하며, 0%는 매이트 고정, 100%는 오브제 고정입니다."
+            )
 
             SettingsToggleRow(
                 title: "화들짝 플래시",
                 subtitle: store.value.torchEnabled
-                    ? "강하게 · 터치와 뒤척임에 100%"
-                    : "은은하게 · 터치는 끄고 뒤척임에 10%",
+                    ? "화들짝 모드에서만 강하게 켜짐"
+                    : "화들짝 모드에서만 은은하게 켜짐",
                 systemImage: "flashlight.on.fill",
                 isOn: $store.value.torchEnabled,
                 accent: accent
             )
 
             SettingsHelpText(
-                "자동은 어두워지면 1분 안에 매이트로 전환합니다. 밝아질 때는 잠깐 켜진 조명인지 조금 더 확인합니다."
+                "플래시는 오브제·매이트 전환, 화면 터치와 밝기 조절에는 사용하지 않습니다. 매이트에서 움직임을 감지한 화들짝 모드에서만 작동합니다."
             )
         }
     }
