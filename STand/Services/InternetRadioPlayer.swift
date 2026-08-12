@@ -32,10 +32,28 @@ enum InternetRadioReconnectPolicy {
     }
 }
 
+enum RadioVolumePolicy {
+    static let horizontalDragTravelRatio = 0.5
+
+    static func clamped(_ level: Double) -> Double {
+        min(1, max(0, level))
+    }
+
+    static func level(
+        startingAt startingLevel: Double,
+        horizontalTranslation: CGFloat,
+        viewportWidth: CGFloat
+    ) -> Double {
+        let travel = max(1, viewportWidth * horizontalDragTravelRatio)
+        return clamped(startingLevel + Double(horizontalTranslation / travel))
+    }
+}
+
 @MainActor
 final class InternetRadioPlayer: ObservableObject {
     @Published private(set) var state: InternetRadioPlaybackState = .idle
     @Published private(set) var activeChannelID: UUID?
+    @Published private(set) var volume = 1.0
 
     var activeStreamURL: URL? { activeURL }
 
@@ -102,10 +120,16 @@ final class InternetRadioPlayer: ObservableObject {
         let item = AVPlayerItem(url: url)
         let player = AVPlayer(playerItem: item)
         player.automaticallyWaitsToMinimizeStalling = true
+        player.volume = Float(volume)
         self.player = player
         observe(player: player, item: item)
         scheduleLoadingTimeout()
         player.play()
+    }
+
+    func updateVolume(_ level: Double) {
+        volume = RadioVolumePolicy.clamped(level)
+        player?.volume = Float(volume)
     }
 
     func stop() {

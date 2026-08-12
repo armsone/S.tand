@@ -379,6 +379,42 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertFalse(InternetRadioReconnectPolicy.shouldRetry(attempt: 6))
     }
 
+    func testHorizontalDragCoversFullRadioVolumeRangeAndClamps() {
+        XCTAssertEqual(RadioVolumePolicy.horizontalDragTravelRatio, 0.5)
+        XCTAssertEqual(
+            RadioVolumePolicy.level(
+                startingAt: 0.5,
+                horizontalTranslation: 100,
+                viewportWidth: 400
+            ),
+            1
+        )
+        XCTAssertEqual(
+            RadioVolumePolicy.level(
+                startingAt: 0.5,
+                horizontalTranslation: -100,
+                viewportWidth: 400
+            ),
+            0
+        )
+        XCTAssertEqual(
+            RadioVolumePolicy.level(
+                startingAt: 0.8,
+                horizontalTranslation: 1_000,
+                viewportWidth: 400
+            ),
+            1
+        )
+        XCTAssertEqual(
+            RadioVolumePolicy.level(
+                startingAt: 0.2,
+                horizontalTranslation: -1_000,
+                viewportWidth: 400
+            ),
+            0
+        )
+    }
+
     func testAudioInterruptionOnlyResumesWhenSystemAllowsIt() {
         let resumable = Notification(
             name: AVAudioSession.interruptionNotification,

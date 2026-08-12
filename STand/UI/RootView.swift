@@ -83,8 +83,9 @@ private enum PresentedSheet: String, Identifiable {
     var id: String { rawValue }
 }
 
-private struct BrightnessDragState {
-    let startingValue: Double
+private enum ScreenAdjustmentDragState {
+    case brightness(startingValue: Double)
+    case volume(startingValue: Double)
 }
 
 enum HomeEditorResetPolicy {
@@ -278,7 +279,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var presentedSheet: PresentedSheet?
     @State private var didInitialize = false
-    @State private var brightnessDragState: BrightnessDragState?
+    @State private var screenAdjustmentDragState: ScreenAdjustmentDragState?
     @State private var clockScaleGestureStart: Double?
     @State private var clockScaleFeedback: Double?
     @State private var clockScaleFeedbackTask: Task<Void, Never>?
@@ -363,8 +364,8 @@ struct RootView: View {
                     .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
                     .zIndex(6)
 
-                    if brightnessDragState != nil {
-                        AppBrightnessHUD(level: model.displayBrightness)
+                    if let screenAdjustmentDragState {
+                        adjustmentHUD(for: screenAdjustmentDragState)
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
                             .zIndex(90)
@@ -518,7 +519,7 @@ struct RootView: View {
 
         clockScaleFeedbackTask = nil
 
-        brightnessDragState = nil
+        screenAdjustmentDragState = nil
         clockScaleGestureStart = nil
         clockScaleFeedback = nil
     }
@@ -667,31 +668,51 @@ struct RootView: View {
         DragGesture(minimumDistance: 10)
             .onChanged { value in
                 guard !isEditingScreen, presentedSheet == nil else { return }
-                guard abs(value.translation.height) > abs(value.translation.width) else { return }
+                let state = screenAdjustmentDragState ?? initialAdjustmentState(for: value.translation)
+                screenAdjustmentDragState = state
 
-                let state: BrightnessDragState
-                if let brightnessDragState {
-                    state = brightnessDragState
-                } else {
-                    state = BrightnessDragState(startingValue: model.displayBrightness)
-                    brightnessDragState = state
-                    model.beginBrightnessAdjustment()
+                switch state {
+                case .brightness(let startingValue):
+                    let adjustedValue = SimplifiedBrightnessModePolicy.level(
+                        startingAt: startingValue,
+                        verticalTranslation: value.translation.height,
+                        viewportHeight: currentCanvasSize.height
+                    )
+                    model.updateBrightnessLevel(adjustedValue)
+                case .volume(let startingValue):
+                    let adjustedValue = RadioVolumePolicy.level(
+                        startingAt: startingValue,
+                        horizontalTranslation: value.translation.width,
+                        viewportWidth: currentCanvasSize.width
+                    )
+                    radio.updateVolume(adjustedValue)
                 }
-
-                let adjustedValue = SimplifiedBrightnessModePolicy.level(
-                    startingAt: state.startingValue,
-                    verticalTranslation: value.translation.height,
-                    viewportHeight: currentCanvasSize.height
-                )
-                model.updateBrightnessLevel(adjustedValue)
             }
             .onEnded { _ in
                 guard !isEditingScreen else { return }
-                if brightnessDragState != nil {
+                if case .brightness = screenAdjustmentDragState {
                     model.endBrightnessAdjustment()
-                    brightnessDragState = nil
                 }
+                screenAdjustmentDragState = nil
             }
+    }
+
+    private func initialAdjustmentState(for translation: CGSize) -> ScreenAdjustmentDragState {
+        if abs(translation.height) > abs(translation.width) {
+            model.beginBrightnessAdjustment()
+            return .brightness(startingValue: model.displayBrightness)
+        }
+        return .volume(startingValue: radio.volume)
+    }
+
+    @ViewBuilder
+    private func adjustmentHUD(for state: ScreenAdjustmentDragState) -> some View {
+        switch state {
+        case .brightness:
+            AppBrightnessHUD(level: model.displayBrightness)
+        case .volume:
+            RadioVolumeHUD(level: radio.volume)
+        }
     }
 
     private var screenPressGesture: some Gesture {
@@ -1048,6 +1069,35 @@ private struct AppBrightnessHUD: View {
 
     private var percent: Int {
         Int((min(1, max(0, level)) * 100).rounded())
+    }
+}
+
+private struct RadioVolumeHUD: View {
+    let level: Double
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: level == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                .font(.system(size: 16, weight: .semibold))
+
+            Text("라디오 볼륨")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+
+            Text("\(percent)%")
+                .font(.system(size: 14, weight: .bold, design: .rounded).monospacedDigit())
+        }
+        .foregroundStyle(.white.opacity(0.92))
+        .padding(.horizontal, 15)
+        .frame(height: 46)
+        .background(.black.opacity(0.48), in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(.white.opacity(0.14), lineWidth: 1)
+        }
+    }
+
+    private var percent: Int {
+        Int((RadioVolumePolicy.clamped(level) * 100).rounded())
     }
 }
 
