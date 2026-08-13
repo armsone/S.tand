@@ -5,6 +5,68 @@ import XCTest
 @testable import STand
 
 final class AudioAnalysisTests: XCTestCase {
+    func testFirstLaunchPermissionPromptShowsFirstThenEveryThreeToSevenLaunches() {
+        let first = FirstLaunchPermissionPromptSchedule(
+            hasShownPrompt: false,
+            launchesUntilNextPrompt: nil
+        )
+        XCTAssertEqual(
+            FirstLaunchPermissionPromptPolicy.evaluateLaunch(
+                allPermissionsGranted: false,
+                schedule: first
+            ).0,
+            .show
+        )
+
+        var schedule = FirstLaunchPermissionPromptPolicy.afterPrompt(interval: 5)
+        for expectedRemaining in [4, 3, 2, 1] {
+            let result = FirstLaunchPermissionPromptPolicy.evaluateLaunch(
+                allPermissionsGranted: false,
+                schedule: schedule
+            )
+            XCTAssertEqual(result.0, .skip)
+            XCTAssertEqual(result.1.launchesUntilNextPrompt, expectedRemaining)
+            schedule = result.1
+        }
+        XCTAssertEqual(
+            FirstLaunchPermissionPromptPolicy.evaluateLaunch(
+                allPermissionsGranted: false,
+                schedule: schedule
+            ).0,
+            .show
+        )
+
+        XCTAssertEqual(
+            FirstLaunchPermissionPromptPolicy.afterPrompt(interval: 1)
+                .launchesUntilNextPrompt,
+            3
+        )
+        XCTAssertEqual(
+            FirstLaunchPermissionPromptPolicy.afterPrompt(interval: 9)
+                .launchesUntilNextPrompt,
+            7
+        )
+    }
+
+    func testFirstLaunchPermissionPromptClearsScheduleWhenEverythingIsGranted() {
+        let result = FirstLaunchPermissionPromptPolicy.evaluateLaunch(
+            allPermissionsGranted: true,
+            schedule: FirstLaunchPermissionPromptSchedule(
+                hasShownPrompt: true,
+                launchesUntilNextPrompt: 2
+            )
+        )
+
+        XCTAssertEqual(result.0, .reset)
+        XCTAssertEqual(
+            result.1,
+            FirstLaunchPermissionPromptSchedule(
+                hasShownPrompt: false,
+                launchesUntilNextPrompt: nil
+            )
+        )
+    }
+
     func testBurnInProtectionMovesWithinAQuietFivePointRange() {
         let start = Date(timeIntervalSinceReferenceDate: 0)
         let offsets = (0..<8).map {

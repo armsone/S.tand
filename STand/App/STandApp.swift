@@ -58,10 +58,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 struct STandApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = StandViewModel()
+    @StateObject private var firstLaunchPermissions = FirstLaunchPermissionCoordinator()
 
     var body: some Scene {
         WindowGroup {
-            RootView(model: model)
+            RootView(model: model, firstLaunchPermissions: firstLaunchPermissions)
                 .preferredColorScheme(.dark)
                 .statusBarHidden(true)
         }

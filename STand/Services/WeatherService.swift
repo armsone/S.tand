@@ -81,7 +81,7 @@ final class WeatherService: NSObject, ObservableObject {
         locationManager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
     }
 
-    func refreshIfNeeded(force: Bool = false) {
+    func refreshIfNeeded(force: Bool = false, requestPermission: Bool = false) {
         guard isLocationEnabled else { return }
         if !force,
            let lastUpdated,
@@ -91,8 +91,12 @@ final class WeatherService: NSObject, ObservableObject {
 
         switch locationManager.authorizationStatus {
         case .notDetermined:
-            availability = .requestingLocation
-            locationManager.requestWhenInUseAuthorization()
+            if requestPermission {
+                availability = .requestingLocation
+                locationManager.requestWhenInUseAuthorization()
+            } else {
+                availability = .locationDenied
+            }
         case .authorizedAlways, .authorizedWhenInUse:
             availability = .loading
             locationManager.requestLocation()
@@ -103,14 +107,14 @@ final class WeatherService: NSObject, ObservableObject {
         }
     }
 
-    func setLocationEnabled(_ enabled: Bool) {
+    func setLocationEnabled(_ enabled: Bool, requestPermission: Bool = false) {
         guard isLocationEnabled != enabled else {
-            if enabled { refreshIfNeeded() }
+            if enabled { refreshIfNeeded(requestPermission: requestPermission) }
             return
         }
         isLocationEnabled = enabled
         if enabled {
-            refreshIfNeeded(force: true)
+            refreshIfNeeded(force: true, requestPermission: requestPermission)
         } else {
             refreshTask?.cancel()
             refreshTask = nil

@@ -1113,7 +1113,7 @@ final class StandViewModel: ObservableObject {
 
     func setWeatherLocationEnabled(_ enabled: Bool) {
         settings.value.weatherLocationEnabled = enabled
-        weather.setLocationEnabled(enabled)
+        weather.setLocationEnabled(enabled, requestPermission: enabled)
     }
 
     func measureAmbientBrightness() {
@@ -1215,7 +1215,7 @@ final class StandViewModel: ObservableObject {
             audio.stop()
             return
         }
-        audio.requestAccessAndStart()
+        audio.startIfAuthorized()
     }
 
     private func applyFaceDownState(_ faceDown: Bool) {

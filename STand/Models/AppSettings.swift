@@ -873,7 +873,7 @@ enum AppVersion {
     }
 
     static var build: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.24.1"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.24.2"
     }
 
     static var display: String { "\(marketing) (\(build))" }

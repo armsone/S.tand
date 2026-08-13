@@ -276,6 +276,7 @@ struct RootView: View {
     @ObservedObject private var library: RecordingLibrary
     @ObservedObject private var settings: SettingsStore
     @ObservedObject private var weather: WeatherService
+    @ObservedObject private var firstLaunchPermissions: FirstLaunchPermissionCoordinator
     @Environment(\.scenePhase) private var scenePhase
     @State private var presentedSheet: PresentedSheet?
     @State private var didInitialize = false
@@ -290,14 +291,19 @@ struct RootView: View {
     @State private var currentCanvasSize = CGSize.zero
     @State private var currentProtectedInsets = EdgeInsets()
     @State private var radioEditorChannelID: UUID?
+    @State private var hasStartedApp = false
 
-    init(model: StandViewModel) {
+    init(
+        model: StandViewModel,
+        firstLaunchPermissions: FirstLaunchPermissionCoordinator
+    ) {
         _model = ObservedObject(wrappedValue: model)
         _audio = ObservedObject(wrappedValue: model.audio)
         _radio = ObservedObject(wrappedValue: model.radio)
         _library = ObservedObject(wrappedValue: model.library)
         _settings = ObservedObject(wrappedValue: model.settings)
         _weather = ObservedObject(wrappedValue: model.weather)
+        _firstLaunchPermissions = ObservedObject(wrappedValue: firstLaunchPermissions)
     }
 
     var body: some View {
@@ -422,6 +428,15 @@ struct RootView: View {
                     homeAccessibilityControls
                 }
 
+                if firstLaunchPermissions.shouldPresentExplanation {
+                    FirstLaunchPermissionView(
+                        coordinator: firstLaunchPermissions,
+                        accent: settings.value.displayTheme.accentColor,
+                        onComplete: startAppIfNeeded
+                    )
+                    .zIndex(200)
+                }
+
             }
             .grayscale(settings.value.displayTheme == .grayscale ? 1 : 0)
             .onAppear {
@@ -490,20 +505,26 @@ struct RootView: View {
         }
         .onAppear {
             resetTransientInterface()
-            model.appDidBecomeActive()
-            model.startNightSession()
-            didInitialize = true
+            if !firstLaunchPermissions.shouldPresentExplanation {
+                startAppIfNeeded()
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:
                 resetTransientInterface()
-                model.appDidBecomeActive()
-                didInitialize = true
+                if !firstLaunchPermissions.shouldPresentExplanation {
+                    if hasStartedApp {
+                        model.appDidBecomeActive()
+                        didInitialize = true
+                    } else {
+                        startAppIfNeeded()
+                    }
+                }
             case .inactive, .background:
                 resetTransientInterface()
                 didInitialize = false
-                model.appWillResignActive()
+                if hasStartedApp { model.appWillResignActive() }
             @unknown default:
                 break
             }
@@ -522,6 +543,19 @@ struct RootView: View {
         screenAdjustmentDragState = nil
         clockScaleGestureStart = nil
         clockScaleFeedback = nil
+    }
+
+    private func startAppIfNeeded() {
+        guard scenePhase == .active else { return }
+        guard !hasStartedApp else {
+            model.appDidBecomeActive()
+            didInitialize = true
+            return
+        }
+        hasStartedApp = true
+        model.appDidBecomeActive()
+        model.startNightSession()
+        didInitialize = true
     }
 
     private func topBar(isPortrait _: Bool) -> some View {
@@ -667,7 +701,10 @@ struct RootView: View {
     private var screenAdjustmentGesture: some Gesture {
         DragGesture(minimumDistance: 10)
             .onChanged { value in
-                guard !isEditingScreen, presentedSheet == nil else { return }
+                guard !firstLaunchPermissions.shouldPresentExplanation,
+                      !isEditingScreen,
+                      presentedSheet == nil
+                else { return }
                 let state = screenAdjustmentDragState ?? initialAdjustmentState(for: value.translation)
                 screenAdjustmentDragState = state
 
@@ -689,7 +726,9 @@ struct RootView: View {
                 }
             }
             .onEnded { _ in
-                guard !isEditingScreen else { return }
+                guard !firstLaunchPermissions.shouldPresentExplanation,
+                      !isEditingScreen
+                else { return }
                 if case .brightness = screenAdjustmentDragState {
                     model.endBrightnessAdjustment()
                 }
@@ -724,7 +763,10 @@ struct RootView: View {
             .onEnded { result in
                 switch result {
                 case .first(true):
-                    guard !isEditingScreen, presentedSheet == nil else { return }
+                    guard !firstLaunchPermissions.shouldPresentExplanation,
+                          !isEditingScreen,
+                          presentedSheet == nil
+                    else { return }
                     enterScreenEditing(isPortrait: currentIsPortrait)
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 case .second(let tapResult):
@@ -741,7 +783,7 @@ struct RootView: View {
     }
 
     private func toggleDisplayTheme() {
-        guard !isEditingScreen else { return }
+        guard !firstLaunchPermissions.shouldPresentExplanation, !isEditingScreen else { return }
         withAnimation(.easeInOut(duration: 0.28)) {
             settings.value.displayTheme.toggle()
         }
@@ -749,7 +791,10 @@ struct RootView: View {
     }
 
     private func handleScreenTap() {
-        guard !isEditingScreen, model.isNightSessionActive else { return }
+        guard !firstLaunchPermissions.shouldPresentExplanation,
+              !isEditingScreen,
+              model.isNightSessionActive
+        else { return }
         model.toggleObjectMateMode()
         model.revealControls()
     }
@@ -799,7 +844,7 @@ struct RootView: View {
     private var clockMagnificationGesture: some Gesture {
         MagnificationGesture()
             .onChanged { magnification in
-                guard !isEditingScreen else { return }
+                guard !firstLaunchPermissions.shouldPresentExplanation, !isEditingScreen else { return }
                 let startingScale: Double
                 if let clockScaleGestureStart {
                     startingScale = clockScaleGestureStart
@@ -816,7 +861,7 @@ struct RootView: View {
                 }
             }
             .onEnded { _ in
-                guard !isEditingScreen else { return }
+                guard !firstLaunchPermissions.shouldPresentExplanation, !isEditingScreen else { return }
                 clockScaleGestureStart = nil
                 scheduleClockScaleFeedbackHide()
             }
