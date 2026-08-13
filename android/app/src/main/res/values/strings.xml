@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">보이소</string>
+    <string name="notification_channel_name">보이소 돌봄 연결</string>
+    <string name="notification_channel_description">소리 감시와 보호자 기기 연결 상태를 표시합니다.</string>
+</resources>

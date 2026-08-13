@@ -276,6 +276,7 @@ struct RootView: View {
     @ObservedObject private var library: RecordingLibrary
     @ObservedObject private var settings: SettingsStore
     @ObservedObject private var weather: WeatherService
+    @ObservedObject private var boyiso: BoyisoConnectivityService
     @ObservedObject private var firstLaunchPermissions: FirstLaunchPermissionCoordinator
     @Environment(\.scenePhase) private var scenePhase
     @State private var presentedSheet: PresentedSheet?
@@ -303,6 +304,7 @@ struct RootView: View {
         _library = ObservedObject(wrappedValue: model.library)
         _settings = ObservedObject(wrappedValue: model.settings)
         _weather = ObservedObject(wrappedValue: model.weather)
+        _boyiso = ObservedObject(wrappedValue: model.boyiso)
         _firstLaunchPermissions = ObservedObject(wrappedValue: firstLaunchPermissions)
     }
 
@@ -1017,6 +1019,30 @@ struct RootView: View {
                     .padding(.vertical, 12)
                     .background(.ultraThinMaterial, in: Capsule())
                     .transition(.move(edge: .top).combined(with: .opacity))
+            }
+            if let event = boyiso.lastRemoteEvent {
+                Label(
+                    "\(event.sourceName) · \(event.kind.title)",
+                    systemImage: event.kind == .movement ? "figure.roll" : "waveform"
+                )
+                .font(.headline.weight(.bold))
+                .padding(.horizontal, 20)
+                .padding(.vertical, 13)
+                .foregroundStyle(.white)
+                .background(.orange.opacity(0.82), in: Capsule())
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .accessibilityLabel("보이소 알림, \(event.sourceName)에서 \(event.kind.title)")
+            }
+            if boyiso.isEnabled,
+               boyiso.role == .host,
+               !boyiso.peers.isEmpty,
+               boyiso.activePeers.isEmpty {
+                Label("보이소 감시 연결이 끊겼습니다", systemImage: "wifi.exclamationmark")
+                    .font(.subheadline.weight(.bold))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    .foregroundStyle(.white)
+                    .background(.red.opacity(0.78), in: Capsule())
             }
         }
         .frame(maxWidth: .infinity)

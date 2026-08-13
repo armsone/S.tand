@@ -386,6 +386,7 @@ final class StandViewModel: ObservableObject {
     let settings: SettingsStore
     let library: RecordingLibrary
     let audio: AudioCaptureService
+    let boyiso: BoyisoConnectivityService
     let radio: InternetRadioPlayer
     let weather: WeatherService
 
@@ -425,6 +426,7 @@ final class StandViewModel: ObservableObject {
         self.library = library
         weather = WeatherService()
         audio = AudioCaptureService(recordingsDirectory: library.directory)
+        boyiso = BoyisoConnectivityService()
         radio = InternetRadioPlayer()
         weather.setLocationEnabled(settings.value.weatherLocationEnabled)
 
@@ -440,6 +442,10 @@ final class StandViewModel: ObservableObject {
                   self.environmentDisplayMode == .sleeping,
                   self.settings.value.multiStimulusWakeEnabled
             else { return }
+            self.boyiso.sendSoundEvent(
+                intensity: max(0.2, self.audio.normalizedLevel),
+                detail: "주변보다 커진 소리"
+            )
             self.wakeForSleepMovement()
         }
         audio.onClipSaved = { [weak self] url in
@@ -459,7 +465,15 @@ final class StandViewModel: ObservableObject {
                   self.environmentDisplayMode == .sleeping,
                   self.settings.value.multiStimulusWakeEnabled
             else { return }
+            self.boyiso.sendMovementEvent()
             self.wakeForSleepMovement()
+        }
+        boyiso.onRemoteAlert = { [weak self] _ in
+            guard let self,
+                  self.environmentDisplayMode == .sleeping,
+                  self.settings.value.multiStimulusWakeEnabled
+            else { return }
+            self.wakeForSleepMovement(respectsMateWarmup: false)
         }
         postureMonitor.onFaceDownChanged = { [weak self] isFaceDown in
             self?.applyFaceDownState(isFaceDown)
@@ -627,6 +641,7 @@ final class StandViewModel: ObservableObject {
 
     func appWillResignActive() {
         appIsActive = false
+        boyiso.updateLocalState(monitoring: false, batteryPercent: boyisoBatteryPercent)
         isAdjustingBrightness = false
         brightnessEndpointLockTask?.cancel()
         brightnessEndpointLockTask = nil
@@ -734,12 +749,14 @@ final class StandViewModel: ObservableObject {
         }
     }
 
-    private func wakeForSleepMovement() {
+    private func wakeForSleepMovement(respectsMateWarmup: Bool = true) {
         guard isNightSessionActive, environmentDisplayMode == .sleeping else { return }
-        guard StartleActivationPolicy.canActivate(
-            mateModeEnteredAt: mateModeEnteredAt,
-            now: ProcessInfo.processInfo.systemUptime
-        ) else { return }
+        if respectsMateWarmup {
+            guard StartleActivationPolicy.canActivate(
+                mateModeEnteredAt: mateModeEnteredAt,
+                now: ProcessInfo.processInfo.systemUptime
+            ) else { return }
+        }
         if activeRecordingSessionID == nil {
             syncRecordingSessionForDisplayMode()
         }
@@ -1224,10 +1241,12 @@ final class StandViewModel: ObservableObject {
         ) else {
             audio.stop()
             motionMonitor.stop()
+            boyiso.updateLocalState(monitoring: false, batteryPercent: boyisoBatteryPercent)
             return
         }
 
         motionMonitor.start()
+        boyiso.updateLocalState(monitoring: true, batteryPercent: boyisoBatteryPercent)
         guard SleepCareMonitoringPolicy.shouldCaptureAudio(
             isNightSessionActive: isNightSessionActive,
             environmentDisplayMode: environmentDisplayMode,
@@ -1238,6 +1257,10 @@ final class StandViewModel: ObservableObject {
             return
         }
         audio.startIfAuthorized()
+    }
+
+    private var boyisoBatteryPercent: Int? {
+        batteryStatus.level.map { Int(($0 * 100).rounded()) }
     }
 
     private func applyFaceDownState(_ faceDown: Bool) {

@@ -3293,3 +3293,73 @@ final class AudioAnalysisTests: XCTestCase {
         return buffer
     }
 }
+
+final class BoyisoProtocolTests: XCTestCase {
+    func testEncryptedLANFrameRoundTripsWithoutSendingRawAudio() throws {
+        let event = BoyisoEvent(
+            sourceID: UUID(),
+            sourceName: "아이 곁 기기",
+            kind: .sound,
+            intensity: 0.82,
+            detail: "주변보다 커진 소리",
+            monitoring: true,
+            batteryPercent: 78
+        )
+
+        let frame = try BoyisoCodec.lanFrame(for: event, roomCode: "ABCD2345")
+
+        XCTAssertFalse(String(decoding: frame, as: UTF8.self).contains("아이 곁 기기"))
+        XCTAssertEqual(
+            try BoyisoCodec.openLANFrame(frame, roomCode: "ABCD2345"),
+            event
+        )
+    }
+
+    func testBluetoothFragmentsReassembleOutOfOrder() throws {
+        let event = BoyisoEvent(
+            sourceID: UUID(),
+            sourceName: "게스트",
+            kind: .movement,
+            intensity: 1,
+            monitoring: true,
+            batteryPercent: 55
+        )
+        let fragments = try BoyisoCodec.bluetoothFragments(
+            for: event,
+            roomCode: "SAFE2345",
+            maximumPayloadLength: 32
+        )
+        var reassembler = BoyisoBluetoothReassembler()
+        var combined: Data?
+
+        for fragment in fragments.reversed() {
+            combined = reassembler.append(fragment, peerID: "peer") ?? combined
+        }
+
+        XCTAssertNotNil(combined)
+        XCTAssertEqual(
+            try BoyisoCodec.open(XCTUnwrap(combined), roomCode: "SAFE2345"),
+            event
+        )
+    }
+
+    func testDuplicateEventFromWiFiAndBluetoothIsAcceptedOnce() {
+        let event = BoyisoEvent(
+            sourceID: UUID(),
+            sourceName: "게스트",
+            kind: .sound,
+            monitoring: true,
+            batteryPercent: nil
+        )
+        var deduplicator = BoyisoEventDeduplicator()
+
+        XCTAssertTrue(deduplicator.accepts(event))
+        XCTAssertFalse(deduplicator.accepts(event))
+    }
+
+    func testRoomCodeNormalizationAndValidation() {
+        XCTAssertEqual(BoyisoCodec.normalizedRoomCode("ab-cd 2345"), "ABCD2345")
+        XCTAssertTrue(BoyisoCodec.isValidRoomCode("ABCD2345"))
+        XCTAssertFalse(BoyisoCodec.isValidRoomCode("SHORT"))
+    }
+}

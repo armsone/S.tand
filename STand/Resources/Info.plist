@@ -41,6 +41,14 @@
 	<string>잠꼬대·코골이 후보를 감지하고 필요한 소리만 이 기기에 저장하려면 마이크 접근이 필요합니다.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>화들짝 모드의 후면 플래시와 방 밝기 측정에 카메라 접근을 사용합니다. 사진이나 영상은 저장하거나 전송하지 않습니다.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>보이소가 아이 곁 기기의 소리·움직임 상태를 보호자 기기에 직접 전송하기 위해 Bluetooth를 사용합니다.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>보이소가 같은 Wi-Fi에 있는 보호자 기기와 아이 곁 기기를 찾아 암호화된 상태 정보를 직접 전송합니다.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_boyiso._tcp</string>
+	</array>
 	<key>NSMotionUsageDescription</key>
 	<string>취침 중 기기 움직임을 감지해 화면 조명을 다시 켜려면 동작 센서 접근이 필요합니다.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

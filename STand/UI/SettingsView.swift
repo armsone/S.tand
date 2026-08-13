@@ -11,6 +11,7 @@ struct SettingsView: View {
     @ObservedObject private var library: RecordingLibrary
     @ObservedObject private var weather: WeatherService
     @ObservedObject private var radio: InternetRadioPlayer
+    @ObservedObject private var boyiso: BoyisoConnectivityService
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -32,6 +33,7 @@ struct SettingsView: View {
         _library = ObservedObject(wrappedValue: model.library)
         _weather = ObservedObject(wrappedValue: model.weather)
         _radio = ObservedObject(wrappedValue: model.radio)
+        _boyiso = ObservedObject(wrappedValue: model.boyiso)
     }
 
     private var accent: Color {
@@ -65,6 +67,7 @@ struct SettingsView: View {
                             ) {
                                 screenAndClockCard
                                 permissionsCard
+                                boyisoCard
                                 detectionCard
                                 informationCard
                             }
@@ -290,6 +293,33 @@ struct SettingsView: View {
 
             SettingsHelpText(
                 "처음 1분 동안 방의 평소 소리를 익힙니다. 이후 평균보다 커진 순간에는 바로 화들짝 반응하고, 녹음은 이 기기 안에서만 처리합니다."
+            )
+        }
+    }
+
+    private var boyisoCard: some View {
+        StandSettingsCard(
+            title: "보이소",
+            subtitle: "아이 곁의 소리를 보호자 화면으로 전합니다",
+            systemImage: "waveform.and.magnifyingglass",
+            accent: accent
+        ) {
+            NavigationLink {
+                BoyisoView(service: boyiso, accent: accent)
+            } label: {
+                SettingsNavigationRow(
+                    title: "연결 설정",
+                    value: boyiso.statusText,
+                    systemImage: boyiso.isEnabled
+                        ? "antenna.radiowaves.left.and.right"
+                        : "antenna.radiowaves.left.and.right.slash",
+                    accent: accent
+                )
+            }
+            .buttonStyle(.plain)
+
+            SettingsHelpText(
+                "Wi-Fi와 Bluetooth를 함께 사용하며 같은 사건은 한 번만 표시합니다."
             )
         }
     }
