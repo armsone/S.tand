@@ -291,7 +291,6 @@ struct RootView: View {
     @State private var currentCanvasSize = CGSize.zero
     @State private var currentProtectedInsets = EdgeInsets()
     @State private var radioEditorChannelID: UUID?
-    @State private var activeYouTubeConfiguration: YouTubeConfiguration?
     @State private var hasStartedApp = false
 
     init(
@@ -392,7 +391,6 @@ struct RootView: View {
                         weather: weather,
                         radioConfigurations: settings.value.homeInternetRadios,
                         availableRadioCount: settings.value.internetRadioChannels.count,
-                        youtubeConfiguration: settings.value.youtube,
                         clockFont: Binding(
                             get: { settings.value.clockFont },
                             set: { settings.value.clockFont = $0 }
@@ -405,9 +403,6 @@ struct RootView: View {
                         },
                         onManageRadios: {
                             presentedSheet = .internetRadioChannels
-                        },
-                        onConfigureYouTube: {
-                            presentedSheet = .settings
                         },
                         onReset: {
                             editingLayout = HomeEditorResetPolicy.panels(
@@ -507,14 +502,6 @@ struct RootView: View {
             case .settings:
                 SettingsView(model: model)
             }
-        }
-        .fullScreenCover(item: $activeYouTubeConfiguration, onDismiss: {
-            model.resumeMonitoringAfterPlayback()
-        }) { configuration in
-            YouTubePlayerView(
-                configuration: configuration,
-                accent: settings.value.displayTheme.accentColor
-            )
         }
         .onAppear {
             resetTransientInterface()
@@ -676,18 +663,10 @@ struct RootView: View {
             radioConfigurations: settings.value.homeInternetRadios,
             radioState: radio.state,
             activeRadioChannelID: radio.activeChannelID,
-            youtubeConfiguration: settings.value.youtube,
             onToggleRadio: model.toggleInternetRadioPlayback(channelID:),
             onEditRadio: { channelID in
                 radioEditorChannelID = channelID
                 presentedSheet = .internetRadio
-            },
-            onOpenYouTube: { configuration in
-                model.pauseMonitoringForPlayback()
-                activeYouTubeConfiguration = configuration
-            },
-            onEditYouTube: {
-                presentedSheet = .settings
             }
         )
     }
@@ -1361,11 +1340,8 @@ private struct DashboardCanvas: View {
     let radioConfigurations: [InternetRadioConfiguration]
     let radioState: InternetRadioPlaybackState
     let activeRadioChannelID: UUID?
-    let youtubeConfiguration: YouTubeConfiguration?
     let onToggleRadio: (UUID) -> Void
     let onEditRadio: (UUID) -> Void
-    let onOpenYouTube: (YouTubeConfiguration) -> Void
-    let onEditYouTube: () -> Void
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -1416,18 +1392,6 @@ private struct DashboardCanvas: View {
                 )
 
                 radioPanels
-
-                if let youtubeConfiguration {
-                    YouTubeHomePanel(
-                        configuration: youtubeConfiguration,
-                        isDimmed: isDimmed,
-                        dimmedIntensity: dimmedIntensity,
-                        showsEditBadge: false,
-                        action: { onOpenYouTube(youtubeConfiguration) },
-                        editAction: onEditYouTube
-                    )
-                    .panelTransform(layout.youtube, canvasSize: canvasSize)
-                }
             }
             .scaleEffect(clockScale, anchor: .center)
             .foregroundStyle(
@@ -1468,91 +1432,6 @@ private struct DashboardCanvas: View {
                 .panelTransform(transform, canvasSize: canvasSize)
             }
         }
-    }
-}
-
-private struct YouTubeHomePanel: View {
-    let configuration: YouTubeConfiguration?
-    let isDimmed: Bool
-    let dimmedIntensity: Double
-    let showsEditBadge: Bool
-    let action: () -> Void
-    let editAction: () -> Void
-
-    var body: some View {
-        Group {
-            if showsEditBadge {
-                panelContent
-            } else {
-                panelContent
-                    .highPriorityGesture(
-                        LongPressGesture(minimumDuration: 0.8, maximumDistance: 12)
-                            .exclusively(before: TapGesture())
-                            .onEnded { result in
-                                switch result {
-                                case .first(true):
-                                    editAction()
-                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                case .second:
-                                    action()
-                                default:
-                                    break
-                                }
-                            }
-                    )
-            }
-        }
-        .opacity(isDimmed ? max(0.12, dimmedIntensity) : 1)
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint(configuration == nil ? "설정에서 YouTube 주소를 등록합니다" : "공식 YouTube 플레이어를 엽니다")
-        .accessibilityAction { showsEditBadge ? editAction() : action() }
-        .accessibilityAction(named: Text("YouTube 주소 편집"), editAction)
-    }
-
-    private var panelContent: some View {
-        HStack(spacing: 9) {
-            Image(systemName: configuration == nil ? "plus.rectangle.on.rectangle" : "play.rectangle.fill")
-                .font(.system(size: 20, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(configuration?.displayName ?? "YouTube")
-                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
-                    .lineLimit(1)
-                Text(configuration == nil ? "주소 등록" : "영상 열기")
-                    .font(.system(size: 9.5, weight: .medium, design: .rounded))
-                    .opacity(0.62)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 13)
-        .frame(
-            width: InternetRadioPanelMetrics.width,
-            height: InternetRadioPanelMetrics.height
-        )
-        .background(
-            FlipPanelSurface(
-                isDimmed: isDimmed,
-                cornerRadius: InternetRadioPanelMetrics.cornerRadius,
-                splitGap: 2
-            )
-        )
-        .overlay(alignment: .topTrailing) {
-            if showsEditBadge {
-                Image(systemName: "pencil.circle.fill")
-                    .font(.system(size: 17, weight: .semibold))
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.black.opacity(0.72), .orange)
-                    .offset(x: 6, y: -6)
-            }
-        }
-    }
-
-    private var accessibilityLabel: String {
-        guard let configuration else { return "YouTube 주소 등록" }
-        return "\(configuration.displayName), 영상 열기"
     }
 }
 
@@ -2317,13 +2196,11 @@ private struct ScreenEditorView: View {
     @ObservedObject var weather: WeatherService
     let radioConfigurations: [InternetRadioConfiguration]
     let availableRadioCount: Int
-    let youtubeConfiguration: YouTubeConfiguration?
     @Binding var clockFont: ClockFontChoice
     let hourMode: ClockHourMode
     let batteryText: String
     let onConfigureRadio: (UUID?) -> Void
     let onManageRadios: () -> Void
-    let onConfigureYouTube: () -> Void
     let onReset: () -> Void
     let onSave: () -> Void
     @State private var showFontPalette = false
@@ -2404,22 +2281,6 @@ private struct ScreenEditorView: View {
 
                 editableRadioPanels(canvasSize: proxy.size)
 
-                EditablePanel(
-                    transform: $layout.youtube,
-                    canvasSize: proxy.size,
-                    accessibilityName: "YouTube 패널",
-                    onTap: onConfigureYouTube
-                ) {
-                    YouTubeHomePanel(
-                        configuration: youtubeConfiguration,
-                        isDimmed: false,
-                        dimmedIntensity: 1,
-                        showsEditBadge: true,
-                        action: onConfigureYouTube,
-                        editAction: onConfigureYouTube
-                    )
-                }
-
                 if showFontPalette {
                     VStack {
                         Spacer()
@@ -2433,7 +2294,7 @@ private struct ScreenEditorView: View {
                     VStack {
                         Spacer()
                         Label(
-                            "패널 이동·크기 조절 · 연필을 눌러 라디오·YouTube 편집",
+                            "패널 이동·크기 조절 · 라디오 연필을 눌러 주소 편집",
                             systemImage: "hand.draw.fill"
                         )
                         .font(.caption.weight(.medium))
