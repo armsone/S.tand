@@ -48,6 +48,8 @@
 		B0000000000000000000002B /* InternetRadioConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002B /* InternetRadioConfiguration.swift */; };
 		B0000000000000000000002C /* InternetRadioBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002C /* InternetRadioBrowserView.swift */; };
 		B0000000000000000000002D /* FirstLaunchPermissionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002D /* FirstLaunchPermissionView.swift */; };
+		B0000000000000000000002E /* YouTubeConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002E /* YouTubeConfiguration.swift */; };
+		B0000000000000000000002F /* YouTubePlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002F /* YouTubePlayerView.swift */; };
 		B00000000000000000000101 /* AudioAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000101 /* AudioAnalysisTests.swift */; };
 		D90000000000000000000001 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000001 /* ShareViewController.swift */; };
 		D90000000000000000000002 /* STandRadioShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* STandRadioShare.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -138,6 +140,8 @@
 		F0000000000000000000002B /* InternetRadioConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InternetRadioConfiguration.swift; sourceTree = "<group>"; };
 		F0000000000000000000002C /* InternetRadioBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InternetRadioBrowserView.swift; sourceTree = "<group>"; };
 		F0000000000000000000002D /* FirstLaunchPermissionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstLaunchPermissionView.swift; sourceTree = "<group>"; };
+		F0000000000000000000002E /* YouTubeConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeConfiguration.swift; sourceTree = "<group>"; };
+		F0000000000000000000002F /* YouTubePlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubePlayerView.swift; sourceTree = "<group>"; };
 		F00000000000000000000101 /* AudioAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAnalysisTests.swift; sourceTree = "<group>"; };
 		F00000000000000000000201 /* STand.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = STand.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000202 /* STandTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = STandTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -229,6 +233,7 @@
 			children = (
 				F00000000000000000000002 /* AppSettings.swift */,
 				F0000000000000000000002B /* InternetRadioConfiguration.swift */,
+				F0000000000000000000002E /* YouTubeConfiguration.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -252,6 +257,7 @@
 				F00000000000000000000008 /* SettingsView.swift */,
 				F0000000000000000000002C /* InternetRadioBrowserView.swift */,
 				F0000000000000000000002D /* FirstLaunchPermissionView.swift */,
+				F0000000000000000000002F /* YouTubePlayerView.swift */,
 				F00000000000000000000009 /* RecordingsView.swift */,
 			);
 			path = UI;
@@ -578,6 +584,8 @@
 				B0000000000000000000002B /* InternetRadioConfiguration.swift in Sources */,
 				B0000000000000000000002C /* InternetRadioBrowserView.swift in Sources */,
 				B0000000000000000000002D /* FirstLaunchPermissionView.swift in Sources */,
+				B0000000000000000000002E /* YouTubeConfiguration.swift in Sources */,
+				B0000000000000000000002F /* YouTubePlayerView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

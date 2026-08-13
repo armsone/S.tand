@@ -23,6 +23,12 @@ struct SettingsView: View {
     @State private var radioDraftAddress = ""
     @State private var radioValidationMessage: String?
     @State private var pendingRadioDeletion: InternetRadioConfiguration?
+    @State private var youtubeEditorVisible = false
+    @State private var youtubeDraftName = ""
+    @State private var youtubeDraftAddress = ""
+    @State private var youtubeValidationMessage: String?
+    @State private var confirmsYouTubeDeletion = false
+    @State private var activeYouTubeConfiguration: YouTubeConfiguration?
     @State private var confirmsRestore = false
 
     init(model: StandViewModel) {
@@ -54,6 +60,7 @@ struct SettingsView: View {
                             )
 
                             internetRadioCard
+                            youtubeCard
 
                             LazyVGrid(
                                 columns: Array(
@@ -102,6 +109,11 @@ struct SettingsView: View {
         .fullScreenCover(isPresented: $showsRadioBrowser) {
             InternetRadioBrowserView(accent: accent)
         }
+        .fullScreenCover(item: $activeYouTubeConfiguration, onDismiss: {
+            model.resumeMonitoringAfterPlayback()
+        }) { configuration in
+            YouTubePlayerView(configuration: configuration, accent: accent)
+        }
         .confirmationDialog(
             "\(pendingRadioDeletion?.displayName ?? "이 채널")을 삭제할까요?",
             isPresented: Binding(
@@ -122,6 +134,16 @@ struct SettingsView: View {
             Button("취소", role: .cancel) { pendingRadioDeletion = nil }
         } message: {
             Text("삭제한 채널 주소는 되돌릴 수 없습니다.")
+        }
+        .confirmationDialog(
+            "저장한 YouTube 주소를 삭제할까요?",
+            isPresented: $confirmsYouTubeDeletion,
+            titleVisibility: .visible
+        ) {
+            Button("YouTube 주소 삭제", role: .destructive, action: deleteYouTubeConfiguration)
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("삭제한 주소는 되돌릴 수 없습니다.")
         }
         .confirmationDialog(
             "추천 설정으로 되돌릴까요?",
@@ -541,6 +563,197 @@ struct SettingsView: View {
             radioValidationMessage = error.localizedDescription
             UINotificationFeedbackGenerator().notificationOccurred(.error)
         }
+    }
+
+    private var youtubeCard: some View {
+        let configuration = store.value.youtube
+
+        return StandSettingsCard(
+            title: "YouTube",
+            subtitle: configuration == nil
+                ? "영상·라이브·재생목록 주소 하나를 등록합니다"
+                : "공식 플레이어로 화면 안에서 재생합니다",
+            systemImage: "play.rectangle.fill",
+            accent: accent
+        ) {
+            if let configuration, !youtubeEditorVisible {
+                HStack(spacing: 8) {
+                    Button {
+                        model.pauseMonitoringForPlayback()
+                        activeYouTubeConfiguration = configuration
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(accent)
+                                .frame(width: 34, height: 34)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(configuration.displayName)
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+                                Text(configuration.contentDescription)
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.54))
+                            }
+                            Spacer(minLength: 2)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(configuration.displayName), YouTube 열기")
+                    .accessibilityHint("공식 YouTube 플레이어를 엽니다")
+
+                    Button(action: beginEditingYouTube) {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(width: 34, height: 34)
+                            .background(.white.opacity(0.07), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("YouTube 주소 수정")
+                }
+                .padding(.horizontal, 10)
+                .frame(minHeight: 58)
+                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 15))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .stroke(.white.opacity(0.08), lineWidth: 1)
+                }
+            }
+
+            if youtubeEditorVisible {
+                youtubeEditor
+            } else if configuration == nil {
+                SettingsInlineButton(
+                    title: "YouTube 주소 추가",
+                    systemImage: "plus.circle.fill",
+                    accent: accent,
+                    action: beginAddingYouTube
+                )
+            }
+
+            SettingsHelpText(
+                "영상은 보이는 공식 YouTube 플레이어에서 재생됩니다. 외부 재생이 제한된 영상은 YouTube에서 직접 열 수 있습니다. 플레이어를 닫거나 앱을 벗어나면 재생을 멈추며, 재생 중에는 라디오와 소리 감지·녹음을 잠시 멈춥니다."
+            )
+        }
+    }
+
+    private var youtubeEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(
+                    store.value.youtube == nil ? "YouTube 주소 추가" : "YouTube 주소 수정",
+                    systemImage: store.value.youtube == nil
+                        ? "plus.circle.fill"
+                        : "pencil.circle.fill"
+                )
+                .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("닫기", action: closeYouTubeEditor)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.64))
+            }
+
+            TextField("이름 (선택)", text: $youtubeDraftName)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .padding(.horizontal, 12)
+                .frame(minHeight: 42)
+                .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+
+            TextField("https://www.youtube.com/watch?v=…", text: $youtubeDraftAddress, axis: .vertical)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+
+            if let youtubeValidationMessage {
+                Label(youtubeValidationMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            PasteButton(payloadType: String.self) { values in
+                guard let pasted = values.first else { return }
+                youtubeDraftAddress = pasted
+                youtubeValidationMessage = nil
+            }
+            .buttonBorderShape(.roundedRectangle(radius: 12))
+
+            HStack(spacing: 8) {
+                if store.value.youtube != nil {
+                    Button(role: .destructive) {
+                        confirmsYouTubeDeletion = true
+                    } label: {
+                        Image(systemName: "trash")
+                            .frame(width: 42, height: 42)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("YouTube 주소 삭제")
+                }
+
+                Button(action: saveYouTubeConfiguration) {
+                    Label("저장", systemImage: "checkmark.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 42)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(accent)
+            }
+        }
+        .padding(12)
+        .background(.black.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+        .onChange(of: youtubeDraftName) { _, _ in youtubeValidationMessage = nil }
+        .onChange(of: youtubeDraftAddress) { _, _ in youtubeValidationMessage = nil }
+    }
+
+    private func beginAddingYouTube() {
+        youtubeDraftName = ""
+        youtubeDraftAddress = ""
+        youtubeValidationMessage = nil
+        withAnimation(.easeInOut(duration: 0.22)) { youtubeEditorVisible = true }
+    }
+
+    private func beginEditingYouTube() {
+        guard let configuration = store.value.youtube else { return }
+        youtubeDraftName = configuration.displayName
+        youtubeDraftAddress = configuration.urlString
+        youtubeValidationMessage = nil
+        withAnimation(.easeInOut(duration: 0.22)) { youtubeEditorVisible = true }
+    }
+
+    private func closeYouTubeEditor() {
+        withAnimation(.easeInOut(duration: 0.22)) { youtubeEditorVisible = false }
+        youtubeDraftName = ""
+        youtubeDraftAddress = ""
+        youtubeValidationMessage = nil
+    }
+
+    private func saveYouTubeConfiguration() {
+        do {
+            let saved = try YouTubeConfiguration(
+                displayName: youtubeDraftName,
+                urlString: youtubeDraftAddress
+            )
+            var value = store.value
+            value.youtube = saved
+            store.value = value
+            closeYouTubeEditor()
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } catch {
+            youtubeValidationMessage = error.localizedDescription
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+        }
+    }
+
+    private func deleteYouTubeConfiguration() {
+        var value = store.value
+        value.youtube = nil
+        store.value = value
+        closeYouTubeEditor()
     }
 
     private var informationCard: some View {

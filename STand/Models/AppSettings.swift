@@ -189,6 +189,11 @@ struct StandScreenLayout: Codable, Equatable {
         y: 0.215,
         scale: 0.75
     )
+    static let defaultYouTubePanelTransform = PanelTransform(
+        x: 0.30,
+        y: 0.31,
+        scale: 0.75
+    )
 
     var clock: PanelTransform
     var seconds: PanelTransform
@@ -201,6 +206,7 @@ struct StandScreenLayout: Codable, Equatable {
     var battery: PanelTransform
     var radio: PanelTransform
     var secondaryRadio: PanelTransform
+    var youtube: PanelTransform
     var radiosGrouped: Bool
     var weatherGroupIDs: [Int]
     var controlOrder: [StandControlKind]
@@ -217,6 +223,7 @@ struct StandScreenLayout: Codable, Equatable {
         battery: PanelTransform = .init(x: 0, y: 0.18),
         radio: PanelTransform = StandScreenLayout.defaultRadioPanelTransform,
         secondaryRadio: PanelTransform = StandScreenLayout.defaultSecondaryRadioPanelTransform,
+        youtube: PanelTransform = StandScreenLayout.defaultYouTubePanelTransform,
         radiosGrouped: Bool = false,
         weatherGroupIDs: [Int],
         controlOrder: [StandControlKind] = StandControlKind.defaultOrder
@@ -232,6 +239,7 @@ struct StandScreenLayout: Codable, Equatable {
         self.battery = battery
         self.radio = radio
         self.secondaryRadio = secondaryRadio
+        self.youtube = youtube
         self.radiosGrouped = radiosGrouped
         self.weatherGroupIDs = weatherGroupIDs
         self.controlOrder = StandControlKind.normalizedOrder(controlOrder)
@@ -240,7 +248,7 @@ struct StandScreenLayout: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case clock, seconds
         case weatherIcon, weatherTemperature, weatherCondition
-        case date, status, brightnessRule, battery, radio, secondaryRadio, radiosGrouped
+        case date, status, brightnessRule, battery, radio, secondaryRadio, youtube, radiosGrouped
         case weatherGroupIDs, controlOrder
     }
 
@@ -262,6 +270,8 @@ struct StandScreenLayout: Codable, Equatable {
             ?? StandScreenLayout.defaultRadioPanelTransform
         secondaryRadio = try values.decodeIfPresent(PanelTransform.self, forKey: .secondaryRadio)
             ?? StandScreenLayout.defaultSecondaryRadioPanelTransform
+        youtube = try values.decodeIfPresent(PanelTransform.self, forKey: .youtube)
+            ?? StandScreenLayout.defaultYouTubePanelTransform
         radiosGrouped = try values.decodeIfPresent(Bool.self, forKey: .radiosGrouped) ?? false
         weatherGroupIDs = try values.decode([Int].self, forKey: .weatherGroupIDs)
         let rawControlOrder = try? values.decode([String].self, forKey: .controlOrder)
@@ -286,6 +296,7 @@ struct StandScreenLayout: Codable, Equatable {
             y: 0.31097257926306765,
             scale: 0.75
         ),
+        youtube: .init(x: 0.30, y: 0.31097257926306765, scale: 0.75),
         radiosGrouped: true,
         weatherGroupIDs: [1, 1, 1],
         controlOrder: [.recordings, .settings]
@@ -307,6 +318,7 @@ struct StandScreenLayout: Codable, Equatable {
             y: -0.27627399650959866,
             scale: 0.75
         ),
+        youtube: .init(x: 0, y: -0.2762739965095986, scale: 0.75),
         radiosGrouped: false,
         weatherGroupIDs: [1, 1, 1],
         controlOrder: [.recordings, .settings]
@@ -339,6 +351,7 @@ struct AppSettings: Codable, Equatable {
     var modePreference = StandModePreference.automatic
     var cameraAmbientSensingEnabled = false
     var weatherLocationEnabled = true
+    var youtube: YouTubeConfiguration?
     private(set) var internetRadioChannels: [InternetRadioConfiguration] = []
     private(set) var selectedInternetRadioID: UUID?
     private(set) var secondaryInternetRadioID: UUID?
@@ -422,6 +435,7 @@ struct AppSettings: Codable, Equatable {
         modePreference: StandModePreference = .automatic,
         cameraAmbientSensingEnabled: Bool = false,
         weatherLocationEnabled: Bool = true,
+        youtube: YouTubeConfiguration? = nil,
         internetRadio: InternetRadioConfiguration? = nil,
         internetRadioChannels: [InternetRadioConfiguration] = [],
         selectedInternetRadioID: UUID? = nil,
@@ -449,6 +463,7 @@ struct AppSettings: Codable, Equatable {
         self.modePreference = modePreference
         self.cameraAmbientSensingEnabled = cameraAmbientSensingEnabled
         self.weatherLocationEnabled = weatherLocationEnabled
+        self.youtube = youtube
         let initialChannels = internetRadioChannels.isEmpty
             ? internetRadio.map { [$0] } ?? []
             : internetRadioChannels
@@ -487,6 +502,7 @@ struct AppSettings: Codable, Equatable {
         case modePreference
         case cameraAmbientSensingEnabled
         case weatherLocationEnabled
+        case youtube
         case internetRadioChannels
         case selectedInternetRadioID
         case secondaryInternetRadioID
@@ -563,6 +579,7 @@ struct AppSettings: Codable, Equatable {
             Bool.self,
             forKey: .weatherLocationEnabled
         ) ?? true
+        youtube = try? container.decode(YouTubeConfiguration.self, forKey: .youtube)
         let decodedChannels: [InternetRadioConfiguration]?
         do {
             decodedChannels = try container.decodeIfPresent(
@@ -617,6 +634,7 @@ struct AppSettings: Codable, Equatable {
         try container.encode(modePreference, forKey: .modePreference)
         try container.encode(cameraAmbientSensingEnabled, forKey: .cameraAmbientSensingEnabled)
         try container.encode(weatherLocationEnabled, forKey: .weatherLocationEnabled)
+        try container.encodeIfPresent(youtube, forKey: .youtube)
         try container.encode(internetRadioChannels, forKey: .internetRadioChannels)
         try container.encodeIfPresent(selectedInternetRadioID, forKey: .selectedInternetRadioID)
         try container.encodeIfPresent(secondaryInternetRadioID, forKey: .secondaryInternetRadioID)

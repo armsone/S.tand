@@ -182,6 +182,86 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
+    func testYouTubeConfigurationAcceptsVideoLiveShortAndPlaylistURLs() throws {
+        let watch = try YouTubeConfiguration(
+            displayName: "  밤 음악  ",
+            urlString: " https://www.youtube.com/watch?v=dQw4w9WgXcQ "
+        )
+        XCTAssertEqual(watch.displayName, "밤 음악")
+        XCTAssertEqual(watch.videoID, "dQw4w9WgXcQ")
+        XCTAssertNil(watch.playlistID)
+        XCTAssertEqual(
+            watch.originalURL?.absoluteString,
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        )
+        XCTAssertEqual(
+            watch.embedURL.absoluteString,
+            "https://www.youtube.com/embed/dQw4w9WgXcQ?playsinline=1&rel=0&origin=https://www.youtube.com"
+        )
+
+        let shortURL = try YouTubeConfiguration(
+            displayName: "",
+            urlString: "https://youtu.be/dQw4w9WgXcQ?list=PL1234567890"
+        )
+        XCTAssertEqual(shortURL.displayName, YouTubeConfiguration.defaultDisplayName)
+        XCTAssertEqual(shortURL.videoID, "dQw4w9WgXcQ")
+        XCTAssertEqual(shortURL.playlistID, "PL1234567890")
+
+        let live = try YouTubeConfiguration(
+            displayName: "라이브",
+            urlString: "https://www.youtube.com/live/dQw4w9WgXcQ"
+        )
+        XCTAssertEqual(live.videoID, "dQw4w9WgXcQ")
+
+        let shorts = try YouTubeConfiguration(
+            displayName: "쇼츠",
+            urlString: "https://www.youtube.com/shorts/dQw4w9WgXcQ"
+        )
+        XCTAssertEqual(shorts.videoID, "dQw4w9WgXcQ")
+
+        let playlist = try YouTubeConfiguration(
+            displayName: "재생목록",
+            urlString: "https://www.youtube.com/playlist?list=PL1234567890"
+        )
+        XCTAssertNil(playlist.videoID)
+        XCTAssertEqual(playlist.playlistID, "PL1234567890")
+        XCTAssertEqual(
+            playlist.embedURL.absoluteString,
+            "https://www.youtube.com/embed/videoseries?playsinline=1&rel=0&origin=https://www.youtube.com&list=PL1234567890"
+        )
+    }
+
+    func testYouTubeConfigurationRejectsUnsafeOrUnsupportedURLs() {
+        for rejectedAddress in [
+            "",
+            "http://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtube.example.com/watch?v=dQw4w9WgXcQ",
+            "https://user:password@www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://www.youtube.com/channel/UC1234567890",
+            "https://www.youtube.com/watch?v=too-short"
+        ] {
+            XCTAssertThrowsError(
+                try YouTubeConfiguration(displayName: "테스트", urlString: rejectedAddress),
+                "허용되지 않은 YouTube 주소가 검증을 통과했습니다: \(rejectedAddress)"
+            )
+        }
+    }
+
+    func testYouTubeConfigurationRoundTripsInAppSettings() throws {
+        let configuration = try YouTubeConfiguration(
+            displayName: "수면 음악",
+            urlString: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        )
+        let original = AppSettings(youtube: configuration)
+        let decoded = try JSONDecoder().decode(
+            AppSettings.self,
+            from: JSONEncoder().encode(original)
+        )
+
+        XCTAssertEqual(decoded.youtube, configuration)
+        XCTAssertNil(AppSettings.recommended.youtube)
+    }
+
     func testInternetRadioBrowserAddressAcceptsOnlyCredentialFreeHTTPS() throws {
         let explicit = try InternetRadioBrowserAddress.secureURL(
             from: "  https://radio.example.com/live?token=public  "
