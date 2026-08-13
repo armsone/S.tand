@@ -3300,6 +3300,15 @@ final class AudioAnalysisTests: XCTestCase {
 }
 
 final class BoyisoProtocolTests: XCTestCase {
+    func testSoundDetectionOverlayUsesExactProductCopy() {
+        XCTAssertEqual(BoyisoOverlayKind.soundDetected.primaryMessage, "말할 사람의 소리가 감지되었습니다.")
+        XCTAssertEqual(
+            BoyisoOverlayKind.soundDetected.accessibilityLabel(sender: "아이 방"),
+            "말할 사람의 소리가 감지되었습니다. 보낸 기기, 아이 방"
+        )
+        XCTAssertEqual(BoyisoOverlayKind.soundDetected.imageName, "BoyisoCryingChild")
+    }
+
     func testParticipantSectionsIncludeCurrentDeviceFirstAndKeepEmptyGroup() {
         let currentID = UUID()
         let current = BoyisoPeerStatus(
@@ -3353,6 +3362,38 @@ final class BoyisoProtocolTests: XCTestCase {
         XCTAssertEqual(sections.guests.map(\.name), ["아이", "동생"])
         XCTAssertEqual(sections.guests.map(\.state), ["감지 중", "대기 중"])
         XCTAssertTrue(sections.guests[0].isCurrentDevice)
+    }
+
+    func testParticipantSectionsMergeOnlyMatchingSourceIDs() {
+        let current = BoyisoPeerStatus(
+            id: UUID(), name: "나", role: .host, lastSeen: Date(), monitoring: false,
+            batteryPercent: 90, displayMode: .mate, sessionActive: true, transports: []
+        )
+        let sharedID = UUID()
+        let wifiCopy = BoyisoPeerStatus(
+            id: sharedID, name: "SM-T500", role: .host, lastSeen: Date(timeIntervalSince1970: 10),
+            monitoring: false, batteryPercent: 70, displayMode: .mate, sessionActive: true,
+            transports: [.localNetwork]
+        )
+        let bluetoothCopy = BoyisoPeerStatus(
+            id: sharedID, name: "SM-T500", role: .host, lastSeen: Date(timeIntervalSince1970: 20),
+            monitoring: false, batteryPercent: 71, displayMode: .mate, sessionActive: true,
+            transports: [.bluetooth]
+        )
+        let sameNameDifferentID = BoyisoPeerStatus(
+            id: UUID(), name: "SM-T500", role: .host, lastSeen: Date(timeIntervalSince1970: 30),
+            monitoring: false, batteryPercent: 72, displayMode: .mate, sessionActive: true,
+            transports: [.localNetwork]
+        )
+
+        let sections = BoyisoParticipantSections(
+            current: current,
+            peers: [wifiCopy, bluetoothCopy, sameNameDifferentID]
+        )
+
+        XCTAssertEqual(sections.totalCount, 3)
+        XCTAssertEqual(sections.hosts.filter { $0.name == "SM-T500" }.count, 2)
+        XCTAssertEqual(sections.hosts.first { $0.id == sharedID }?.batteryPercent, 71)
     }
 
     func testEncryptedLANFrameRoundTripsWithoutSendingRawAudio() throws {

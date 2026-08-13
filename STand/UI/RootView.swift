@@ -432,11 +432,11 @@ struct RootView: View {
                 }
 
                 if didInitialize, let sender = boyisoGreetingSender {
-                    BoyisoGreetingOverlay(sender: sender, imageName: "BoyisoGreeting")
+                    BoyisoGreetingOverlay(sender: sender, kind: .greeting)
                         .transition(.opacity.combined(with: .scale(scale: 0.94)))
                         .zIndex(160)
                 } else if didInitialize, let sender = boyisoCryingSender {
-                    BoyisoGreetingOverlay(sender: sender, imageName: "BoyisoCryingChild")
+                    BoyisoGreetingOverlay(sender: sender, kind: .soundDetected)
                         .transition(.opacity.combined(with: .scale(scale: 0.94)))
                         .zIndex(160)
                 }
@@ -3640,24 +3640,55 @@ private struct BoyisoControlButton: View {
     }
 }
 
+enum BoyisoOverlayKind: Equatable {
+    case greeting, soundDetected
+
+    var imageName: String { self == .greeting ? "BoyisoGreeting" : "BoyisoCryingChild" }
+    var primaryMessage: String {
+        self == .greeting ? "같은 공간에서 인사가 왔어요" : "말할 사람의 소리가 감지되었습니다."
+    }
+    func accessibilityLabel(sender: String) -> String {
+        guard !sender.isEmpty else { return primaryMessage }
+        return self == .greeting ? "\(sender)님의 인사" : "\(primaryMessage) 보낸 기기, \(sender)"
+    }
+}
+
 private struct BoyisoGreetingOverlay: View {
     let sender: String
-    let imageName: String
+    let kind: BoyisoOverlayKind
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.78).ignoresSafeArea()
+            (kind == .soundDetected ? Color(red: 1, green: 0.93, blue: 0.72) : Color.black.opacity(0.78))
+                .ignoresSafeArea()
             VStack(spacing: 18) {
-                Image(imageName)
+                Image(kind.imageName)
                     .resizable().scaledToFit().frame(maxWidth: 320, maxHeight: 320)
                     .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-                Text(sender.isEmpty ? "같은 공간에서 인사가 왔어요" : "\(sender)님의 인사")
-                    .font(.title2.bold()).foregroundStyle(.white)
+                VStack(spacing: 7) {
+                    Text(kind.primaryMessage)
+                        .font(.title2.bold())
+                        .multilineTextAlignment(.center)
+                    if !sender.isEmpty {
+                        Text(kind == .greeting ? "\(sender)님의 인사" : "보낸 기기 · \(sender)")
+                            .font(.headline)
+                            .opacity(0.72)
+                    }
+                }
+                .foregroundStyle(kind == .soundDetected ? Color.black.opacity(0.86) : .white)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 16)
+                .background(
+                    kind == .soundDetected ? Color.white.opacity(0.9) : Color.white.opacity(0.1),
+                    in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                )
             }
             .padding(28)
         }
         .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.4), value: sender)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(kind.accessibilityLabel(sender: sender))
         .allowsHitTesting(false)
     }
 }

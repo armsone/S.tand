@@ -159,21 +159,9 @@ struct BoyisoView: View {
                 }
             }
 
-            BoyisoCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("함께 연결된 사람").font(.title3.bold())
-                        Spacer()
-                        Text("총 \(participantSections.totalCount)명")
-                            .font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.68))
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("함께 연결된 사람, 총 \(participantSections.totalCount)명")
-
-                    participantGroup(role: .host, participants: participantSections.hosts)
-                    participantGroup(role: .guest, participants: participantSections.guests)
-                }
-            }
+            BoyisoParticipantSummaryHeader(totalCount: participantSections.totalCount)
+            participantGroupCard(role: .host, participants: participantSections.hosts)
+            participantGroupCard(role: .guest, participants: participantSections.guests)
 
             Text("iOS가 백그라운드 실행을 제한하거나 앱이 종료되면 근거리 연결과 알림이 유지되지 않을 수 있습니다. 무음 모드·집중 모드·알림 설정은 그대로 따릅니다.")
                 .font(.caption).foregroundStyle(.white.opacity(0.48))
@@ -219,28 +207,37 @@ struct BoyisoView: View {
         .buttonStyle(.bordered)
     }
 
-    @ViewBuilder
-    private func participantGroup(role: BoyisoRole, participants: [BoyisoParticipantPresentation]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Image(systemName: role.iconName).accessibilityHidden(true)
-                Text("\(role.title) \(participants.count)명")
-            }
-            .font(.headline)
-            .foregroundStyle(role.tint)
-            .accessibilityAddTraits(.isHeader)
+    private func participantGroupCard(
+        role: BoyisoRole,
+        participants: [BoyisoParticipantPresentation]
+    ) -> some View {
+        BoyisoCard(tint: role.tint) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(role.tint).frame(width: 4, height: 28).accessibilityHidden(true)
+                    Image(systemName: role.iconName).accessibilityHidden(true)
+                    Text("\(role.title) \(participants.count)명")
+                }
+                .font(.title3.bold())
+                .foregroundStyle(role.tint)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(role.title) \(participants.count)명")
+                .accessibilityAddTraits(.isHeader)
 
-            if participants.isEmpty {
-                Text("아직 없음")
-                    .font(.subheadline).foregroundStyle(.white.opacity(0.58))
-                    .frame(minHeight: 56, alignment: .leading)
-            } else {
-                ForEach(participants) { participant in
-                    BoyisoParticipantRow(participant: participant)
+                if participants.isEmpty {
+                    Text("아직 없음")
+                        .font(.body).foregroundStyle(.white.opacity(0.58))
+                        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
+                } else {
+                    ForEach(participants) { participant in
+                        BoyisoParticipantRow(participant: participant)
+                    }
                 }
             }
         }
-        .padding(.top, 4)
     }
 
     private func pathBadge(_ name: String, count: Int) -> some View {
@@ -296,7 +293,18 @@ struct BoyisoParticipantSections: Equatable {
     var totalCount: Int { hosts.count + guests.count }
 
     init(current: BoyisoPeerStatus, peers: [BoyisoPeerStatus]) {
-        let all = [(current, true)] + peers.map { ($0, false) }
+        var uniquePeers: [UUID: BoyisoPeerStatus] = [:]
+        for peer in peers where peer.id != current.id {
+            if let existing = uniquePeers[peer.id] {
+                var newest = peer.lastSeen >= existing.lastSeen ? peer : existing
+                newest.transports.formUnion(existing.transports)
+                newest.transports.formUnion(peer.transports)
+                uniquePeers[peer.id] = newest
+            } else {
+                uniquePeers[peer.id] = peer
+            }
+        }
+        let all = [(current, true)] + uniquePeers.values.map { ($0, false) }
         func presentations(for role: BoyisoRole) -> [BoyisoParticipantPresentation] {
             all.filter { $0.0.role == role }.map { peer, isCurrent in
                 BoyisoParticipantPresentation(
@@ -327,6 +335,31 @@ private extension BoyisoRole {
     var tint: Color { self == .host ? Color(red: 0.25, green: 0.78, blue: 0.84) : Color.orange }
 }
 
+private struct BoyisoParticipantSummaryHeader: View {
+    let totalCount: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("함께 연결된 사람").font(.title2.bold())
+                Spacer(minLength: 8)
+                Text("총 \(totalCount)명")
+                    .font(.headline).foregroundStyle(.white.opacity(0.72))
+            }
+            Text("현재 기기를 포함해 이 공간에 연결된 사람입니다.")
+                .font(.subheadline).foregroundStyle(.white.opacity(0.62))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 4)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("함께 연결된 사람, 총 \(totalCount)명")
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
 private struct BoyisoParticipantRow: View {
     let participant: BoyisoParticipantPresentation
 
@@ -337,7 +370,7 @@ private struct BoyisoParticipantRow: View {
                 .frame(width: 24).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 7) {
-                    Text(participant.name).font(.headline)
+                    Text(participant.name).font(.title3.weight(.semibold))
                     if participant.isCurrentDevice {
                         Text("나").font(.caption2.bold()).padding(.horizontal, 7).padding(.vertical, 3)
                             .background(.white.opacity(0.14), in: Capsule())
@@ -355,7 +388,10 @@ private struct BoyisoParticipantRow: View {
                 Text("\(battery)%").font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.58))
             }
         }
-        .frame(minHeight: 56)
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(participant.accessibilityLabel)
     }
@@ -440,10 +476,21 @@ private struct BoyisoQRScanner: UIViewControllerRepresentable {
 }
 
 private struct BoyisoCard<Content: View>: View {
+    var tint: Color?
     @ViewBuilder let content: Content
+    init(tint: Color? = nil, @ViewBuilder content: () -> Content) {
+        self.tint = tint
+        self.content = content()
+    }
     var body: some View {
         content.frame(maxWidth: .infinity, alignment: .leading).padding(16)
-            .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 18))
-            .overlay { RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.08), lineWidth: 0.7) }
+            .background {
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(tint?.opacity(0.065) ?? .white.opacity(0.055))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(tint?.opacity(0.28) ?? .white.opacity(0.08), lineWidth: 0.8)
+            }
     }
 }
