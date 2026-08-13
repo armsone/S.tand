@@ -3300,6 +3300,61 @@ final class AudioAnalysisTests: XCTestCase {
 }
 
 final class BoyisoProtocolTests: XCTestCase {
+    func testParticipantSectionsIncludeCurrentDeviceFirstAndKeepEmptyGroup() {
+        let currentID = UUID()
+        let current = BoyisoPeerStatus(
+            id: currentID,
+            name: "엄마",
+            role: .host,
+            lastSeen: Date(),
+            monitoring: false,
+            batteryPercent: 82,
+            displayMode: .mate,
+            sessionActive: true,
+            transports: []
+        )
+
+        let sections = BoyisoParticipantSections(current: current, peers: [])
+
+        XCTAssertEqual(sections.totalCount, 1)
+        XCTAssertEqual(sections.hosts.map(\.id), [currentID])
+        XCTAssertTrue(sections.hosts[0].isCurrentDevice)
+        XCTAssertEqual(sections.hosts[0].state, "연결됨")
+        XCTAssertEqual(sections.hosts[0].accessibilityLabel, "엄마, 나, 볼 사람, 연결됨, 배터리 82퍼센트")
+        XCTAssertTrue(sections.guests.isEmpty)
+    }
+
+    func testParticipantSectionsUseFixedRoleOrderAndGuestSensingState() {
+        let currentID = UUID()
+        let current = BoyisoPeerStatus(
+            id: currentID,
+            name: "아이",
+            role: .guest,
+            lastSeen: Date(),
+            monitoring: true,
+            batteryPercent: nil,
+            displayMode: .mate,
+            sessionActive: true,
+            transports: []
+        )
+        let host = BoyisoPeerStatus(
+            id: UUID(), name: "아빠", role: .host, lastSeen: Date(), monitoring: false,
+            batteryPercent: 44, displayMode: .object, sessionActive: false, transports: [.localNetwork]
+        )
+        let waitingGuest = BoyisoPeerStatus(
+            id: UUID(), name: "동생", role: .guest, lastSeen: Date(), monitoring: false,
+            batteryPercent: nil, displayMode: .mate, sessionActive: true, transports: [.bluetooth]
+        )
+
+        let sections = BoyisoParticipantSections(current: current, peers: [waitingGuest, host])
+
+        XCTAssertEqual(sections.totalCount, 3)
+        XCTAssertEqual(sections.hosts.map(\.name), ["아빠"])
+        XCTAssertEqual(sections.guests.map(\.name), ["아이", "동생"])
+        XCTAssertEqual(sections.guests.map(\.state), ["감지 중", "대기 중"])
+        XCTAssertTrue(sections.guests[0].isCurrentDevice)
+    }
+
     func testEncryptedLANFrameRoundTripsWithoutSendingRawAudio() throws {
         let invitation = BoyisoInvitation.make()
         let event = BoyisoEvent(

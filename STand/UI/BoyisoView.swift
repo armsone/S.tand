@@ -13,6 +13,8 @@ struct BoyisoView: View {
     @State private var pendingInvitation: URL?
     @State private var validationMessage: String?
     @State private var shareURL: URL?
+    @State private var connectionDetailsExpanded = false
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     init(service: BoyisoConnectivityService, accent: Color) {
         self.service = service
@@ -87,23 +89,13 @@ struct BoyisoView: View {
             BoyisoCard {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("3. 공간 선택").font(.title3.bold())
-                    Button {
-                        createRoom()
-                    } label: {
-                        Label("공간 만들기", systemImage: "qrcode")
-                            .font(.headline).frame(maxWidth: .infinity, minHeight: 48)
+                    Group {
+                        if horizontalSizeClass == .regular {
+                            HStack(spacing: 12) { roomCreationTile; roomJoinTile }
+                        } else {
+                            VStack(spacing: 12) { roomCreationTile; roomJoinTile }
+                        }
                     }
-                    .buttonStyle(.borderedProminent).tint(accent)
-
-                    Button {
-                        scannerPresented = true
-                    } label: {
-                        Label("공간 입장", systemImage: "qrcode.viewfinder")
-                            .font(.headline).frame(maxWidth: .infinity, minHeight: 48)
-                    }
-                    .buttonStyle(.bordered)
-                    Text("공간 입장은 같은 공간의 QR코드를 카메라로 찍습니다.")
-                        .font(.caption).foregroundStyle(.white.opacity(0.58))
                 }
             }
 
@@ -128,15 +120,20 @@ struct BoyisoView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Label("공간에 연결됨", systemImage: "checkmark.circle.fill")
                         .font(.title3.bold()).foregroundStyle(.green)
-                    Text("나의 역할").font(.caption).foregroundStyle(.white.opacity(0.55))
-                    Text(service.role.title).font(.headline)
-                    HStack(spacing: 8) {
-                        pathBadge("Wi-Fi", count: service.localNetworkConnectionCount)
-                        pathBadge("Bluetooth", count: service.bluetoothConnectionCount)
-                    }
+                    Text(connectionSummary)
+                        .font(.subheadline).foregroundStyle(.white.opacity(0.68))
                     if let issue = service.issueMessage {
                         Text(issue).font(.caption).foregroundStyle(.orange)
                     }
+                    DisclosureGroup("연결 자세히 보기", isExpanded: $connectionDetailsExpanded) {
+                        HStack(spacing: 8) {
+                            pathBadge("Wi-Fi", count: service.localNetworkConnectionCount)
+                            pathBadge("Bluetooth", count: service.bluetoothConnectionCount)
+                        }
+                        .padding(.top, 8)
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .tint(.white.opacity(0.78))
                 }
             }
 
@@ -164,28 +161,17 @@ struct BoyisoView: View {
 
             BoyisoCard {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("같은 공간 안에 있는 사람").font(.title3.bold())
-                    if service.activePeers.isEmpty {
-                        Text("같은 공간의 사람이 연결되기를 기다리고 있습니다.")
-                            .font(.subheadline).foregroundStyle(.white.opacity(0.58))
-                    } else {
-                        ForEach(service.activePeers) { peer in
-                            Divider().overlay(.white.opacity(0.08))
-                            HStack(spacing: 10) {
-                                Image(systemName: peer.role == .host ? "eye.fill" : "waveform")
-                                    .foregroundStyle(accent)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(peer.name).font(.headline)
-                                    Text(peer.role.title + participantState(peer))
-                                        .font(.caption).foregroundStyle(.white.opacity(0.58))
-                                }
-                                Spacer()
-                                if let battery = peer.batteryPercent {
-                                    Text("\(battery)%").font(.caption.monospacedDigit())
-                                }
-                            }
-                        }
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("함께 연결된 사람").font(.title3.bold())
+                        Spacer()
+                        Text("총 \(participantSections.totalCount)명")
+                            .font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.68))
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("함께 연결된 사람, 총 \(participantSections.totalCount)명")
+
+                    participantGroup(role: .host, participants: participantSections.hosts)
+                    participantGroup(role: .guest, participants: participantSections.guests)
                 }
             }
 
@@ -201,9 +187,60 @@ struct BoyisoView: View {
         .onAppear { prepareShareImage() }
     }
 
-    private func participantState(_ peer: BoyisoPeerStatus) -> String {
-        guard peer.role == .guest else { return "" }
-        return peer.sessionActive && peer.displayMode == .mate && peer.monitoring ? " · 감지 중" : " · 대기 중"
+    private var participantSections: BoyisoParticipantSections {
+        BoyisoParticipantSections(current: service.currentParticipant, peers: service.activePeers)
+    }
+
+    private var connectionSummary: String {
+        if service.issueMessage != nil { return "연결을 다시 시도하고 있습니다." }
+        if service.activePeers.isEmpty { return "함께할 사람이 연결되기를 기다리고 있습니다." }
+        return "함께 연결되어 있습니다."
+    }
+
+    private var roomCreationTile: some View {
+        Button(action: createRoom) {
+            BoyisoRoomChoiceLabel(
+                title: "공간 만들기",
+                description: "초대 QR을 만들고 사람들을 기다립니다.",
+                systemImage: "qrcode"
+            )
+        }
+        .buttonStyle(.borderedProminent).tint(accent)
+    }
+
+    private var roomJoinTile: some View {
+        Button { scannerPresented = true } label: {
+            BoyisoRoomChoiceLabel(
+                title: "공간 입장",
+                description: "카메라로 같은 공간의 QR을 찍습니다.",
+                systemImage: "qrcode.viewfinder"
+            )
+        }
+        .buttonStyle(.bordered)
+    }
+
+    @ViewBuilder
+    private func participantGroup(role: BoyisoRole, participants: [BoyisoParticipantPresentation]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Image(systemName: role.iconName).accessibilityHidden(true)
+                Text("\(role.title) \(participants.count)명")
+            }
+            .font(.headline)
+            .foregroundStyle(role.tint)
+            .accessibilityAddTraits(.isHeader)
+
+            if participants.isEmpty {
+                Text("아직 없음")
+                    .font(.subheadline).foregroundStyle(.white.opacity(0.58))
+                    .frame(minHeight: 56, alignment: .leading)
+            } else {
+                ForEach(participants) { participant in
+                    BoyisoParticipantRow(participant: participant)
+                }
+            }
+        }
+        .padding(.top, 4)
     }
 
     private func pathBadge(_ name: String, count: Int) -> some View {
@@ -235,6 +272,113 @@ struct BoyisoView: View {
               let data = image.pngData() else { shareURL = nil; return }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("boyiso-invitation.png")
         do { try data.write(to: url, options: .atomic); shareURL = url } catch { shareURL = nil }
+    }
+}
+
+struct BoyisoParticipantPresentation: Identifiable, Equatable {
+    let id: UUID
+    let name: String
+    let role: BoyisoRole
+    let isCurrentDevice: Bool
+    let state: String
+    let batteryPercent: Int?
+
+    var accessibilityLabel: String {
+        [name, isCurrentDevice ? "나" : nil, role.title, state,
+         batteryPercent.map { "배터리 \($0)퍼센트" }]
+            .compactMap { $0 }.joined(separator: ", ")
+    }
+}
+
+struct BoyisoParticipantSections: Equatable {
+    let hosts: [BoyisoParticipantPresentation]
+    let guests: [BoyisoParticipantPresentation]
+    var totalCount: Int { hosts.count + guests.count }
+
+    init(current: BoyisoPeerStatus, peers: [BoyisoPeerStatus]) {
+        let all = [(current, true)] + peers.map { ($0, false) }
+        func presentations(for role: BoyisoRole) -> [BoyisoParticipantPresentation] {
+            all.filter { $0.0.role == role }.map { peer, isCurrent in
+                BoyisoParticipantPresentation(
+                    id: peer.id,
+                    name: peer.name,
+                    role: peer.role,
+                    isCurrentDevice: isCurrent,
+                    state: peer.role == .host ? "연결됨" : Self.guestState(peer),
+                    batteryPercent: peer.batteryPercent
+                )
+            }
+            .sorted {
+                if $0.isCurrentDevice != $1.isCurrentDevice { return $0.isCurrentDevice }
+                return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
+        }
+        hosts = presentations(for: .host)
+        guests = presentations(for: .guest)
+    }
+
+    private static func guestState(_ peer: BoyisoPeerStatus) -> String {
+        peer.sessionActive && peer.displayMode == .mate && peer.monitoring ? "감지 중" : "대기 중"
+    }
+}
+
+private extension BoyisoRole {
+    var iconName: String { self == .host ? "eye.fill" : "waveform" }
+    var tint: Color { self == .host ? Color(red: 0.25, green: 0.78, blue: 0.84) : Color.orange }
+}
+
+private struct BoyisoParticipantRow: View {
+    let participant: BoyisoParticipantPresentation
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: participant.role.iconName)
+                .font(.headline).foregroundStyle(participant.role.tint)
+                .frame(width: 24).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 7) {
+                    Text(participant.name).font(.headline)
+                    if participant.isCurrentDevice {
+                        Text("나").font(.caption2.bold()).padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(.white.opacity(0.14), in: Capsule())
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 7) {
+                    Text(participant.role.title)
+                        .font(.caption.bold()).foregroundStyle(participant.role.tint)
+                    Text(participant.state).font(.caption).foregroundStyle(.white.opacity(0.68))
+                }
+            }
+            Spacer(minLength: 8)
+            if let battery = participant.batteryPercent {
+                Text("\(battery)%").font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.58))
+            }
+        }
+        .frame(minHeight: 56)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(participant.accessibilityLabel)
+    }
+}
+
+private struct BoyisoRoomChoiceLabel: View {
+    let title: String
+    let description: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: systemImage).font(.title2).frame(width: 32).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline)
+                Text(description).font(.caption).foregroundStyle(.white.opacity(0.7))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .multilineTextAlignment(.leading)
+        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 

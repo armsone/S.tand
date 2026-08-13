@@ -44,6 +44,19 @@ final class BoyisoConnectivityService: NSObject, ObservableObject {
     var activePeers: [BoyisoPeerStatus] {
         peers.filter { $0.isFresh() }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
+    var currentParticipant: BoyisoPeerStatus {
+        BoyisoPeerStatus(
+            id: deviceID,
+            name: deviceName,
+            role: role,
+            lastSeen: Date(),
+            monitoring: localMonitoring,
+            batteryPercent: localBatteryPercent,
+            displayMode: localDisplayMode,
+            sessionActive: localSessionActive,
+            transports: []
+        )
+    }
     var statusText: String { isEnabled ? "공간에 연결됨" : "설정 필요" }
     var homeRoleText: String { isEnabled ? role.title : "연결 안 됨" }
 
