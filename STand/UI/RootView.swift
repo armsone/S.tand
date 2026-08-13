@@ -1,3 +1,4 @@
+import AudioToolbox
 import SwiftUI
 import UIKit
 
@@ -79,6 +80,7 @@ private enum PresentedSheet: String, Identifiable {
     case internetRadio
     case internetRadioChannels
     case settings
+    case boyiso
 
     var id: String { rawValue }
 }
@@ -293,6 +295,9 @@ struct RootView: View {
     @State private var currentProtectedInsets = EdgeInsets()
     @State private var radioEditorChannelID: UUID?
     @State private var hasStartedApp = false
+    @State private var boyisoGreetingSender: String?
+    @State private var boyisoCryingSender: String?
+    @State private var boyisoOverlayTask: Task<Void, Never>?
 
     init(
         model: StandViewModel,
@@ -426,6 +431,16 @@ struct RootView: View {
                         .zIndex(100)
                 }
 
+                if didInitialize, let sender = boyisoGreetingSender {
+                    BoyisoGreetingOverlay(sender: sender, imageName: "BoyisoGreeting")
+                        .transition(.opacity.combined(with: .scale(scale: 0.94)))
+                        .zIndex(160)
+                } else if didInitialize, let sender = boyisoCryingSender {
+                    BoyisoGreetingOverlay(sender: sender, imageName: "BoyisoCryingChild")
+                        .transition(.opacity.combined(with: .scale(scale: 0.94)))
+                        .zIndex(160)
+                }
+
                 if !isEditingScreen, model.isNightSessionActive {
                     homeAccessibilityControls
                 }
@@ -503,6 +518,10 @@ struct RootView: View {
                 InternetRadioChannelManagementView(model: model)
             case .settings:
                 SettingsView(model: model)
+            case .boyiso:
+                NavigationStack {
+                    BoyisoView(service: boyiso, accent: settings.value.displayTheme.accentColor)
+                }
             }
         }
         .onAppear {
@@ -530,6 +549,10 @@ struct RootView: View {
             @unknown default:
                 break
             }
+        }
+        .onChange(of: boyiso.lastRemoteEvent?.id) { _, _ in
+            guard let event = boyiso.lastRemoteEvent else { return }
+            handleBoyisoEvent(event)
         }
         .onChange(of: model.sharedInternetRadioDraft) { _, draft in
             guard draft != nil else { return }
@@ -563,11 +586,13 @@ struct RootView: View {
     private func topBar(isPortrait _: Bool) -> some View {
         let objectModeLocked = model.isNightSessionActive
             && settings.value.modePreference == .object
+        let mateModeLocked = model.isNightSessionActive
+            && settings.value.modePreference == .mate
         let statusTitle = model.isNightSessionActive
-            ? (objectModeLocked ? "오브제 모드 잠금" : model.experienceMode.title)
+            ? (objectModeLocked ? "오브제 모드 잠금" : (mateModeLocked ? "매이트 모드 잠금" : model.experienceMode.title))
             : "자동 기능 꺼짐"
         let statusImage = model.isNightSessionActive
-            ? (objectModeLocked ? "lock.fill" : model.experienceMode.systemImage)
+            ? ((objectModeLocked || mateModeLocked) ? "lock.fill" : model.experienceMode.systemImage)
             : "stop.circle.fill"
 
         return ZStack {
@@ -601,7 +626,14 @@ struct RootView: View {
     @ViewBuilder
     private func centerContent(isPortrait: Bool, canvasSize: CGSize) -> some View {
         if model.isNightSessionActive {
-            clockAndWeather(isPortrait: isPortrait, isDimmed: false, canvasSize: canvasSize)
+            if settings.value.modePreference == .mate, model.experienceMode != .startled {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: isPortrait ? 72 : 92, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.78))
+                    .accessibilityLabel("매이트 모드 잠금")
+            } else {
+                clockAndWeather(isPortrait: isPortrait, isDimmed: false, canvasSize: canvasSize)
+            }
         } else {
             VStack(spacing: 16) {
                 Image(systemName: "moon.stars.fill")
@@ -984,6 +1016,18 @@ struct RootView: View {
                 model.pauseMonitoringForPlayback()
                 presentedSheet = .recordings
             }
+        case .boyiso:
+            BoyisoControlButton(
+                title: "보이소",
+                systemImage: boyiso.isEnabled ? "pawprint.fill" : "pawprint",
+                status: boyiso.isEnabled ? "나의 역할 · \(boyiso.role.title)" : "연결 안 됨",
+                width: width,
+                tap: {
+                    if boyiso.isEnabled { _ = boyiso.sendTokTok() }
+                    else { presentedSheet = .boyiso }
+                },
+                longPress: { presentedSheet = .boyiso }
+            )
         case .settings:
             ControlButton(
                 title: "설정 열기",
@@ -1033,11 +1077,8 @@ struct RootView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .accessibilityLabel("보이소 알림, \(event.sourceName)에서 \(event.kind.title)")
             }
-            if boyiso.isEnabled,
-               boyiso.role == .host,
-               !boyiso.peers.isEmpty,
-               boyiso.activePeers.isEmpty {
-                Label("보이소 감시 연결이 끊겼습니다", systemImage: "wifi.exclamationmark")
+            if boyiso.isEnabled, !boyiso.peers.isEmpty, boyiso.activePeers.isEmpty {
+                Label("보이소 공간 연결이 끊겼습니다", systemImage: "wifi.exclamationmark")
                     .font(.subheadline.weight(.bold))
                     .padding(.horizontal, 18)
                     .padding(.vertical, 12)
@@ -1048,6 +1089,42 @@ struct RootView: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
         .allowsHitTesting(false)
+    }
+
+    private func handleBoyisoEvent(_ event: BoyisoEvent) {
+        guard event.kind == .toktok || event.isCryingSound else { return }
+        boyisoOverlayTask?.cancel()
+        if event.kind == .toktok {
+            boyisoGreetingSender = event.sourceName
+            boyisoCryingSender = nil
+            playBoyisoChime()
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } else {
+            boyisoCryingSender = event.sourceName
+            boyisoGreetingSender = nil
+            Task { @MainActor in
+                playBoyisoChime()
+                try? await Task.sleep(for: .milliseconds(1_250))
+                playBoyisoChime()
+            }
+        }
+        UIAccessibility.post(notification: .announcement,
+            argument: event.kind == .toktok ? "\(event.sourceName)님의 톡톡" : "\(event.sourceName)에서 소리를 감지했습니다")
+        boyisoOverlayTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            boyisoGreetingSender = nil
+            boyisoCryingSender = nil
+        }
+    }
+
+    private func playBoyisoChime() {
+        guard let url = Bundle.main.url(forResource: "boyiso_toktok", withExtension: "wav") else { return }
+        var soundID: SystemSoundID = 0
+        guard AudioServicesCreateSystemSoundID(url as CFURL, &soundID) == kAudioServicesNoError else { return }
+        AudioServicesPlaySystemSoundWithCompletion(soundID) {
+            AudioServicesDisposeSystemSoundID(soundID)
+        }
     }
 
     private var batteryProtectionBanner: some View {
@@ -3521,5 +3598,66 @@ private struct ControlButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint(hint ?? "")
+    }
+}
+
+private struct BoyisoControlButton: View {
+    let title: String
+    let systemImage: String
+    let status: String
+    let width: CGFloat
+    let tap: () -> Void
+    let longPress: () -> Void
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold)).frame(width: 20, height: 16)
+            Text(title).font(.system(size: StandControlLayoutMetrics.titleFontSize, weight: .semibold))
+            Text(status).font(.system(size: StandControlLayoutMetrics.statusFontSize, weight: .medium))
+                .foregroundStyle(.white.opacity(0.52)).lineLimit(1).minimumScaleFactor(0.6)
+        }
+        .foregroundStyle(.white.opacity(StandControlLayoutMetrics.foregroundOpacity))
+        .padding(.horizontal, 4)
+        .frame(width: width, height: StandControlLayoutMetrics.itemHeight)
+        .background { FlipPanelSurface(isDimmed: false, cornerRadius: 13, splitGap: 2) }
+        .contentShape(Rectangle())
+        .gesture(
+            LongPressGesture(minimumDuration: 0.7, maximumDistance: 12)
+                .exclusively(before: TapGesture())
+                .onEnded { result in
+                    switch result {
+                    case .first(true): longPress()
+                    case .second: tap()
+                    default: break
+                    }
+                }
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: "기본 동작", tap)
+        .accessibilityAction(named: "보이소 설정 열기", longPress)
+    }
+}
+
+private struct BoyisoGreetingOverlay: View {
+    let sender: String
+    let imageName: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.78).ignoresSafeArea()
+            VStack(spacing: 18) {
+                Image(imageName)
+                    .resizable().scaledToFit().frame(maxWidth: 320, maxHeight: 320)
+                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                Text(sender.isEmpty ? "같은 공간에서 인사가 왔어요" : "\(sender)님의 인사")
+                    .font(.title2.bold()).foregroundStyle(.white)
+            }
+            .padding(28)
+        }
+        .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.4), value: sender)
+        .allowsHitTesting(false)
     }
 }

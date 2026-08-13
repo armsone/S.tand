@@ -28,6 +28,7 @@ final class AudioCaptureService: ObservableObject {
 
     var onClap: (() -> Void)?
     var onRelativeSoundRise: (() -> Void)?
+    var onContinuousSound: (() -> Void)?
     var onSoundClassified: ((SleepSoundClassification) -> Void)?
     var onClipSaved: ((URL) -> Void)?
 
@@ -61,6 +62,8 @@ final class AudioCaptureService: ObservableObject {
     private var tapInstalled = false
     private var lastLevelPublication: TimeInterval = 0
     private var notificationObservers: [NSObjectProtocol] = []
+    private var continuousSoundDuration: TimeInterval = 0
+    private var lastContinuousSoundAt: TimeInterval = -.infinity
     private var shouldResumeAfterInterruption = false
 
     init(recordingsDirectory: URL) {
@@ -285,6 +288,13 @@ final class AudioCaptureService: ObservableObject {
             }
             if detection.soundBegan {
                 DispatchQueue.main.async { self.onRelativeSoundRise?() }
+            }
+            continuousSoundDuration = detection.isAboveSoundThreshold
+                ? continuousSoundDuration + duration
+                : 0
+            if continuousSoundDuration >= 2, now - lastContinuousSoundAt >= 5 {
+                lastContinuousSoundAt = now
+                DispatchQueue.main.async { self.onContinuousSound?() }
             }
             let features = copiedBuffer.sleepSoundFeatures(
                 rmsDB: levels.rmsDB,

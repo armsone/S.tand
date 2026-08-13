@@ -66,6 +66,7 @@ enum SimplifiedBrightnessModePolicy {
     static let objectTapLevel = 0.8
     static let verticalDragTravelRatio = 0.5
     static let objectLockDelay: Duration = .seconds(1)
+    static let mateLockDelay: Duration = .seconds(1)
     static let objectLockReleaseLevel = 0.95
 
     static func clamped(_ level: Double) -> Double {
@@ -89,7 +90,8 @@ enum SimplifiedBrightnessModePolicy {
     }
 
     static func preferenceDuringAdjustment(for level: Double) -> StandModePreference {
-        clamped(level) >= 1 ? .automatic : preference(for: level)
+        let value = clamped(level)
+        return (value >= 1 || value <= 0) ? .automatic : preference(for: value)
     }
 
     static func stabilizedAdjustment(
@@ -435,6 +437,10 @@ final class StandViewModel: ObservableObject {
                   self.environmentDisplayMode == .sleeping,
                   self.settings.value.multiStimulusWakeEnabled
             else { return }
+            self.boyiso.sendSoundEvent(
+                intensity: max(0.2, self.audio.normalizedLevel),
+                detail: "finger_snap"
+            )
             self.wakeForSleepMovement()
         }
         audio.onRelativeSoundRise = { [weak self] in
@@ -444,7 +450,18 @@ final class StandViewModel: ObservableObject {
             else { return }
             self.boyiso.sendSoundEvent(
                 intensity: max(0.2, self.audio.normalizedLevel),
-                detail: "주변보다 커진 소리"
+                detail: "big_sound"
+            )
+            self.wakeForSleepMovement()
+        }
+        audio.onContinuousSound = { [weak self] in
+            guard let self,
+                  self.environmentDisplayMode == .sleeping,
+                  self.settings.value.multiStimulusWakeEnabled
+            else { return }
+            self.boyiso.sendSoundEvent(
+                intensity: max(0.2, self.audio.normalizedLevel),
+                detail: "continuous_sound"
             )
             self.wakeForSleepMovement()
         }
@@ -468,11 +485,18 @@ final class StandViewModel: ObservableObject {
             self.boyiso.sendMovementEvent()
             self.wakeForSleepMovement()
         }
-        boyiso.onRemoteAlert = { [weak self] _ in
+        boyiso.onRemoteEvent = { [weak self] event in
             guard let self,
+                  event.role == .guest,
+                  event.kind == .sound || event.kind == .movement,
                   self.environmentDisplayMode == .sleeping,
+                  self.isNightSessionActive,
                   self.settings.value.multiStimulusWakeEnabled
             else { return }
+            if event.kind == .sound {
+                guard self.isNightSessionActive,
+                      self.environmentDisplayMode == .sleeping else { return }
+            }
             self.wakeForSleepMovement(respectsMateWarmup: false)
         }
         postureMonitor.onFaceDownChanged = { [weak self] isFaceDown in
@@ -641,7 +665,11 @@ final class StandViewModel: ObservableObject {
 
     func appWillResignActive() {
         appIsActive = false
-        boyiso.updateLocalState(monitoring: false, batteryPercent: boyisoBatteryPercent)
+        let keepsBoyisoMonitoring = boyiso.isEnabled
+            && boyiso.role == .guest
+            && isNightSessionActive
+            && environmentDisplayMode == .sleeping
+        updateBoyisoLocalState(monitoring: keepsBoyisoMonitoring)
         isAdjustingBrightness = false
         brightnessEndpointLockTask?.cancel()
         brightnessEndpointLockTask = nil
@@ -661,8 +689,10 @@ final class StandViewModel: ObservableObject {
             ? ambientCamera.currentState
             : .disabled
         guard isNightSessionActive else { return }
-        audio.stop()
-        motionMonitor.stop()
+        if !keepsBoyisoMonitoring {
+            audio.stop()
+            motionMonitor.stop()
+        }
         // 앱이 화면을 떠난 동안에는 실제 감시가 중단되므로 잠자기 모드 구간도
         // 여기서 닫는다. 다시 30분 이내 돌아오면 같은 잠자리로 재개된다.
         finishStartleEvent()
@@ -1241,12 +1271,12 @@ final class StandViewModel: ObservableObject {
         ) else {
             audio.stop()
             motionMonitor.stop()
-            boyiso.updateLocalState(monitoring: false, batteryPercent: boyisoBatteryPercent)
+            updateBoyisoLocalState(monitoring: false)
             return
         }
 
         motionMonitor.start()
-        boyiso.updateLocalState(monitoring: true, batteryPercent: boyisoBatteryPercent)
+        updateBoyisoLocalState(monitoring: true)
         guard SleepCareMonitoringPolicy.shouldCaptureAudio(
             isNightSessionActive: isNightSessionActive,
             environmentDisplayMode: environmentDisplayMode,
@@ -1261,6 +1291,15 @@ final class StandViewModel: ObservableObject {
 
     private var boyisoBatteryPercent: Int? {
         batteryStatus.level.map { Int(($0 * 100).rounded()) }
+    }
+
+    private func updateBoyisoLocalState(monitoring: Bool) {
+        boyiso.updateLocalState(
+            monitoring: monitoring,
+            batteryPercent: boyisoBatteryPercent,
+            displayMode: environmentDisplayMode == .sleeping ? .mate : .object,
+            sessionActive: isNightSessionActive
+        )
     }
 
     private func applyFaceDownState(_ faceDown: Bool) {
@@ -1319,11 +1358,13 @@ final class StandViewModel: ObservableObject {
             performTransition: true
         )
 
-        if preference == .object {
+        if preference == .object || preference == .mate {
             brightnessEndpointLockTask?.cancel()
             brightnessEndpointLockTask = nil
         } else if value >= 1 {
             scheduleObjectModeLock()
+        } else if value <= 0 {
+            scheduleMateModeLock()
         } else {
             brightnessEndpointLockTask?.cancel()
             brightnessEndpointLockTask = nil
@@ -1374,6 +1415,21 @@ final class StandViewModel: ObservableObject {
             updated.modePreference = .object
             settings.value = updated
             refreshEnvironmentDisplayMode(preference: .object, performTransition: true)
+            brightnessEndpointLockTask = nil
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+    }
+
+    private func scheduleMateModeLock() {
+        guard brightnessEndpointLockTask == nil else { return }
+        brightnessEndpointLockTask = Task { [weak self] in
+            try? await Task.sleep(for: SimplifiedBrightnessModePolicy.mateLockDelay)
+            guard let self, !Task.isCancelled, displayBrightness <= 0 else { return }
+            var updated = settings.value
+            updated.lampIntensity = 0
+            updated.modePreference = .mate
+            settings.value = updated
+            refreshEnvironmentDisplayMode(preference: .mate, performTransition: true)
             brightnessEndpointLockTask = nil
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         }

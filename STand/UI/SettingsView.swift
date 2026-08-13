@@ -300,7 +300,7 @@ struct SettingsView: View {
     private var boyisoCard: some View {
         StandSettingsCard(
             title: "보이소",
-            subtitle: "아이 곁의 소리를 보호자 화면으로 전합니다",
+            subtitle: "볼 사람과 말할 사람이 같은 공간에서 소리와 인사를 나눕니다",
             systemImage: "waveform.and.magnifyingglass",
             accent: accent
         ) {

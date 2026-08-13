@@ -1873,7 +1873,12 @@ final class AudioAnalysisTests: XCTestCase {
             SimplifiedBrightnessModePolicy.preferenceDuringAdjustment(for: 1),
             .automatic
         )
+        XCTAssertEqual(
+            SimplifiedBrightnessModePolicy.preferenceDuringAdjustment(for: 0),
+            .automatic
+        )
         XCTAssertEqual(SimplifiedBrightnessModePolicy.objectLockDelay, .seconds(1))
+        XCTAssertEqual(SimplifiedBrightnessModePolicy.mateLockDelay, .seconds(1))
 
         let tinyReleaseMovement = SimplifiedBrightnessModePolicy.stabilizedAdjustment(
             requestedLevel: 0.98,
@@ -3296,29 +3301,35 @@ final class AudioAnalysisTests: XCTestCase {
 
 final class BoyisoProtocolTests: XCTestCase {
     func testEncryptedLANFrameRoundTripsWithoutSendingRawAudio() throws {
+        let invitation = BoyisoInvitation.make()
         let event = BoyisoEvent(
             sourceID: UUID(),
-            sourceName: "아이 곁 기기",
+            sourceName: "말할 사람",
+            role: .guest,
             kind: .sound,
             intensity: 0.82,
-            detail: "주변보다 커진 소리",
+            detail: "big_sound",
             monitoring: true,
-            batteryPercent: 78
+            batteryPercent: 78,
+            displayMode: .mate,
+            sessionActive: true
         )
 
-        let frame = try BoyisoCodec.lanFrame(for: event, roomCode: "ABCD2345")
+        let frame = try BoyisoCodec.lanFrame(for: event, invitation: invitation)
 
-        XCTAssertFalse(String(decoding: frame, as: UTF8.self).contains("아이 곁 기기"))
+        XCTAssertFalse(String(decoding: frame, as: UTF8.self).contains("말할 사람"))
         XCTAssertEqual(
-            try BoyisoCodec.openLANFrame(frame, roomCode: "ABCD2345"),
+            try BoyisoCodec.openLANFrame(frame, invitation: invitation),
             event
         )
     }
 
     func testBluetoothFragmentsReassembleOutOfOrder() throws {
+        let invitation = BoyisoInvitation.make()
         let event = BoyisoEvent(
             sourceID: UUID(),
-            sourceName: "게스트",
+            sourceName: "참여자",
+            role: .host,
             kind: .movement,
             intensity: 1,
             monitoring: true,
@@ -3326,7 +3337,7 @@ final class BoyisoProtocolTests: XCTestCase {
         )
         let fragments = try BoyisoCodec.bluetoothFragments(
             for: event,
-            roomCode: "SAFE2345",
+            invitation: invitation,
             maximumPayloadLength: 32
         )
         var reassembler = BoyisoBluetoothReassembler()
@@ -3338,7 +3349,7 @@ final class BoyisoProtocolTests: XCTestCase {
 
         XCTAssertNotNil(combined)
         XCTAssertEqual(
-            try BoyisoCodec.open(XCTUnwrap(combined), roomCode: "SAFE2345"),
+            try BoyisoCodec.open(XCTUnwrap(combined), invitation: invitation),
             event
         )
     }
@@ -3346,8 +3357,9 @@ final class BoyisoProtocolTests: XCTestCase {
     func testDuplicateEventFromWiFiAndBluetoothIsAcceptedOnce() {
         let event = BoyisoEvent(
             sourceID: UUID(),
-            sourceName: "게스트",
-            kind: .sound,
+            sourceName: "볼 사람",
+            role: .host,
+            kind: .toktok,
             monitoring: true,
             batteryPercent: nil
         )
@@ -3357,9 +3369,27 @@ final class BoyisoProtocolTests: XCTestCase {
         XCTAssertFalse(deduplicator.accepts(event))
     }
 
-    func testRoomCodeNormalizationAndValidation() {
-        XCTAssertEqual(BoyisoCodec.normalizedRoomCode("ab-cd 2345"), "ABCD2345")
-        XCTAssertTrue(BoyisoCodec.isValidRoomCode("ABCD2345"))
-        XCTAssertFalse(BoyisoCodec.isValidRoomCode("SHORT"))
+    func testV2InvitationRoundTripsAndRejectsV1() throws {
+        let invitation = BoyisoInvitation.make()
+        XCTAssertEqual(try BoyisoInvitation(url: invitation.url), invitation)
+        XCTAssertThrowsError(try BoyisoInvitation(url: URL(string: "stand://boyiso?v=1&room=ABCD2345&key=ABCD2345")!))
+        XCTAssertEqual(Data(base64Encoded: invitation.roomKey.replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/") + String(repeating: "=", count: (4 - invitation.roomKey.count % 4) % 4))?.count, 32)
+    }
+
+    func testRolesUseProductNamesWhileKeepingWireValues() {
+        XCTAssertEqual(BoyisoRole.host.rawValue, "host")
+        XCTAssertEqual(BoyisoRole.guest.rawValue, "guest")
+        XCTAssertEqual(BoyisoRole.host.title, "볼 사람")
+        XCTAssertEqual(BoyisoRole.guest.title, "말할 사람")
+    }
+
+    func testSoundDetailsDriveCryingChildOnlyForSpecifiedKinds() {
+        for detail in ["big_sound", "continuous_sound", "finger_snap"] {
+            XCTAssertTrue(BoyisoEvent(sourceID: UUID(), sourceName: "말할 사람", role: .guest,
+                kind: .sound, detail: detail, monitoring: true, batteryPercent: nil).isCryingSound)
+        }
+        XCTAssertFalse(BoyisoEvent(sourceID: UUID(), sourceName: "말할 사람", role: .guest,
+            kind: .movement, detail: "turning", monitoring: true, batteryPercent: nil).isCryingSound)
     }
 }

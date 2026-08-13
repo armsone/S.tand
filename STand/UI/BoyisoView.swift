@@ -1,3 +1,6 @@
+import AVFoundation
+import CoreImage
+import CoreImage.CIFilterBuiltins
 import SwiftUI
 
 struct BoyisoView: View {
@@ -5,220 +8,298 @@ struct BoyisoView: View {
     let accent: Color
 
     @State private var selectedRole: BoyisoRole
-    @State private var roomCode: String
+    @State private var name: String
+    @State private var scannerPresented = false
+    @State private var pendingInvitation: URL?
     @State private var validationMessage: String?
+    @State private var shareURL: URL?
 
     init(service: BoyisoConnectivityService, accent: Color) {
         self.service = service
         self.accent = accent
         _selectedRole = State(initialValue: service.role)
-        _roomCode = State(initialValue: service.roomCode)
+        _name = State(initialValue: service.deviceName)
     }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                introductionCard
-                configurationCard
-                connectionCard
-                safetyCard
+            VStack(spacing: 14) {
+                if service.invitation == nil { setupFlow } else { connectedFlow }
             }
             .padding(16)
         }
         .background(Color.black.ignoresSafeArea())
         .navigationTitle("보이소")
         .navigationBarTitleDisplayMode(.inline)
-        .preferredColorScheme(.dark)
-        .tint(accent)
-    }
-
-    private var introductionCard: some View {
-        BoyisoCard {
-            VStack(alignment: .leading, spacing: 10) {
-                Label("보이는 소리", systemImage: "waveform.and.magnifyingglass")
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(accent)
-                Text("아이 곁 기기가 감지한 큰소리와 움직임을 보호자 화면의 빛으로 전합니다.")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.72))
-                Text("현재 단계에서는 아이의 울음을 진단하거나 단정하지 않습니다.")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.48))
-            }
-        }
-    }
-
-    private var configurationCard: some View {
-        BoyisoCard {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("이 기기의 역할")
-                    .font(.headline)
-
-                Picker("역할", selection: $selectedRole) {
-                    ForEach(BoyisoRole.allCases) { role in
-                        Text(role.title).tag(role)
-                    }
+        .sheet(isPresented: $scannerPresented) {
+            BoyisoQRScanner { result in
+                scannerPresented = false
+                switch result {
+                case .success(let url):
+                    pendingInvitation = url
+                    joinPendingInvitation()
+                case .failure:
+                    validationMessage = "보이소 초대 QR을 읽지 못했습니다."
                 }
-                .pickerStyle(.segmented)
-                .disabled(service.isEnabled)
+            }
+            .ignoresSafeArea()
+        }
+        .onChange(of: service.invitation?.url) { _, _ in prepareShareImage() }
+    }
 
-                Text(selectedRole.description)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.56))
+    private var setupFlow: some View {
+        VStack(spacing: 14) {
+            BoyisoCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("1. 나의 역할").font(.title3.bold())
+                    HStack(spacing: 10) {
+                        ForEach(BoyisoRole.allCases) { role in
+                            if role == selectedRole {
+                                Button(role.title) { selectedRole = role }
+                                    .font(.headline).frame(maxWidth: .infinity, minHeight: 48)
+                                    .buttonStyle(.borderedProminent).tint(accent)
+                            } else {
+                                Button(role.title) { selectedRole = role }
+                                    .font(.headline).frame(maxWidth: .infinity, minHeight: 48)
+                                    .buttonStyle(.bordered).tint(accent)
+                            }
+                        }
+                    }
+                    Text(selectedRole.description).font(.caption).foregroundStyle(.white.opacity(0.6))
+                }
+            }
 
-                HStack(spacing: 10) {
-                    TextField("8자리 돌봄 공간 코드", text: $roomCode)
-                        .textInputAutocapitalization(.characters)
+            BoyisoCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("2. 내 이름").font(.title3.bold())
+                    TextField("같은 공간에 표시할 이름", text: $name)
+                        .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .font(.system(.body, design: .monospaced, weight: .semibold))
-                        .padding(.horizontal, 12)
-                        .frame(height: 44)
+                        .padding(.horizontal, 12).frame(height: 46)
                         .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                        .disabled(service.isEnabled)
-                        .onChange(of: roomCode) { _, value in
-                            roomCode = BoyisoCodec.normalizedRoomCode(value)
+                        .onChange(of: name) { _, value in
+                            if value.count > 32 { name = String(value.prefix(32)) }
                             validationMessage = nil
                         }
+                }
+            }
 
-                    if selectedRole == .host, !service.isEnabled {
-                        Button("새 코드") {
-                            roomCode = BoyisoCodec.makeRoomCode()
-                        }
-                        .font(.subheadline.weight(.semibold))
-                        .buttonStyle(.bordered)
+            BoyisoCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("3. 공간 선택").font(.title3.bold())
+                    Button {
+                        createRoom()
+                    } label: {
+                        Label("공간 만들기", systemImage: "qrcode")
+                            .font(.headline).frame(maxWidth: .infinity, minHeight: 48)
                     }
-                }
+                    .buttonStyle(.borderedProminent).tint(accent)
 
-                if let validationMessage {
-                    Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                    Button {
+                        scannerPresented = true
+                    } label: {
+                        Label("공간 입장", systemImage: "qrcode.viewfinder")
+                            .font(.headline).frame(maxWidth: .infinity, minHeight: 48)
+                    }
+                    .buttonStyle(.bordered)
+                    Text("공간 입장은 같은 공간의 QR코드를 카메라로 찍습니다.")
+                        .font(.caption).foregroundStyle(.white.opacity(0.58))
                 }
+            }
 
-                Button {
-                    service.isEnabled ? service.disable() : enable()
-                } label: {
-                    Label(
-                        service.isEnabled ? "보이소 연결 끄기" : "보이소 연결 시작",
-                        systemImage: service.isEnabled ? "stop.fill" : "antenna.radiowaves.left.and.right"
-                    )
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(service.isEnabled ? .red.opacity(0.78) : accent)
+            if let validationMessage {
+                Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
-    private var connectionCard: some View {
-        BoyisoCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Label(service.statusText, systemImage: statusSystemImage)
-                        .font(.headline)
-                    Spacer()
-                    Circle()
-                        .fill(service.activePeers.isEmpty ? .orange : .green)
-                        .frame(width: 9, height: 9)
-                }
+    private var connectedFlow: some View {
+        VStack(spacing: 14) {
+            Button {
+                _ = service.sendTokTok()
+            } label: {
+                Label("톡톡 보내기", systemImage: "pawprint.fill")
+                    .font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 54)
+            }
+            .buttonStyle(.borderedProminent).tint(accent)
 
-                HStack(spacing: 8) {
-                    transportBadge(
-                        title: "Wi-Fi",
-                        systemImage: "wifi",
-                        ready: service.localNetworkReady
-                    )
-                    transportBadge(
-                        title: "Bluetooth",
-                        systemImage: "antenna.radiowaves.left.and.right",
-                        ready: service.bluetoothReady
-                    )
+            BoyisoCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("공간에 연결됨", systemImage: "checkmark.circle.fill")
+                        .font(.title3.bold()).foregroundStyle(.green)
+                    Text("나의 역할").font(.caption).foregroundStyle(.white.opacity(0.55))
+                    Text(service.role.title).font(.headline)
+                    HStack(spacing: 8) {
+                        pathBadge("Wi-Fi", count: service.localNetworkConnectionCount)
+                        pathBadge("Bluetooth", count: service.bluetoothConnectionCount)
+                    }
+                    if let issue = service.issueMessage {
+                        Text(issue).font(.caption).foregroundStyle(.orange)
+                    }
                 }
+            }
 
-                if let issue = service.issueMessage {
-                    Text(issue)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-
-                if service.role == .host {
-                    ForEach(service.activePeers) { peer in
-                        Divider().overlay(.white.opacity(0.08))
-                        HStack(spacing: 10) {
-                            Image(systemName: peer.monitoring ? "waveform" : "waveform.slash")
-                                .foregroundStyle(peer.monitoring ? accent : .orange)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(peer.name)
-                                    .font(.subheadline.weight(.semibold))
-                                Text(peer.transports.map(\.title).sorted().joined(separator: " + "))
-                                    .font(.caption2)
-                                    .foregroundStyle(.white.opacity(0.48))
+            if service.canInvite, let invitation = service.invitation,
+               let image = BoyisoQRCode.image(for: invitation.url.absoluteString) {
+                BoyisoCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("우리 공간 QR코드").font(.title3.bold())
+                        Text("이 QR을 가진 사람은 같은 공간에 들어올 수 있습니다. 필요한 사람에게만 보내 주세요.")
+                            .font(.caption).foregroundStyle(.white.opacity(0.58))
+                        Image(uiImage: image).interpolation(.none).resizable().scaledToFit()
+                            .padding(12).background(.white, in: RoundedRectangle(cornerRadius: 16))
+                            .accessibilityLabel("보이소 초대 QR코드")
+                        if let shareURL {
+                            ShareLink(item: shareURL, subject: Text("보이소 초대"),
+                                      message: Text("보이소에서 이 QR 사진을 찍고 같은 공간에 들어오세요.")) {
+                                Label("QR 사진 보내기", systemImage: "square.and.arrow.up")
+                                    .frame(maxWidth: .infinity, minHeight: 44)
                             }
-                            Spacer()
-                            if let battery = peer.batteryPercent {
-                                Text("\(battery)%")
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundStyle(.white.opacity(0.58))
-                            }
+                            .buttonStyle(.bordered)
                         }
                     }
                 }
             }
-        }
-    }
 
-    private var safetyCard: some View {
-        BoyisoCard {
-            VStack(alignment: .leading, spacing: 8) {
-                Label("연결 상태를 함께 확인해 주세요", systemImage: "checkmark.shield.fill")
-                    .font(.headline)
-                Text("Wi-Fi와 Bluetooth는 각각 독립적으로 연결되며 같은 사건은 한 번만 표시합니다. 두 경로가 모두 끊기거나 아이 곁 기기의 감시가 멈추면 정상 상태로 취급하지 않습니다.")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.58))
-                Text("보이소는 보호자의 직접 돌봄이나 의료용 감시장치를 대신하지 않습니다.")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.58))
+            BoyisoCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("같은 공간 안에 있는 사람").font(.title3.bold())
+                    if service.activePeers.isEmpty {
+                        Text("같은 공간의 사람이 연결되기를 기다리고 있습니다.")
+                            .font(.subheadline).foregroundStyle(.white.opacity(0.58))
+                    } else {
+                        ForEach(service.activePeers) { peer in
+                            Divider().overlay(.white.opacity(0.08))
+                            HStack(spacing: 10) {
+                                Image(systemName: peer.role == .host ? "eye.fill" : "waveform")
+                                    .foregroundStyle(accent)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(peer.name).font(.headline)
+                                    Text(peer.role.title + participantState(peer))
+                                        .font(.caption).foregroundStyle(.white.opacity(0.58))
+                                }
+                                Spacer()
+                                if let battery = peer.batteryPercent {
+                                    Text("\(battery)%").font(.caption.monospacedDigit())
+                                }
+                            }
+                        }
+                    }
+                }
             }
+
+            Text("iOS가 백그라운드 실행을 제한하거나 앱이 종료되면 근거리 연결과 알림이 유지되지 않을 수 있습니다. 무음 모드·집중 모드·알림 설정은 그대로 따릅니다.")
+                .font(.caption).foregroundStyle(.white.opacity(0.48))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(role: .destructive) { service.leaveRoom() } label: {
+                Text("공간에서 나오기").font(.headline).frame(maxWidth: .infinity, minHeight: 48)
+            }
+            .buttonStyle(.bordered)
         }
+        .onAppear { prepareShareImage() }
     }
 
-    private var statusSystemImage: String {
-        if !service.isEnabled { return "antenna.radiowaves.left.and.right.slash" }
-        return service.activePeers.isEmpty ? "dot.radiowaves.left.and.right" : "checkmark.circle.fill"
+    private func participantState(_ peer: BoyisoPeerStatus) -> String {
+        guard peer.role == .guest else { return "" }
+        return peer.sessionActive && peer.displayMode == .mate && peer.monitoring ? " · 감지 중" : " · 대기 중"
     }
 
-    private func transportBadge(title: String, systemImage: String, ready: Bool) -> some View {
-        Label(ready ? "\(title) 준비됨" : "\(title) 대기", systemImage: systemImage)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(ready ? .green : .white.opacity(0.46))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(.white.opacity(0.06), in: Capsule())
+    private func pathBadge(_ name: String, count: Int) -> some View {
+        Text("\(name) \(count)").font(.caption.bold()).padding(.horizontal, 10).padding(.vertical, 6)
+            .background(.white.opacity(0.08), in: Capsule())
     }
 
-    private func enable() {
+    private func createRoom() {
         do {
-            try service.configure(role: selectedRole, roomCode: roomCode)
+            try service.createRoom(role: selectedRole, name: name)
             validationMessage = nil
-        } catch {
-            validationMessage = "공백 없이 영문과 숫자 8자리 이상을 입력해 주세요."
+            prepareShareImage()
+        } catch { validationMessage = "내 이름을 입력해 주세요." }
+    }
+
+    private func joinPendingInvitation() {
+        guard let pendingInvitation else { return }
+        do {
+            try service.joinRoom(pendingInvitation, role: selectedRole, name: name)
+            validationMessage = nil
+            self.pendingInvitation = nil
+        } catch { validationMessage = name.trimmingCharacters(in: .whitespaces).isEmpty
+            ? "내 이름을 입력한 뒤 다시 QR을 찍어 주세요." : "보이소 V2 초대 QR이 아닙니다." }
+    }
+
+    private func prepareShareImage() {
+        guard service.canInvite, let invitation = service.invitation,
+              let image = BoyisoQRCode.image(for: invitation.url.absoluteString),
+              let data = image.pngData() else { shareURL = nil; return }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("boyiso-invitation.png")
+        do { try data.write(to: url, options: .atomic); shareURL = url } catch { shareURL = nil }
+    }
+}
+
+private enum BoyisoQRCode {
+    static func image(for value: String) -> UIImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(value.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage?.transformed(by: .init(scaleX: 12, y: 12)),
+              let cgImage = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+}
+
+private struct BoyisoQRScanner: UIViewControllerRepresentable {
+    let completion: (Result<URL, Error>) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(completion: completion) }
+    func makeUIViewController(context: Context) -> UIViewController {
+        let controller = UIViewController()
+        let session = AVCaptureSession()
+        guard let camera = AVCaptureDevice.default(for: .video),
+              let input = try? AVCaptureDeviceInput(device: camera), session.canAddInput(input) else {
+            completion(.failure(ScannerError.unavailable)); return controller
+        }
+        session.addInput(input)
+        let output = AVCaptureMetadataOutput()
+        guard session.canAddOutput(output) else { completion(.failure(ScannerError.unavailable)); return controller }
+        session.addOutput(output)
+        output.setMetadataObjectsDelegate(context.coordinator, queue: .main)
+        output.metadataObjectTypes = [.qr]
+        let preview = AVCaptureVideoPreviewLayer(session: session)
+        preview.videoGravity = .resizeAspectFill
+        controller.view.layer.addSublayer(preview)
+        context.coordinator.session = session
+        context.coordinator.preview = preview
+        DispatchQueue.global(qos: .userInitiated).async { session.startRunning() }
+        return controller
+    }
+    func updateUIViewController(_ controller: UIViewController, context: Context) {
+        context.coordinator.preview?.frame = controller.view.bounds
+    }
+    static func dismantleUIViewController(_ controller: UIViewController, coordinator: Coordinator) {
+        coordinator.session?.stopRunning()
+    }
+    final class Coordinator: NSObject, AVCaptureMetadataOutputObjectsDelegate {
+        let completion: (Result<URL, Error>) -> Void
+        var session: AVCaptureSession?
+        var preview: AVCaptureVideoPreviewLayer?
+        private var completed = false
+        init(completion: @escaping (Result<URL, Error>) -> Void) { self.completion = completion }
+        func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject],
+                            from connection: AVCaptureConnection) {
+            guard !completed, let value = (metadataObjects.first as? AVMetadataMachineReadableCodeObject)?.stringValue,
+                  let url = URL(string: value) else { return }
+            completed = true; session?.stopRunning(); completion(.success(url))
         }
     }
+    enum ScannerError: Error { case unavailable }
 }
 
 private struct BoyisoCard<Content: View>: View {
     @ViewBuilder let content: Content
-
     var body: some View {
-        content
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
+        content.frame(maxWidth: .infinity, alignment: .leading).padding(16)
             .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 18))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18)
-                    .stroke(.white.opacity(0.08), lineWidth: 0.7)
-            }
+            .overlay { RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.08), lineWidth: 0.7) }
     }
 }

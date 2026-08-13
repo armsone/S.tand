@@ -159,12 +159,14 @@ enum StandControlKind: String, Codable, CaseIterable, Identifiable {
     // Decoding-only legacy value. It is intentionally excluded from defaultOrder.
     case stopDetection
     case recordings
+    case boyiso
     case settings
 
     var id: String { rawValue }
 
     static let defaultOrder: [StandControlKind] = [
         .recordings,
+        .boyiso,
         .settings
     ]
 
@@ -288,7 +290,7 @@ struct StandScreenLayout: Codable, Equatable {
         ),
         radiosGrouped: true,
         weatherGroupIDs: [1, 1, 1],
-        controlOrder: [.recordings, .settings]
+        controlOrder: [.recordings, .boyiso, .settings]
     )
 
     static let landscape = StandScreenLayout(
@@ -309,7 +311,7 @@ struct StandScreenLayout: Codable, Equatable {
         ),
         radiosGrouped: false,
         weatherGroupIDs: [1, 1, 1],
-        controlOrder: [.recordings, .settings]
+        controlOrder: [.recordings, .boyiso, .settings]
     )
 }
 
