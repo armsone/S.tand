@@ -204,13 +204,8 @@ struct FirstLaunchPermissionView: View {
 
                     VStack(spacing: 10) {
                         permissionRow(
-                            title: "플래시",
-                            detail: "화들짝 모드에서 어두운 방을 잠깐 밝힙니다.",
-                            systemImage: "flashlight.on.fill"
-                        )
-                        permissionRow(
-                            title: "카메라",
-                            detail: "방 밝기만 측정하며 사진·영상은 저장하거나 전송하지 않습니다.",
+                            title: "카메라와 플래시",
+                            detail: "방 밝기를 확인하고, 어두울 때 화들짝 모드에서만 잠깐 밝힙니다. 사진·영상은 저장하거나 전송하지 않습니다.",
                             systemImage: "camera.fill"
                         )
                         permissionRow(
@@ -228,11 +223,6 @@ struct FirstLaunchPermissionView: View {
                     Text("허용하지 않아도 앱은 시작됩니다. 허용한 기능만 작동합니다.")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.58))
-                        .multilineTextAlignment(.center)
-
-                    Text("iPhone에서는 플래시와 밝기 측정이 하나의 카메라 권한을 함께 사용합니다.")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.42))
                         .multilineTextAlignment(.center)
 
                     Button {
@@ -271,14 +261,14 @@ struct FirstLaunchPermissionView: View {
             Image(systemName: systemImage)
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(accent)
-                .frame(width: 32, height: 32)
+                .frame(width: 36, height: 36)
                 .background(accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.subheadline.weight(.bold))
                 Text(detail)
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.62))
+                    .foregroundStyle(.white.opacity(0.72))
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)

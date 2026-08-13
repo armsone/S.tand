@@ -592,7 +592,7 @@ struct RootView: View {
         }
         .frame(maxWidth: .infinity)
         .foregroundStyle(.white.opacity(0.82))
-        .opacity(model.controlsVisible || !model.isNightSessionActive ? 1 : 0.18)
+        .opacity(model.controlsVisible || !model.isNightSessionActive ? 1 : 0.62)
         .animation(.easeOut(duration: 0.3), value: model.controlsVisible)
     }
 
@@ -913,7 +913,7 @@ struct RootView: View {
             .frame(height: StandControlLayoutMetrics.hiddenControlRevealHeight)
             .contentShape(Rectangle())
             .accessibilityLabel("하단 기능 버튼 열기")
-            .accessibilityHint("두 번 누르면 녹음 및 설정 버튼이 나타납니다")
+            .accessibilityHint("녹음 및 설정 버튼이 나타납니다")
         } else {
             WrappingControlLayout {
                 ForEach(visibleControlOrder(isPortrait: isPortrait)) { kind in
@@ -996,11 +996,11 @@ struct RootView: View {
 
     private var tapToControlText: some View {
         Label(
-            model.lampPhase == .holding ? "탭하면 자연스럽게 어두워짐" : "탭하면 조명 켜짐",
-            systemImage: model.lampPhase == .holding ? "moon.fill" : "lightbulb.fill"
+            "탭하여 녹음·설정 열기",
+            systemImage: "ellipsis.circle.fill"
         )
-            .font(.caption)
-            .foregroundStyle(.white.opacity(0.24))
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white.opacity(0.62))
             .padding(.vertical, 12)
     }
 
@@ -2207,6 +2207,18 @@ private struct ScreenEditorView: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let editingInsets = PanelEditingPolicy.editingRegion(
+                canvasSize: proxy.size,
+                safeAreaInsets: proxy.safeAreaInsets,
+                isPortrait: isPortrait,
+                fontPaletteVisible: showFontPalette,
+                controlOrder: layout.controlOrder,
+                bottomAvailableWidth: max(
+                    0,
+                    proxy.size.width - StandControlLayoutMetrics.rowSpacing * 2
+                )
+            ).insets
+
             ZStack {
                 Color.black.opacity(0.32).ignoresSafeArea()
 
@@ -2216,6 +2228,7 @@ private struct ScreenEditorView: View {
                 EditablePanel(
                     transform: $layout.clock,
                     canvasSize: proxy.size,
+                    editingInsets: editingInsets,
                     accessibilityName: "시계 패널",
                     onTap: { showFontPalette.toggle() }
                 ) {
@@ -2236,6 +2249,7 @@ private struct ScreenEditorView: View {
                 EditablePanel(
                     transform: $layout.seconds,
                     canvasSize: proxy.size,
+                    editingInsets: editingInsets,
                     accessibilityName: "초 패널"
                 ) {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -2254,12 +2268,14 @@ private struct ScreenEditorView: View {
                 }
 
                 editableWeatherPanels(
-                    canvasSize: proxy.size
+                    canvasSize: proxy.size,
+                    editingInsets: editingInsets
                 )
 
                 EditablePanel(
                     transform: $layout.date,
                     canvasSize: proxy.size,
+                    editingInsets: editingInsets,
                     accessibilityName: "날짜 패널"
                 ) {
                     StandDatePanel(date: .now, isPortrait: isPortrait)
@@ -2270,6 +2286,7 @@ private struct ScreenEditorView: View {
                 EditablePanel(
                     transform: $layout.battery,
                     canvasSize: proxy.size,
+                    editingInsets: editingInsets,
                     accessibilityName: "배터리 패널"
                 ) {
                     Label(batteryText, systemImage: "battery.100percent.bolt")
@@ -2279,7 +2296,7 @@ private struct ScreenEditorView: View {
                         .background(.white.opacity(0.08), in: Capsule())
                 }
 
-                editableRadioPanels(canvasSize: proxy.size)
+                editableRadioPanels(canvasSize: proxy.size, editingInsets: editingInsets)
 
                 if showFontPalette {
                     VStack {
@@ -2331,11 +2348,15 @@ private struct ScreenEditorView: View {
     }
 
     @ViewBuilder
-    private func editableRadioPanels(canvasSize: CGSize) -> some View {
+    private func editableRadioPanels(
+        canvasSize: CGSize,
+        editingInsets: EdgeInsets
+    ) -> some View {
         if radioConfigurations.count == 2, layout.radiosGrouped {
             EditablePanel(
                 transform: $layout.radio,
                 canvasSize: canvasSize,
+                editingInsets: editingInsets,
                 accessibilityName: "인터넷 라디오 묶음 패널",
                 onTap: splitRadioPanels
             ) {
@@ -2356,6 +2377,7 @@ private struct ScreenEditorView: View {
                 EditablePanel(
                     transform: index == 0 ? $layout.radio : $layout.secondaryRadio,
                     canvasSize: canvasSize,
+                    editingInsets: editingInsets,
                     accessibilityName: "\(configuration.displayName) 라디오 패널",
                     onEnded: { mergeRadioPanelsIfNeeded(canvasSize: canvasSize) },
                     onTap: { onConfigureRadio(configuration.id) }
@@ -2377,6 +2399,7 @@ private struct ScreenEditorView: View {
                 EditablePanel(
                     transform: $layout.secondaryRadio,
                     canvasSize: canvasSize,
+                    editingInsets: editingInsets,
                     accessibilityName: "두 번째 라디오 패널",
                     onTap: onManageRadios
                 ) {
@@ -2442,7 +2465,8 @@ private struct ScreenEditorView: View {
 
     @ViewBuilder
     private func editableWeatherPanels(
-        canvasSize: CGSize
+        canvasSize: CGSize,
+        editingInsets: EdgeInsets
     ) -> some View {
         let groupIDs = Array(Set(layout.weatherGroupIDs)).sorted()
         ForEach(groupIDs, id: \.self) { groupID in
@@ -2452,6 +2476,7 @@ private struct ScreenEditorView: View {
             EditablePanel(
                 transform: weatherBinding(for: groupID),
                 canvasSize: canvasSize,
+                editingInsets: editingInsets,
                 accessibilityName: "날씨 패널",
                 onEnded: { mergeWeatherGroup(groupID, canvasSize: canvasSize) }
             ) {
@@ -2911,6 +2936,7 @@ private struct EditablePanelSizeKey: PreferenceKey {
 private struct EditablePanel<Content: View>: View {
     @Binding var transform: PanelTransform
     let canvasSize: CGSize
+    let editingInsets: EdgeInsets
     var accessibilityName = "편집 패널"
     var onEnded: () -> Void = {}
     var onTap: (() -> Void)? = nil
@@ -2984,6 +3010,7 @@ private struct EditablePanel<Content: View>: View {
                             panelSize: panelSize,
                             translation: value.translation
                         )
+                        clampTransformToEditingArea()
                     }
                     .onEnded { _ in
                         cornerResizeStart = nil
@@ -2996,7 +3023,9 @@ private struct EditablePanel<Content: View>: View {
         }
             .onPreferenceChange(EditablePanelSizeKey.self) { measuredSize in
                 panelSize = measuredSize
+                clampTransformToEditingArea()
             }
+            .onChange(of: editingInsets) { _, _ in clampTransformToEditingArea() }
             .offset(
                 x: transform.x * canvasSize.width,
                 y: transform.y * canvasSize.height
@@ -3006,8 +3035,23 @@ private struct EditablePanel<Content: View>: View {
                     .onChanged { value in
                         let start = dragStart ?? transform
                         dragStart = start
-                        let proposedX = start.x + value.translation.width / canvasSize.width
-                        let proposedY = start.y + value.translation.height / canvasSize.height
+                        let rawX = start.x + value.translation.width / canvasSize.width
+                        let rawY = start.y + value.translation.height / canvasSize.height
+                        let renderedSize = CGSize(
+                            width: max(44, panelSize.width * transform.scale),
+                            height: max(44, panelSize.height * transform.scale)
+                        )
+                        let clampedCenter = PanelEditingPolicy.clampedCenter(
+                            CGPoint(
+                                x: canvasSize.width / 2 + rawX * canvasSize.width,
+                                y: canvasSize.height / 2 + rawY * canvasSize.height
+                            ),
+                            panelSize: renderedSize,
+                            canvasSize: canvasSize,
+                            insets: editingInsets
+                        )
+                        let proposedX = (clampedCenter.x - canvasSize.width / 2) / canvasSize.width
+                        let proposedY = (clampedCenter.y - canvasSize.height / 2) / canvasSize.height
                         let snapX = PanelEditingPolicy.shouldSnapToCenter(
                             centerOffset: proposedX * canvasSize.width,
                             panelLength: panelSize.width * transform.scale
@@ -3044,6 +3088,7 @@ private struct EditablePanel<Content: View>: View {
                                 start * Double(value)
                             )
                         )
+                        clampTransformToEditingArea()
                     }
                     .onEnded { _ in scaleStart = nil }
             )
@@ -3066,6 +3111,7 @@ private struct EditablePanel<Content: View>: View {
                 @unknown default:
                     return
                 }
+                clampTransformToEditingArea()
                 onEnded()
                 UISelectionFeedbackGenerator().selectionChanged()
             }
@@ -3090,10 +3136,29 @@ private struct EditablePanel<Content: View>: View {
         let step: Double = 0.05
         transform.x += x * step
         transform.y += y * step
+        clampTransformToEditingArea()
         onEnded()
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
+    private func clampTransformToEditingArea() {
+        guard canvasSize.width > 0, canvasSize.height > 0 else { return }
+        let renderedSize = CGSize(
+            width: max(44, panelSize.width * transform.scale),
+            height: max(44, panelSize.height * transform.scale)
+        )
+        let center = PanelEditingPolicy.clampedCenter(
+            CGPoint(
+                x: canvasSize.width / 2 + transform.x * canvasSize.width,
+                y: canvasSize.height / 2 + transform.y * canvasSize.height
+            ),
+            panelSize: renderedSize,
+            canvasSize: canvasSize,
+            insets: editingInsets
+        )
+        transform.x = (center.x - canvasSize.width / 2) / canvasSize.width
+        transform.y = (center.y - canvasSize.height / 2) / canvasSize.height
+    }
 
 }
 

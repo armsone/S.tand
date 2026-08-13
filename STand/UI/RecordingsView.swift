@@ -663,42 +663,27 @@ private struct RecordingSelectionDock: View {
     let merge: () -> Void
     let delete: () -> Void
     let isBusy: Bool
-
     var body: some View {
-        HStack(spacing: 10) {
-            Button(action: clear) {
-                Image(systemName: "xmark")
-                    .frame(width: 38, height: 38)
-                    .background(.white.opacity(0.07), in: Circle())
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                clearButton
+                selectionCount
+                Spacer(minLength: 4)
+                mergeButton
+                deleteButton
             }
-            .disabled(isBusy)
-            .accessibilityLabel("선택 해제")
-
-            Text("\(count)개 선택")
-                .font(.subheadline.monospacedDigit().weight(.semibold))
-                .foregroundStyle(.white.opacity(0.76))
-
-            Spacer(minLength: 4)
-
-            Button(action: merge) {
-                Label("한데 묶기", systemImage: "waveform.path.badge.plus")
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .frame(height: 38)
-                    .background(accent.opacity(0.16), in: Capsule())
+            VStack(spacing: 8) {
+                HStack {
+                    clearButton
+                    selectionCount
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 10) {
+                    mergeButton
+                    deleteButton
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .disabled(!canMerge)
-            .opacity(canMerge ? 1 : 0.38)
-
-            Button(action: delete) {
-                Image(systemName: "trash")
-                    .foregroundStyle(.red.opacity(0.82))
-                    .frame(width: 38, height: 38)
-                    .background(.red.opacity(0.09), in: Circle())
-            }
-            .disabled(isBusy)
-            .opacity(isBusy ? 0.34 : 1)
-            .accessibilityLabel("선택 삭제")
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 14)
@@ -707,6 +692,46 @@ private struct RecordingSelectionDock: View {
         .overlay(alignment: .top) {
             Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
         }
+    }
+
+    private var clearButton: some View {
+        Button(action: clear) {
+            Image(systemName: "xmark")
+                .frame(width: 48, height: 48)
+                .background(.white.opacity(0.07), in: Circle())
+        }
+        .disabled(isBusy)
+        .accessibilityLabel("선택 해제")
+    }
+
+    private var selectionCount: some View {
+        Text("\(count)개 선택")
+            .font(.subheadline.monospacedDigit().weight(.semibold))
+            .foregroundStyle(.white.opacity(0.76))
+    }
+
+    private var mergeButton: some View {
+        Button(action: merge) {
+            Label("한데 묶기", systemImage: "waveform.path.badge.plus")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 12)
+                .frame(minHeight: 48)
+                .background(accent.opacity(0.16), in: Capsule())
+        }
+        .disabled(!canMerge)
+        .opacity(canMerge ? 1 : 0.38)
+    }
+
+    private var deleteButton: some View {
+        Button(action: delete) {
+            Image(systemName: "trash")
+                .foregroundStyle(.red.opacity(0.82))
+                .frame(width: 48, height: 48)
+                .background(.red.opacity(0.09), in: Circle())
+        }
+        .disabled(isBusy)
+        .opacity(isBusy ? 0.34 : 1)
+        .accessibilityLabel("선택 삭제")
     }
 }
 
@@ -965,14 +990,14 @@ private struct RecordingRow: View {
             if clip.isMerged {
                 Image(systemName: "square.stack.3d.up.fill")
                     .foregroundStyle(accent)
-                    .frame(width: 40, height: 44)
+                    .frame(width: 48, height: 48)
                     .accessibilityLabel("합친 녹음")
             } else {
                 Button(action: toggleSelection) {
                     Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                         .font(.title3)
                     .foregroundStyle(isSelected ? accent : .white.opacity(0.58))
-                        .frame(width: 40, height: 44)
+                        .frame(width: 48, height: 48)
                 }
                 .buttonStyle(.plain)
                 .disabled(mutationDisabled)
@@ -980,10 +1005,10 @@ private struct RecordingRow: View {
             }
 
             Button(action: play) {
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(accent)
-                    .frame(width: 42, height: 42)
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(accent)
+                        .frame(width: 48, height: 48)
                     .background(accent.opacity(0.13), in: Circle())
             }
             .buttonStyle(.plain)
@@ -1008,7 +1033,7 @@ private struct RecordingRow: View {
                 Image(systemName: "ellipsis")
                     .font(.headline)
                     .foregroundStyle(.white.opacity(0.70))
-                    .frame(width: 42, height: 44)
+                    .frame(width: 48, height: 48)
             }
             .accessibilityLabel("녹음 작업")
             .disabled(mutationDisabled)
@@ -1049,74 +1074,96 @@ private struct PlaybackProgressBar: View {
     let clip: RecordingClip
     @ObservedObject var player: RecordingPlayer
     let accent: Color
-
     var body: some View {
-        VStack(spacing: 7) {
+        ViewThatFits(in: .horizontal) {
             HStack(spacing: 10) {
-                Button {
-                    player.toggle(clip)
-                } label: {
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .foregroundStyle(accent)
-                        .frame(width: 38, height: 38)
-                        .background(accent.opacity(0.14), in: Circle())
+                playbackButton
+                boostButton
+                progressControl
+                closeButton
+            }
+            VStack(spacing: 8) {
+                HStack(spacing: 10) {
+                    playbackButton
+                    boostButton
+                    Spacer(minLength: 0)
+                    closeButton
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(player.isPlaying ? "재생 일시 정지" : "재생 계속")
-
-                Button {
-                    player.toggleBoost()
-                } label: {
-                    VStack(spacing: 1) {
-                        Image(systemName: "speaker.wave.3.fill")
-                            .font(.caption.weight(.bold))
-                        Text("2×")
-                            .font(.system(size: 8, weight: .bold, design: .rounded))
-                    }
-                    .foregroundStyle(player.boostEnabled ? accent : .white.opacity(0.42))
-                    .frame(width: 38, height: 38)
-                    .background(
-                        (player.boostEnabled ? accent.opacity(0.14) : .white.opacity(0.06)),
-                        in: Circle()
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(player.boostEnabled ? "작은 소리 두 배 증폭 끄기" : "작은 소리 두 배 증폭 켜기")
-
-                VStack(spacing: 3) {
-                    Slider(
-                        value: Binding(
-                            get: { player.currentTime },
-                            set: { player.seek(to: $0) }
-                        ),
-                        in: 0...max(player.duration, 0.01)
-                    )
-                    .tint(accent)
-
-                    HStack {
-                        Text(player.currentTime.durationText)
-                        Spacer()
-                        Text(player.duration.durationText)
-                    }
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.42))
-                }
-
-                Button {
-                    player.stop()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.white.opacity(0.42))
-                        .frame(width: 38, height: 38)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("재생 닫기")
+                progressControl
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(.ultraThinMaterial)
         .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.08)).frame(height: 1) }
+    }
+
+    private var playbackButton: some View {
+        Button {
+            player.toggle(clip)
+        } label: {
+            Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                .foregroundStyle(accent)
+                .frame(width: 48, height: 48)
+                .background(accent.opacity(0.14), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(player.isPlaying ? "재생 일시 정지" : "재생 계속")
+    }
+
+    private var boostButton: some View {
+        Button {
+            player.toggleBoost()
+        } label: {
+            VStack(spacing: 1) {
+                Image(systemName: "speaker.wave.3.fill")
+                    .font(.caption.weight(.bold))
+                Text("2×")
+                    .font(.caption2.weight(.bold))
+            }
+            .foregroundStyle(player.boostEnabled ? accent : .white.opacity(0.64))
+            .frame(width: 48, height: 48)
+            .background(
+                (player.boostEnabled ? accent.opacity(0.14) : .white.opacity(0.06)),
+                in: Circle()
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(player.boostEnabled ? "작은 소리 두 배 증폭 끄기" : "작은 소리 두 배 증폭 켜기")
+    }
+
+    private var progressControl: some View {
+        VStack(spacing: 3) {
+            Slider(
+                value: Binding(
+                    get: { player.currentTime },
+                    set: { player.seek(to: $0) }
+                ),
+                in: 0...max(player.duration, 0.01)
+            )
+            .tint(accent)
+
+            HStack {
+                Text(player.currentTime.durationText)
+                Spacer()
+                Text(player.duration.durationText)
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.white.opacity(0.62))
+        }
+        .frame(minWidth: 120)
+    }
+
+    private var closeButton: some View {
+        Button {
+            player.stop()
+        } label: {
+            Image(systemName: "xmark.circle.fill")
+                .foregroundStyle(.white.opacity(0.64))
+                .frame(width: 48, height: 48)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("재생 닫기")
     }
 }
 

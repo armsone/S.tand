@@ -49,11 +49,12 @@ struct SettingsView: View {
                             SettingsHero(
                                 isNightSessionActive: runtime.isNightSessionActive,
                                 environmentDisplayMode: runtime.environmentDisplayMode,
-                                accent: accent,
-                                onToggleMode: model.toggleObjectMateMode
+                                modePreference: Binding(
+                                    get: { store.value.modePreference },
+                                    set: { model.setModePreference($0) }
+                                ),
+                                accent: accent
                             )
-
-                            internetRadioCard
 
                             LazyVGrid(
                                 columns: Array(
@@ -67,6 +68,8 @@ struct SettingsView: View {
                                 detectionCard
                                 informationCard
                             }
+
+                            internetRadioCard
                         }
                         .padding(.horizontal, proxy.size.width >= 720 ? 24 : 14)
                         .padding(.top, 8)
@@ -353,12 +356,12 @@ struct SettingsView: View {
                         .symbolRenderingMode(.hierarchical)
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(isActive ? accent : .white.opacity(0.72))
-                        .frame(width: 34, height: 34)
+                        .frame(width: 44, height: 48)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(channel.displayName)
                             .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
+                            .lineLimit(2)
                         Text(radioStatusText(isActive: isActive))
                             .font(.caption)
                             .foregroundStyle(.white.opacity(0.54))
@@ -377,7 +380,7 @@ struct SettingsView: View {
             } label: {
                 Image(systemName: "pencil")
                     .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 34, height: 34)
+                    .frame(width: 48, height: 48)
                     .background(.white.opacity(0.07), in: Circle())
             }
             .buttonStyle(.plain)
@@ -407,6 +410,7 @@ struct SettingsView: View {
                 Button("닫기", action: closeInlineRadioEditor)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.64))
+                    .frame(minWidth: 44, minHeight: 44)
             }
 
             TextField("이름 (선택)", text: $radioDraftName)
@@ -441,7 +445,7 @@ struct SettingsView: View {
                     showsRadioBrowser = true
                 } label: {
                     Label("웹에서 찾기", systemImage: "safari.fill")
-                        .frame(maxWidth: .infinity, minHeight: 40)
+                        .frame(maxWidth: .infinity, minHeight: 48)
                 }
                 .buttonStyle(.bordered)
             }
@@ -452,7 +456,7 @@ struct SettingsView: View {
                         pendingRadioDeletion = editingRadioChannel
                     } label: {
                         Image(systemName: "trash")
-                            .frame(width: 42, height: 42)
+                            .frame(width: 48, height: 48)
                     }
                     .buttonStyle(.bordered)
                     .accessibilityLabel("\(editingRadioChannel.displayName) 삭제")
@@ -461,7 +465,7 @@ struct SettingsView: View {
                 Button(action: saveInlineRadioChannel) {
                     Label("저장", systemImage: "checkmark.circle.fill")
                         .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 42)
+                        .frame(maxWidth: .infinity, minHeight: 48)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(accent)
@@ -805,25 +809,25 @@ private struct StandSettingsBackground: View {
 private struct SettingsHero: View {
     let isNightSessionActive: Bool
     let environmentDisplayMode: EnvironmentDisplayMode
+    @Binding var modePreference: StandModePreference
     let accent: Color
-    let onToggleMode: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
-            STandBrandIcon(size: 58)
+        VStack(spacing: 14) {
+            HStack(spacing: 14) {
+                STandBrandIcon(size: 58)
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text("S.tand")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                Text("낮에는 오브제\n밤에는 매이트")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.56))
-                    .lineLimit(2)
-            }
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("S.tand")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                    Text("낮에는 오브제\n밤에는 매이트")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.64))
+                        .lineLimit(2)
+                }
 
-            Spacer(minLength: 4)
+                Spacer(minLength: 4)
 
-            Button(action: onToggleMode) {
                 StatusPill(
                     title: isNightSessionActive ? environmentText : "S.tand 멈춤",
                     systemImage: isNightSessionActive
@@ -832,10 +836,18 @@ private struct SettingsHero: View {
                     active: isNightSessionActive,
                     accent: accent
                 )
+                .accessibilityElement(children: .combine)
             }
-            .buttonStyle(.plain)
+
+            Picker("화면 모드 유지", selection: $modePreference) {
+                ForEach(StandModePreference.allCases) { preference in
+                    Text(preference.title).tag(preference)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(minHeight: 44)
             .disabled(!isNightSessionActive)
-            .accessibilityHint("홈 화면을 한 번 누른 것처럼 오브제와 매이트 모드를 전환합니다")
+            .accessibilityHint("자동 전환 또는 오브제와 매이트 모드 유지를 선택합니다")
         }
         .padding(16)
         .background(
@@ -883,7 +895,10 @@ private struct ThemePalettePicker: View {
     @Binding var selection: StandDisplayTheme
 
     var body: some View {
-        HStack(spacing: 10) {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 72), spacing: 10)],
+            spacing: 10
+        ) {
             ForEach(StandDisplayTheme.allCases, id: \.self) { theme in
                 Button {
                     withAnimation(.easeInOut(duration: 0.25)) { selection = theme }
@@ -910,7 +925,7 @@ private struct ThemePalettePicker: View {
                         }
 
                         Text(theme.title)
-                            .font(.system(size: 9.5, weight: .semibold))
+                            .font(.caption.weight(.semibold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.75)
                     }
@@ -1354,8 +1369,14 @@ private struct AudioLevelMeter: View {
 private struct ClockFontSelectionView: View {
     @ObservedObject var store: SettingsStore
     let accent: Color
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
+    private var columns: [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(), spacing: 8),
+            count: dynamicTypeSize.isAccessibilitySize ? 1 : 3
+        )
+    }
 
     var body: some View {
         ZStack {
@@ -1421,7 +1442,7 @@ private struct ClockFontGridTile: View {
 
             HStack(spacing: 4) {
                 Text(choice.displayName)
-                    .font(.caption2.weight(.semibold))
+                    .font(.caption.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
                 if selected {
@@ -1551,6 +1572,7 @@ struct InternetRadioChannelManagementView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var path: [InternetRadioManagementDestination] = []
     @State private var showsBrowser = false
+    @State private var pendingDeletion: InternetRadioConfiguration?
 
     init(model: StandViewModel) {
         self.model = model
@@ -1592,7 +1614,7 @@ struct InternetRadioChannelManagementView: View {
                             channelRow(channel)
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     Button(role: .destructive) {
-                                        delete(channel)
+                                        pendingDeletion = channel
                                     } label: {
                                         Label("삭제", systemImage: "trash")
                                     }
@@ -1676,6 +1698,24 @@ struct InternetRadioChannelManagementView: View {
         .fullScreenCover(isPresented: $showsBrowser) {
             InternetRadioBrowserView(accent: accent)
         }
+        .confirmationDialog(
+            "\(pendingDeletion?.displayName ?? "이 채널")을 삭제할까요?",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let channel = pendingDeletion {
+                Button("채널 삭제", role: .destructive) {
+                    delete(channel)
+                    pendingDeletion = nil
+                }
+            }
+            Button("취소", role: .cancel) { pendingDeletion = nil }
+        } message: {
+            Text("삭제한 채널 주소는 되돌릴 수 없습니다.")
+        }
     }
 
     private func channelRow(_ channel: InternetRadioConfiguration) -> some View {
@@ -1714,7 +1754,11 @@ struct InternetRadioChannelManagementView: View {
                     isActive: isActive
                 )
             )
-            .accessibilityHint(isSelected ? "현재 홈 채널입니다" : "두 번 탭하여 홈 채널로 선택합니다")
+            .accessibilityHint(
+                isSelected
+                    ? "현재 홈에 표시되는 채널입니다"
+                    : "편집에서 순서를 바꾸면 홈에 표시할 수 있습니다"
+            )
             .accessibilityAddTraits(isSelected ? .isSelected : [])
             .accessibilityAction(named: "채널 수정") {
                 edit(channel)
@@ -1725,7 +1769,7 @@ struct InternetRadioChannelManagementView: View {
             } label: {
                 Image(systemName: "pencil")
                     .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 32, height: 32)
+                    .frame(width: 48, height: 48)
             }
             .buttonStyle(.borderless)
             .accessibilityLabel("\(channel.displayName) 수정")
@@ -1737,7 +1781,7 @@ struct InternetRadioChannelManagementView: View {
                 Label("채널 수정", systemImage: "pencil")
             }
             Button(role: .destructive) {
-                delete(channel)
+                pendingDeletion = channel
             } label: {
                 Label("채널 삭제", systemImage: "trash")
             }

@@ -66,37 +66,30 @@ struct InternetRadioBrowserView: View {
     }
 
     private var addressBar: some View {
-        HStack(spacing: 7) {
-            browserBackOrCloseButton
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 7) {
+                browserBackOrCloseButton
+                browserAddressField.frame(minWidth: 88)
+                browserPrimaryAddressButton
+                browserReloadButton
+                browserFavoritesButton
+                browserCloseButton
+            }
 
-            TextField("웹 주소 입력", text: $addressText)
-                .font(.callout.weight(.semibold))
-                .keyboardType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.go)
-                .focused($addressFieldIsFocused)
-                .onSubmit(loadAddress)
-                .padding(.horizontal, 10)
-                .frame(height: addressBarHeight)
-                .background(browserPanelFill.opacity(0.72), in: Capsule())
-                .overlay {
-                    Capsule()
-                        .stroke(.white.opacity(0.14), lineWidth: 1)
+            VStack(spacing: 7) {
+                HStack(spacing: 7) {
+                    browserBackOrCloseButton
+                    browserAddressField
+                    browserPrimaryAddressButton
                 }
 
-            browserPrimaryAddressButton
-
-            Button {
-                session.reload()
-            } label: {
-                browserToolbarIcon("arrow.clockwise")
+                HStack(spacing: 7) {
+                    Spacer(minLength: 0)
+                    browserReloadButton
+                    browserFavoritesButton
+                    browserCloseButton
+                }
             }
-            .buttonStyle(.plain)
-            .disabled(!session.hasLoadedPage)
-            .accessibilityLabel("새로고침")
-
-            browserFavoritesButton
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -111,6 +104,43 @@ struct InternetRadioBrowserView: View {
                     .frame(height: 2)
             }
         }
+    }
+
+    private var browserAddressField: some View {
+        TextField("웹 주소 입력", text: $addressText)
+            .font(.callout.weight(.semibold))
+            .keyboardType(.URL)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .submitLabel(.go)
+            .focused($addressFieldIsFocused)
+            .onSubmit(loadAddress)
+            .padding(.horizontal, 10)
+            .frame(height: addressBarHeight)
+            .background(browserPanelFill.opacity(0.72), in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(.white.opacity(0.14), lineWidth: 1)
+            }
+    }
+
+    private var browserReloadButton: some View {
+        Button {
+            session.reload()
+        } label: {
+            browserToolbarIcon("arrow.clockwise")
+        }
+        .buttonStyle(.plain)
+        .disabled(!session.hasLoadedPage)
+        .accessibilityLabel("새로고침")
+    }
+
+    private var browserCloseButton: some View {
+        Button(action: closeBrowser) {
+            browserToolbarIcon("xmark")
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("브라우저 닫기")
     }
 
     private var pageLoadProgressBar: some View {
@@ -317,6 +347,7 @@ struct InternetRadioBrowserView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.white.opacity(0.58))
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("즐겨찾기 닫기")
@@ -384,6 +415,7 @@ struct InternetRadioBrowserView: View {
                 session.clearError()
             } label: {
                 Image(systemName: "xmark.circle.fill")
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("안내 닫기")
