@@ -1694,6 +1694,29 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
+    func testStartleActivationWaitsForFullMinuteAfterEnteringMateMode() {
+        let enteredAt: TimeInterval = 1_000
+
+        XCTAssertFalse(
+            StartleActivationPolicy.canActivate(
+                mateModeEnteredAt: nil,
+                now: enteredAt + 120
+            )
+        )
+        XCTAssertFalse(
+            StartleActivationPolicy.canActivate(
+                mateModeEnteredAt: enteredAt,
+                now: enteredAt + 59.999
+            )
+        )
+        XCTAssertTrue(
+            StartleActivationPolicy.canActivate(
+                mateModeEnteredAt: enteredAt,
+                now: enteredAt + 60
+            )
+        )
+    }
+
     func testSleepCareMonitoringRunsOnlyInSleepingMode() {
         XCTAssertTrue(
             SleepCareMonitoringPolicy.shouldMonitor(

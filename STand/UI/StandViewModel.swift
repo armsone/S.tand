@@ -213,6 +213,18 @@ enum AmbientCameraSamplingPolicy {
     }
 }
 
+enum StartleActivationPolicy {
+    static let delay: TimeInterval = 60
+
+    static func canActivate(
+        mateModeEnteredAt: TimeInterval?,
+        now: TimeInterval
+    ) -> Bool {
+        guard let mateModeEnteredAt else { return false }
+        return now - mateModeEnteredAt >= delay
+    }
+}
+
 enum AutomaticModeTransitionPolicy {
     static let cameraDarkThreshold = 0.16
     static let objectToMateDelay: TimeInterval = 20
@@ -404,6 +416,7 @@ final class StandViewModel: ObservableObject {
     private var isAdjustingBrightness = false
     private var activeRecordingSessionID: UUID?
     private var activeStartleEventID: UUID?
+    private var mateModeEnteredAt: TimeInterval?
 
     init() {
         let settings = SettingsStore()
@@ -723,6 +736,10 @@ final class StandViewModel: ObservableObject {
 
     private func wakeForSleepMovement() {
         guard isNightSessionActive, environmentDisplayMode == .sleeping else { return }
+        guard StartleActivationPolicy.canActivate(
+            mateModeEnteredAt: mateModeEnteredAt,
+            now: ProcessInfo.processInfo.systemUptime
+        ) else { return }
         if activeRecordingSessionID == nil {
             syncRecordingSessionForDisplayMode()
         }
@@ -1061,6 +1078,11 @@ final class StandViewModel: ObservableObject {
         performTransition: Bool
     ) {
         let changed = newMode != environmentDisplayMode
+        if changed {
+            mateModeEnteredAt = newMode == .sleeping
+                ? ProcessInfo.processInfo.systemUptime
+                : nil
+        }
         if newMode == .stand { finishStartleEvent() }
         environmentDisplayMode = newMode
         if newMode == .sleeping {
