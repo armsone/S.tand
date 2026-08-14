@@ -1020,7 +1020,7 @@ struct RootView: View {
             BoyisoControlButton(
                 title: BoyisoBranding.primaryName,
                 systemImage: boyiso.isEnabled ? "pawprint.fill" : "pawprint",
-                status: boyiso.isEnabled ? "나의 역할 · \(boyiso.role.title)" : "연결 안 됨",
+                status: boyiso.isEnabled ? boyiso.role.title : "연결 안 됨",
                 width: width,
                 tap: {
                     if boyiso.isEnabled { _ = boyiso.sendTokTok() }
@@ -1092,7 +1092,8 @@ struct RootView: View {
     }
 
     private func handleBoyisoEvent(_ event: BoyisoEvent) {
-        guard event.kind == .toktok || event.isCryingSound else { return }
+        let chimeCount = BoyisoReactionPolicy.chimeCount(for: event)
+        guard chimeCount > 0 else { return }
         boyisoOverlayTask?.cancel()
         if event.kind == .toktok {
             boyisoGreetingSender = event.sourceName
@@ -1103,9 +1104,10 @@ struct RootView: View {
             boyisoCryingSender = event.sourceName
             boyisoGreetingSender = nil
             Task { @MainActor in
-                playBoyisoChime()
-                try? await Task.sleep(for: .milliseconds(1_250))
-                playBoyisoChime()
+                for index in 0..<chimeCount {
+                    if index > 0 { try? await Task.sleep(for: .milliseconds(1_250)) }
+                    playBoyisoChime()
+                }
             }
         }
         UIAccessibility.post(notification: .announcement,
@@ -3650,6 +3652,13 @@ enum BoyisoOverlayKind: Equatable {
     func accessibilityLabel(sender: String) -> String {
         guard !sender.isEmpty else { return primaryMessage }
         return self == .greeting ? "\(sender)님의 인사" : "\(primaryMessage) 보낸 기기, \(sender)"
+    }
+}
+
+enum BoyisoReactionPolicy {
+    static func chimeCount(for event: BoyisoEvent) -> Int {
+        if event.kind == .toktok { return 1 }
+        return event.isCryingSound ? 2 : 0
     }
 }
 

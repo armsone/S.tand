@@ -3379,6 +3379,7 @@ final class BoyisoProtocolTests: XCTestCase {
         XCTAssertTrue(sections.hosts[0].isCurrentDevice)
         XCTAssertEqual(sections.hosts[0].state, "연결됨")
         XCTAssertEqual(sections.hosts[0].connectionLabels, ["이 기기"])
+        XCTAssertFalse(sections.hasDuplicateNames)
         XCTAssertEqual(
             sections.hosts[0].accessibilityLabel,
             "엄마, 나, 볼 사람, 연결됨, 배터리 82퍼센트, 연결 경로, 이 기기"
@@ -3446,6 +3447,7 @@ final class BoyisoProtocolTests: XCTestCase {
 
         XCTAssertEqual(sections.totalCount, 3)
         XCTAssertEqual(sections.hosts.filter { $0.name == "SM-T500" }.count, 2)
+        XCTAssertTrue(sections.hasDuplicateNames)
         XCTAssertEqual(sections.hosts.first { $0.id == sharedID }?.batteryPercent, 71)
         XCTAssertEqual(
             sections.hosts.first { $0.id == sharedID }?.connectionLabels,
@@ -3458,6 +3460,40 @@ final class BoyisoProtocolTests: XCTestCase {
             sections.hosts.first { $0.id == sameNameDifferentID.id }?.connectionLabels,
             ["Wi-Fi"]
         )
+    }
+
+    func testDuplicateFingerSnapMeshEventDoesNotRefreshPeerOrRepeatReaction() {
+        let suite = "BoyisoProtocolTests.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = BoyisoConnectivityService(defaults: defaults)
+        let event = BoyisoEvent(
+            sourceID: UUID(), sourceName: "아이 방", role: .guest, kind: .sound,
+            detail: "finger_snap", monitoring: true, batteryPercent: 81,
+            displayMode: .mate, sessionActive: true
+        )
+        var reactions: [BoyisoEvent] = []
+        service.onRemoteEvent = { reactions.append($0) }
+
+        service.accept(event, through: .localNetwork)
+        let firstUpdate = expectation(description: "first peer update")
+        DispatchQueue.main.async { firstUpdate.fulfill() }
+        wait(for: [firstUpdate], timeout: 1)
+        let first = service.activePeers.first
+        XCTAssertEqual(reactions, [event])
+        XCTAssertEqual(BoyisoReactionPolicy.chimeCount(for: event), 2)
+
+        service.accept(event, through: .bluetooth)
+        let duplicateDelivery = expectation(description: "duplicate delivery ignored")
+        DispatchQueue.main.async { duplicateDelivery.fulfill() }
+        wait(for: [duplicateDelivery], timeout: 1)
+        let second = service.activePeers.first
+
+        XCTAssertEqual(service.activePeers.count, 1)
+        XCTAssertEqual(first?.lastSeen, second?.lastSeen)
+        XCTAssertEqual(second?.transports, [.localNetwork])
+        XCTAssertEqual(reactions, [event])
+        XCTAssertEqual(service.lastRemoteEvent, event)
     }
 
     func testEncryptedLANFrameRoundTripsWithoutSendingRawAudio() throws {

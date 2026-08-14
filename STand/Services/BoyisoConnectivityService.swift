@@ -424,11 +424,10 @@ final class BoyisoConnectivityService: NSObject, ObservableObject {
         }
     }
 
-    private func accept(_ event: BoyisoEvent, through transport: BoyisoTransportKind) {
+    func accept(_ event: BoyisoEvent, through transport: BoyisoTransportKind) {
         guard event.sourceID != deviceID else { return }
-        let first = deduplicator.accepts(event)
+        guard deduplicator.accepts(event) else { return }
         publish { service in service.updatePeer(event, transport: transport) }
-        guard first else { return }
         send(event)
         guard event.kind != .heartbeat else { return }
         publish { service in

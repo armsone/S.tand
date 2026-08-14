@@ -173,6 +173,15 @@ struct BoyisoView: View {
             }
 
             BoyisoParticipantSummaryHeader(totalCount: participantSections.totalCount)
+            if participantSections.hasDuplicateNames {
+                Label("같은 이름을 쓰는 기기가 있어요", systemImage: "person.2")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.68))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+            }
             participantGroupCard(role: .host, participants: participantSections.hosts)
             participantGroupCard(role: .guest, participants: participantSections.guests)
 
@@ -207,6 +216,7 @@ struct BoyisoView: View {
             }
             .buttonStyle(.bordered)
         }
+        .frame(maxWidth: 720)
         .onAppear { prepareShareImage() }
     }
 
@@ -248,16 +258,18 @@ struct BoyisoView: View {
         role: BoyisoRole,
         participants: [BoyisoParticipantPresentation]
     ) -> some View {
-        BoyisoCard(tint: role.tint) {
+        BoyisoCard {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 8) {
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(role.tint).frame(width: 4, height: 28).accessibilityHidden(true)
-                    Image(systemName: role.iconName).accessibilityHidden(true)
+                        .fill(role.tint).frame(width: 4, height: 24).accessibilityHidden(true)
+                    Image(systemName: role.iconName)
+                        .foregroundStyle(role.tint)
+                        .accessibilityHidden(true)
                     Text("\(role.title) \(participants.count)명")
                 }
-                .font(.title3.bold())
-                .foregroundStyle(role.tint)
+                .font(.headline.bold())
+                .foregroundStyle(.white)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(role.title) \(participants.count)명")
                 .accessibilityAddTraits(.isHeader)
@@ -265,12 +277,13 @@ struct BoyisoView: View {
                 if participants.isEmpty {
                     Text("아직 없음")
                         .font(.body).foregroundStyle(.white.opacity(0.58))
-                        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 } else {
-                    ForEach(participants) { participant in
+                    ForEach(Array(participants.enumerated()), id: \.element.id) { index, participant in
                         BoyisoParticipantRow(participant: participant)
+                        if index < participants.count - 1 {
+                            Divider().overlay(.white.opacity(0.08))
+                        }
                     }
                 }
             }
@@ -343,6 +356,10 @@ struct BoyisoParticipantSections: Equatable {
     let hosts: [BoyisoParticipantPresentation]
     let guests: [BoyisoParticipantPresentation]
     var totalCount: Int { hosts.count + guests.count }
+    var hasDuplicateNames: Bool {
+        let names = (hosts + guests).map(\.name)
+        return Set(names).count != names.count
+    }
 
     init(current: BoyisoPeerStatus, peers: [BoyisoPeerStatus]) {
         var uniquePeers: [UUID: BoyisoPeerStatus] = [:]
@@ -393,13 +410,8 @@ private struct BoyisoParticipantSummaryHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text("함께 연결된 사람").font(.title2.bold())
-                Spacer(minLength: 8)
-                Text("총 \(totalCount)명")
-                    .font(.headline).foregroundStyle(.white.opacity(0.72))
-            }
-            Text("현재 기기를 포함해 이 공간에 연결된 사람입니다.")
+            Text("공간에 있는 사람").font(.title2.bold())
+            Text("나를 포함해 총 \(totalCount)명")
                 .font(.subheadline).foregroundStyle(.white.opacity(0.62))
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -408,49 +420,65 @@ private struct BoyisoParticipantSummaryHeader: View {
         .padding(.top, 8)
         .padding(.bottom, 2)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("함께 연결된 사람, 총 \(totalCount)명")
+        .accessibilityLabel("공간에 있는 사람, 나를 포함해 총 \(totalCount)명")
         .accessibilityAddTraits(.isHeader)
     }
 }
 
 private struct BoyisoParticipantRow: View {
     let participant: BoyisoParticipantPresentation
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var nameSize = 18.0
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: participant.role.iconName)
-                .font(.headline).foregroundStyle(participant.role.tint)
-                .frame(width: 24).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 7) {
-                    Text(participant.name).font(.title3.weight(.semibold))
-                    if participant.isCurrentDevice {
-                        Text("나").font(.caption2.bold()).padding(.horizontal, 7).padding(.vertical, 3)
-                            .background(.white.opacity(0.14), in: Capsule())
-                    }
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 7) {
-                    Text(participant.role.title)
-                        .font(.caption.bold()).foregroundStyle(participant.role.tint)
-                    Text(participant.state).font(.caption).foregroundStyle(.white.opacity(0.68))
+        VStack(alignment: .leading, spacing: 8) {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 6) { participantName; batteryLabel }
+                VStack(alignment: .leading, spacing: 6) { stateLabel; connectionBadges }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 7) { participantName; batteryLabel }
+                    VStack(alignment: .leading, spacing: 6) { participantName; batteryLabel }
                 }
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 6) { connectionBadges }
-                    VStack(alignment: .leading, spacing: 5) { connectionBadges }
+                    HStack(spacing: 8) { stateLabel; Spacer(minLength: 4); connectionBadges }
+                    VStack(alignment: .leading, spacing: 6) { stateLabel; connectionBadges }
                 }
             }
-            Spacer(minLength: 8)
-            if let battery = participant.batteryPercent {
-                Text("\(battery)%").font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.58))
-            }
         }
-        .frame(maxWidth: .infinity, minHeight: 56)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
+        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        .padding(.vertical, 4)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(participant.accessibilityLabel)
+    }
+
+    private var participantName: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            Text(participant.name)
+                .font(.system(size: nameSize, weight: .semibold))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
+            if participant.isCurrentDevice {
+                Text("나").font(.caption2.bold()).padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(.white.opacity(0.14), in: Capsule())
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var batteryLabel: some View {
+        if let battery = participant.batteryPercent {
+            Text("배터리 \(battery)%")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.white.opacity(0.58))
+        }
+    }
+
+    private var stateLabel: some View {
+        Text(participant.state)
+            .font(.subheadline)
+            .foregroundStyle(.white.opacity(0.68))
     }
 
     @ViewBuilder
