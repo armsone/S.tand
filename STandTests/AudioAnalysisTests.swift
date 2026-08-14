@@ -3300,6 +3300,47 @@ final class AudioAnalysisTests: XCTestCase {
 }
 
 final class BoyisoProtocolTests: XCTestCase {
+    func testConnectedDisplayNameUpdateTrimsPersistsAndRejectsEmptyName() {
+        let suite = "BoyisoProtocolTests.\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = BoyisoConnectivityService(defaults: defaults)
+
+        XCTAssertTrue(service.updateDisplayName("  아이 방  "))
+        XCTAssertEqual(service.deviceName, "아이 방")
+        XCTAssertEqual(service.currentParticipant.name, "아이 방")
+        XCTAssertFalse(service.updateDisplayName("   \n"))
+        XCTAssertEqual(service.deviceName, "아이 방")
+    }
+
+    func testEveryParticipantCanReuseTheSameInvitationAfterLeavingAndRejoining() throws {
+        let invitation = BoyisoInvitation.make()
+        let sharedURL = invitation.url
+
+        XCTAssertEqual(try BoyisoInvitation(url: sharedURL), invitation)
+        XCTAssertEqual(try BoyisoInvitation(url: sharedURL), invitation)
+    }
+
+    func testDisconnectedRoomShowsReconnectStatusAfterItPreviouslyHadAPeer() {
+        XCTAssertEqual(
+            BoyisoConnectionStatusCopy.summary(hasPeers: false, hadConnectedPeer: true, hasIssue: false),
+            "다시 연결 중"
+        )
+        XCTAssertEqual(
+            BoyisoConnectionStatusCopy.summary(hasPeers: false, hadConnectedPeer: false, hasIssue: false),
+            "함께할 사람이 연결되기를 기다리고 있습니다."
+        )
+        XCTAssertEqual(
+            BoyisoConnectionStatusCopy.summary(hasPeers: true, hadConnectedPeer: true, hasIssue: false),
+            "함께 연결되어 있습니다."
+        )
+    }
+
+    func testBoyisoBackgroundModesDeclareAudioAndBothBluetoothRoles() {
+        let modes = Set(Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String] ?? [])
+        XCTAssertTrue(modes.isSuperset(of: ["audio", "bluetooth-central", "bluetooth-peripheral"]))
+    }
+
     func testSoundDetectionOverlayUsesExactProductCopy() {
         XCTAssertEqual(BoyisoOverlayKind.soundDetected.primaryMessage, "말할 사람의 소리가 감지되었습니다.")
         XCTAssertEqual(

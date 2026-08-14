@@ -45,6 +45,7 @@ final class BoyisoConnectivityService: NSObject, ObservableObject {
     @Published private(set) var localNetworkConnectionCount = 0
     @Published private(set) var bluetoothConnectionCount = 0
     @Published private(set) var issueMessage: String?
+    @Published private(set) var hadConnectedPeer = false
 
     var onRemoteEvent: ((BoyisoEvent) -> Void)?
     var activePeers: [BoyisoPeerStatus] {
@@ -131,6 +132,16 @@ final class BoyisoConnectivityService: NSObject, ObservableObject {
         defaults.set(deviceName, forKey: Self.nameKey)
     }
 
+    @discardableResult
+    func updateDisplayName(_ name: String) -> Bool {
+        let updated = name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(32).description
+        guard !updated.isEmpty else { return false }
+        deviceName = updated
+        defaults.set(updated, forKey: Self.nameKey)
+        if isEnabled { emit(kind: .heartbeat) }
+        return true
+    }
+
     func createRoom(role: BoyisoRole, name: String) throws {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw BoyisoCodecError.invalidInvitation
@@ -210,6 +221,7 @@ final class BoyisoConnectivityService: NSObject, ObservableObject {
         guard invitation != nil, !deviceName.isEmpty else { return }
         isEnabled = true
         issueMessage = nil
+        hadConnectedPeer = false
         peers = []
         startHeartbeatTimer()
         startLocalNetworkListener()
@@ -227,6 +239,7 @@ final class BoyisoConnectivityService: NSObject, ObservableObject {
         isEnabled = false
         heartbeatTimer?.invalidate(); heartbeatTimer = nil
         peers = []; lastRemoteEvent = nil; issueMessage = nil
+        hadConnectedPeer = false
         localNetworkConnectionCount = 0; bluetoothConnectionCount = 0
         queue.async { [weak self] in
             guard let self else { return }
@@ -423,11 +436,15 @@ final class BoyisoConnectivityService: NSObject, ObservableObject {
             service.onRemoteEvent?(event)
             if event.kind == .toktok, UIApplication.shared.applicationState != .active {
                 service.scheduleTokTokNotification(from: event.sourceName)
+            } else if event.kind != .heartbeat, UIApplication.shared.applicationState != .active {
+                service.scheduleDetectionNotification(for: event)
             }
         }
     }
 
     private func updatePeer(_ event: BoyisoEvent, transport: BoyisoTransportKind) {
+        hadConnectedPeer = true
+        issueMessage = nil
         if let index = peers.firstIndex(where: { $0.id == event.sourceID }) {
             peers[index].name = event.sourceName; peers[index].role = event.role
             peers[index].lastSeen = Date(); peers[index].monitoring = event.monitoring
@@ -451,6 +468,19 @@ final class BoyisoConnectivityService: NSObject, ObservableObject {
         content.body = "\(name.isEmpty ? "같은 공간의 사람" : name)님이 인사를 보냈어요."
         content.sound = UNNotificationSound(named: UNNotificationSoundName("boyiso_toktok.wav"))
         UNUserNotificationCenter.current().add(.init(identifier: "boyiso-toktok-\(UUID())", content: content, trigger: nil))
+    }
+
+    private func scheduleDetectionNotification(for event: BoyisoEvent) {
+        let content = UNMutableNotificationContent()
+        content.title = "보이소"
+        content.body = event.kind == .movement
+            ? "말할 사람의 큰 움직임이 감지되었습니다."
+            : "말할 사람의 소리가 감지되었습니다."
+        if !event.sourceName.isEmpty { content.subtitle = event.sourceName }
+        content.sound = .default
+        UNUserNotificationCenter.current().add(
+            .init(identifier: "boyiso-detection-\(event.id)", content: content, trigger: nil)
+        )
     }
 
     private func publish(_ mutation: @escaping (BoyisoConnectivityService) -> Void) {
@@ -478,6 +508,13 @@ extension BoyisoConnectivityService: CBCentralManagerDelegate {
     }
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         peripheral.discoverServices([Self.bluetoothServiceUUID])
+    }
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        guard isEnabled else { return }
+        queue.asyncAfter(deadline: .now() + 2) { [weak self, weak peripheral] in
+            guard let self, let peripheral, self.isEnabled else { return }
+            central.connect(peripheral)
+        }
     }
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         subscribedCharacteristics.removeValue(forKey: peripheral.identifier); publishConnectionCounts()

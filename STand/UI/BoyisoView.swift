@@ -14,6 +14,7 @@ struct BoyisoView: View {
     @State private var validationMessage: String?
     @State private var shareURL: URL?
     @State private var connectionDetailsExpanded = false
+    @State private var nameEditorExpanded = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     init(service: BoyisoConnectivityService, accent: Color) {
@@ -134,10 +135,40 @@ struct BoyisoView: View {
                     }
                     .font(.subheadline.weight(.semibold))
                     .tint(.white.opacity(0.78))
+
+                    DisclosureGroup("내 이름 수정", isExpanded: $nameEditorExpanded) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            TextField("같은 공간에 표시할 이름", text: $name)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .padding(.horizontal, 12).frame(minHeight: 46)
+                                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                                .onChange(of: name) { _, value in
+                                    if value.count > 32 { name = String(value.prefix(32)) }
+                                    validationMessage = nil
+                                }
+                            Button("이름 저장") {
+                                if service.updateDisplayName(name) {
+                                    name = service.deviceName
+                                    validationMessage = nil
+                                    nameEditorExpanded = false
+                                } else {
+                                    validationMessage = "내 이름을 입력해 주세요."
+                                }
+                            }
+                            .buttonStyle(.borderedProminent).tint(accent)
+                            if let validationMessage {
+                                Text(validationMessage).font(.caption).foregroundStyle(.orange)
+                            }
+                        }
+                        .padding(.top, 8)
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .tint(.white.opacity(0.78))
                 }
             }
 
-            if service.canInvite, let invitation = service.invitation,
+            if let invitation = service.invitation,
                let image = BoyisoQRCode.image(for: invitation.url.absoluteString) {
                 BoyisoCard {
                     VStack(alignment: .leading, spacing: 10) {
@@ -163,7 +194,7 @@ struct BoyisoView: View {
             participantGroupCard(role: .host, participants: participantSections.hosts)
             participantGroupCard(role: .guest, participants: participantSections.guests)
 
-            Text("iOS가 백그라운드 실행을 제한하거나 앱이 종료되면 근거리 연결과 알림이 유지되지 않을 수 있습니다. 무음 모드·집중 모드·알림 설정은 그대로 따릅니다.")
+            Text("화면 잠금 중에도 iOS가 허용하는 범위에서 Bluetooth·오디오 연결과 수신 알림을 유지합니다. 다만 앱이 정지되거나 종료되면 Wi-Fi·Bluetooth 상시 연결은 보장되지 않으며, 앱을 다시 열면 자동으로 재탐색합니다. 무음 모드·집중 모드·알림 설정은 그대로 따릅니다.")
                 .font(.caption).foregroundStyle(.white.opacity(0.48))
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -180,9 +211,11 @@ struct BoyisoView: View {
     }
 
     private var connectionSummary: String {
-        if service.issueMessage != nil { return "연결을 다시 시도하고 있습니다." }
-        if service.activePeers.isEmpty { return "함께할 사람이 연결되기를 기다리고 있습니다." }
-        return "함께 연결되어 있습니다."
+        BoyisoConnectionStatusCopy.summary(
+            hasPeers: !service.activePeers.isEmpty,
+            hadConnectedPeer: service.hadConnectedPeer,
+            hasIssue: service.issueMessage != nil
+        )
     }
 
     private var roomCreationTile: some View {
@@ -264,11 +297,19 @@ struct BoyisoView: View {
     }
 
     private func prepareShareImage() {
-        guard service.canInvite, let invitation = service.invitation,
+        guard let invitation = service.invitation,
               let image = BoyisoQRCode.image(for: invitation.url.absoluteString),
               let data = image.pngData() else { shareURL = nil; return }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("boyiso-invitation.png")
         do { try data.write(to: url, options: .atomic); shareURL = url } catch { shareURL = nil }
+    }
+}
+
+enum BoyisoConnectionStatusCopy {
+    static func summary(hasPeers: Bool, hadConnectedPeer: Bool, hasIssue: Bool) -> String {
+        if hasIssue || hadConnectedPeer && !hasPeers { return "다시 연결 중" }
+        if !hasPeers { return "함께할 사람이 연결되기를 기다리고 있습니다." }
+        return "함께 연결되어 있습니다."
     }
 }
 
