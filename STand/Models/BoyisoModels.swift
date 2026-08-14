@@ -5,6 +5,7 @@ import Security
 enum BoyisoBranding {
     static let primaryName = "보이소"
     static let descriptor = "BOISO · 보이는 소리"
+    static let representativeIconAccessibilityLabel = primaryName
 }
 
 enum BoyisoRole: String, Codable, CaseIterable, Identifiable {
@@ -143,11 +144,15 @@ enum BoyisoCodec {
     }
 
     static func seal(_ event: BoyisoEvent, invitation: BoyisoInvitation) throws -> Data {
-        let encoded = try JSONEncoder().encode(event)
+        let encoded = try encodeWire(event)
         guard let combined = try AES.GCM.seal(encoded, using: key(invitation)).combined else {
             throw BoyisoCodecError.invalidFrame
         }
         return combined
+    }
+
+    static func encodeWire(_ event: BoyisoEvent) throws -> Data {
+        try JSONEncoder().encode(BoyisoWireEvent(event))
     }
 
     static func open(_ combined: Data, invitation: BoyisoInvitation) throws -> BoyisoEvent {
@@ -192,6 +197,38 @@ enum BoyisoCodec {
 
     private static func key(_ invitation: BoyisoInvitation) -> SymmetricKey {
         SymmetricKey(data: Data(SHA256.hash(data: Data("boyiso-v2|\(invitation.roomKey)".utf8))))
+    }
+}
+
+private struct BoyisoWireEvent: Encodable {
+    let version: Int
+    let id: String
+    let sourceID: String
+    let sourceName: String
+    let role: BoyisoRole
+    let kind: BoyisoEventKind
+    let sentAtMilliseconds: Int64
+    let intensity: Double?
+    let detail: String?
+    let monitoring: Bool
+    let batteryPercent: Int?
+    let displayMode: BoyisoDisplayMode?
+    let sessionActive: Bool
+
+    init(_ event: BoyisoEvent) {
+        version = event.version
+        id = event.id.uuidString.lowercased()
+        sourceID = event.sourceID.uuidString.lowercased()
+        sourceName = event.sourceName
+        role = event.role
+        kind = event.kind
+        sentAtMilliseconds = event.sentAtMilliseconds
+        intensity = event.intensity
+        detail = event.detail
+        monitoring = event.monitoring
+        batteryPercent = event.batteryPercent
+        displayMode = event.displayMode
+        sessionActive = event.sessionActive
     }
 }
 

@@ -302,6 +302,7 @@ struct SettingsView: View {
             title: BoyisoBranding.primaryName,
             subtitle: BoyisoBranding.descriptor,
             systemImage: "waveform.and.magnifyingglass",
+            usesBoyisoIcon: true,
             accent: accent
         ) {
             NavigationLink {
@@ -978,6 +979,7 @@ private struct StandSettingsCard<Content: View>: View {
     let title: String
     let subtitle: String
     let systemImage: String
+    let usesBoyisoIcon: Bool
     let accent: Color
     @ViewBuilder let content: Content
 
@@ -985,12 +987,14 @@ private struct StandSettingsCard<Content: View>: View {
         title: String,
         subtitle: String,
         systemImage: String,
+        usesBoyisoIcon: Bool = false,
         accent: Color,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.subtitle = subtitle
         self.systemImage = systemImage
+        self.usesBoyisoIcon = usesBoyisoIcon
         self.accent = accent
         self.content = content()
     }
@@ -998,11 +1002,19 @@ private struct StandSettingsCard<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 11) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 16, weight: .semibold))
+                Group {
+                    if usesBoyisoIcon {
+                        BoyisoBabyFaceIcon(lineWidth: 1.6)
+                            .padding(7)
+                    } else {
+                        Image(systemName: systemImage)
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                }
                     .foregroundStyle(accent)
                     .frame(width: 34, height: 34)
                     .background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)

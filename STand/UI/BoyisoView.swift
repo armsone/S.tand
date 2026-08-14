@@ -3,6 +3,77 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import SwiftUI
 
+struct BoyisoBabyFaceShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let side = min(rect.width, rect.height)
+        let origin = CGPoint(
+            x: rect.midX - (side / 2),
+            y: rect.midY - (side / 2)
+        )
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: origin.x + (side * x), y: origin.y + (side * y))
+        }
+
+        var path = Path()
+        path.addEllipse(in: CGRect(
+            x: origin.x + (side * 0.12),
+            y: origin.y + (side * 0.12),
+            width: side * 0.76,
+            height: side * 0.76
+        ))
+
+        path.move(to: point(0.37, 0.17))
+        path.addCurve(
+            to: point(0.58, 0.30),
+            control1: point(0.42, 0.05),
+            control2: point(0.60, 0.10)
+        )
+        path.addCurve(
+            to: point(0.68, 0.22),
+            control1: point(0.62, 0.27),
+            control2: point(0.66, 0.24)
+        )
+
+        let eyeSize = side * 0.045
+        path.addEllipse(in: CGRect(
+            x: point(0.36, 0.43).x - (eyeSize / 2),
+            y: point(0.36, 0.43).y - (eyeSize / 2),
+            width: eyeSize,
+            height: eyeSize
+        ))
+        path.addEllipse(in: CGRect(
+            x: point(0.64, 0.43).x - (eyeSize / 2),
+            y: point(0.64, 0.43).y - (eyeSize / 2),
+            width: eyeSize,
+            height: eyeSize
+        ))
+
+        path.move(to: point(0.35, 0.60))
+        path.addQuadCurve(
+            to: point(0.65, 0.60),
+            control: point(0.50, 0.77)
+        )
+        return path
+    }
+}
+
+struct BoyisoBabyFaceIcon: View {
+    var lineWidth: CGFloat = 1.5
+
+    var body: some View {
+        BoyisoBabyFaceShape()
+            .stroke(
+                style: StrokeStyle(
+                    lineWidth: lineWidth,
+                    lineCap: .round,
+                    lineJoin: .round
+                )
+            )
+            .aspectRatio(1, contentMode: .fit)
+            .accessibilityHidden(true)
+    }
+}
+
 struct BoyisoView: View {
     @ObservedObject var service: BoyisoConnectivityService
     let accent: Color
@@ -13,7 +84,6 @@ struct BoyisoView: View {
     @State private var pendingInvitation: URL?
     @State private var validationMessage: String?
     @State private var shareURL: URL?
-    @State private var connectionDetailsExpanded = false
     @State private var nameEditorExpanded = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -116,30 +186,27 @@ struct BoyisoView: View {
             Button {
                 _ = service.sendTokTok()
             } label: {
-                Label("톡톡 보내기", systemImage: "pawprint.fill")
-                    .font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 54)
+                HStack(spacing: 8) {
+                    BoyisoBabyFaceIcon(lineWidth: 1.8)
+                        .frame(width: 22, height: 22)
+                    Text("톡톡 보내기")
+                }
+                .font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 54)
             }
             .buttonStyle(.borderedProminent).tint(accent)
+            .accessibilityLabel("톡톡 보내기")
 
             BoyisoCard {
                 VStack(alignment: .leading, spacing: 10) {
                     Label("공간에 연결됨", systemImage: "checkmark.circle.fill")
                         .font(.title3.bold()).foregroundStyle(.green)
-                    Text(connectionSummary)
-                        .font(.subheadline).foregroundStyle(.white.opacity(0.68))
+                    if let connectionDetail {
+                        Text(connectionDetail)
+                            .font(.subheadline).foregroundStyle(.white.opacity(0.68))
+                    }
                     if let issue = service.issueMessage {
                         Text(issue).font(.caption).foregroundStyle(.orange)
                     }
-                    DisclosureGroup("연결 자세히 보기", isExpanded: $connectionDetailsExpanded) {
-                        HStack(spacing: 8) {
-                            pathBadge("Wi-Fi", count: service.localNetworkConnectionCount)
-                            pathBadge("Bluetooth", count: service.bluetoothConnectionCount)
-                        }
-                        .padding(.top, 8)
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .tint(.white.opacity(0.78))
-
                     DisclosureGroup("내 이름 수정", isExpanded: $nameEditorExpanded) {
                         VStack(alignment: .leading, spacing: 8) {
                             TextField("같은 공간에 표시할 이름", text: $name)
@@ -224,8 +291,8 @@ struct BoyisoView: View {
         BoyisoParticipantSections(current: service.currentParticipant, peers: service.activePeers)
     }
 
-    private var connectionSummary: String {
-        BoyisoConnectionStatusCopy.summary(
+    private var connectionDetail: String? {
+        BoyisoConnectionStatusCopy.detail(
             hasPeers: !service.activePeers.isEmpty,
             hadConnectedPeer: service.hadConnectedPeer,
             hasIssue: service.issueMessage != nil
@@ -290,11 +357,6 @@ struct BoyisoView: View {
         }
     }
 
-    private func pathBadge(_ name: String, count: Int) -> some View {
-        Text("\(name) \(count)").font(.caption.bold()).padding(.horizontal, 10).padding(.vertical, 6)
-            .background(.white.opacity(0.08), in: Capsule())
-    }
-
     private func createRoom() {
         do {
             try service.createRoom(role: selectedRole, name: name)
@@ -327,6 +389,14 @@ enum BoyisoConnectionStatusCopy {
         if hasIssue || hadConnectedPeer && !hasPeers { return "다시 연결 중" }
         if !hasPeers { return "함께할 사람이 연결되기를 기다리고 있습니다." }
         return "함께 연결되어 있습니다."
+    }
+
+    static func detail(hasPeers: Bool, hadConnectedPeer: Bool, hasIssue: Bool) -> String? {
+        hasPeers && !hasIssue ? nil : summary(
+            hasPeers: hasPeers,
+            hadConnectedPeer: hadConnectedPeer,
+            hasIssue: hasIssue
+        )
     }
 }
 

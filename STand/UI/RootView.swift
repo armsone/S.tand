@@ -298,6 +298,8 @@ struct RootView: View {
     @State private var boyisoGreetingSender: String?
     @State private var boyisoCryingSender: String?
     @State private var boyisoOverlayTask: Task<Void, Never>?
+    @State private var boyisoBannerEvent: BoyisoEvent?
+    @State private var boyisoBannerTask: Task<Void, Never>?
 
     init(
         model: StandViewModel,
@@ -530,6 +532,7 @@ struct RootView: View {
                 startAppIfNeeded()
             }
         }
+        .onDisappear { resetTransientInterface() }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:
@@ -552,6 +555,7 @@ struct RootView: View {
         }
         .onChange(of: boyiso.lastRemoteEvent?.id) { _, _ in
             guard let event = boyiso.lastRemoteEvent else { return }
+            showBoyisoBanner(event)
             handleBoyisoEvent(event)
         }
         .onChange(of: model.sharedInternetRadioDraft) { _, draft in
@@ -562,12 +566,19 @@ struct RootView: View {
 
     private func resetTransientInterface() {
         clockScaleFeedbackTask?.cancel()
+        boyisoOverlayTask?.cancel()
+        boyisoBannerTask?.cancel()
 
         clockScaleFeedbackTask = nil
+        boyisoOverlayTask = nil
+        boyisoBannerTask = nil
 
         screenAdjustmentDragState = nil
         clockScaleGestureStart = nil
         clockScaleFeedback = nil
+        boyisoGreetingSender = nil
+        boyisoCryingSender = nil
+        boyisoBannerEvent = nil
     }
 
     private func startAppIfNeeded() {
@@ -1019,7 +1030,6 @@ struct RootView: View {
         case .boyiso:
             BoyisoControlButton(
                 title: BoyisoBranding.primaryName,
-                systemImage: boyiso.isEnabled ? "pawprint.fill" : "pawprint",
                 status: boyiso.isEnabled ? boyiso.role.title : "연결 안 됨",
                 width: width,
                 tap: {
@@ -1064,7 +1074,7 @@ struct RootView: View {
                     .background(.ultraThinMaterial, in: Capsule())
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-            if let event = boyiso.lastRemoteEvent {
+            if let event = boyisoBannerEvent {
                 Label(
                     "\(event.sourceName) · \(event.kind.title)",
                     systemImage: event.kind == .movement ? "figure.roll" : "waveform"
@@ -1089,6 +1099,22 @@ struct RootView: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
         .allowsHitTesting(false)
+    }
+
+    private func showBoyisoBanner(_ event: BoyisoEvent) {
+        boyisoBannerTask?.cancel()
+        boyisoBannerEvent = event
+        boyisoBannerTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(BoyisoEventBannerPolicy.displayDurationSeconds))
+            guard !Task.isCancelled,
+                  BoyisoEventBannerPolicy.shouldDismiss(
+                    displayedEventID: boyisoBannerEvent?.id,
+                    timerEventID: event.id
+                  )
+            else { return }
+            boyisoBannerEvent = nil
+            boyisoBannerTask = nil
+        }
     }
 
     private func handleBoyisoEvent(_ event: BoyisoEvent) {
@@ -3605,7 +3631,6 @@ private struct ControlButton: View {
 
 private struct BoyisoControlButton: View {
     let title: String
-    let systemImage: String
     let status: String
     let width: CGFloat
     let tap: () -> Void
@@ -3613,8 +3638,8 @@ private struct BoyisoControlButton: View {
 
     var body: some View {
         VStack(spacing: 3) {
-            Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold)).frame(width: 20, height: 16)
+            BoyisoBabyFaceIcon(lineWidth: 1.35)
+                .frame(width: 18, height: 18)
             Text(title).font(.system(size: StandControlLayoutMetrics.titleFontSize, weight: .semibold))
             Text(status).font(.system(size: StandControlLayoutMetrics.statusFontSize, weight: .medium))
                 .foregroundStyle(.white.opacity(0.52)).lineLimit(1).minimumScaleFactor(0.6)
@@ -3636,6 +3661,7 @@ private struct BoyisoControlButton: View {
                 }
         )
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(BoyisoBranding.representativeIconAccessibilityLabel), \(status)")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(named: "기본 동작", tap)
         .accessibilityAction(named: "\(BoyisoBranding.primaryName) 설정 열기", longPress)
@@ -3659,6 +3685,14 @@ enum BoyisoReactionPolicy {
     static func chimeCount(for event: BoyisoEvent) -> Int {
         if event.kind == .toktok { return 1 }
         return event.isCryingSound ? 2 : 0
+    }
+}
+
+enum BoyisoEventBannerPolicy {
+    static let displayDurationSeconds: Double = 5
+
+    static func shouldDismiss(displayedEventID: UUID?, timerEventID: UUID) -> Bool {
+        displayedEventID == timerEventID
     }
 }
 

@@ -3303,6 +3303,7 @@ final class BoyisoProtocolTests: XCTestCase {
     func testKoreanFirstBrandingKeepsAppAndProtocolIdentitiesSeparate() {
         XCTAssertEqual(BoyisoBranding.primaryName, "보이소")
         XCTAssertEqual(BoyisoBranding.descriptor, "BOISO · 보이는 소리")
+        XCTAssertEqual(BoyisoBranding.representativeIconAccessibilityLabel, "보이소")
         XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String, "에스텐드")
         XCTAssertEqual(BoyisoInvitation.scheme, "stand")
         XCTAssertEqual(BoyisoInvitation.host, "boyiso")
@@ -3342,11 +3343,45 @@ final class BoyisoProtocolTests: XCTestCase {
             BoyisoConnectionStatusCopy.summary(hasPeers: true, hadConnectedPeer: true, hasIssue: false),
             "함께 연결되어 있습니다."
         )
+        XCTAssertNil(BoyisoConnectionStatusCopy.detail(
+            hasPeers: true,
+            hadConnectedPeer: true,
+            hasIssue: false
+        ))
+        XCTAssertEqual(BoyisoConnectionStatusCopy.detail(
+            hasPeers: false,
+            hadConnectedPeer: true,
+            hasIssue: false
+        ), "다시 연결 중")
+        XCTAssertEqual(BoyisoConnectionStatusCopy.detail(
+            hasPeers: false,
+            hadConnectedPeer: false,
+            hasIssue: false
+        ), "함께할 사람이 연결되기를 기다리고 있습니다.")
     }
 
     func testBoyisoBackgroundModesDeclareAudioAndBothBluetoothRoles() {
         let modes = Set(Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String] ?? [])
         XCTAssertTrue(modes.isSuperset(of: ["audio", "bluetooth-central", "bluetooth-peripheral"]))
+    }
+
+    func testBoyisoInAppBannerExpiresAndOldTimerCannotDismissNewEvent() {
+        let oldEventID = UUID()
+        let newEventID = UUID()
+
+        XCTAssertEqual(BoyisoEventBannerPolicy.displayDurationSeconds, 5)
+        XCTAssertTrue(BoyisoEventBannerPolicy.shouldDismiss(
+            displayedEventID: oldEventID,
+            timerEventID: oldEventID
+        ))
+        XCTAssertFalse(BoyisoEventBannerPolicy.shouldDismiss(
+            displayedEventID: newEventID,
+            timerEventID: oldEventID
+        ))
+        XCTAssertFalse(BoyisoEventBannerPolicy.shouldDismiss(
+            displayedEventID: nil,
+            timerEventID: oldEventID
+        ))
     }
 
     func testSoundDetectionOverlayUsesExactProductCopy() {
@@ -3518,6 +3553,28 @@ final class BoyisoProtocolTests: XCTestCase {
             try BoyisoCodec.openLANFrame(frame, invitation: invitation),
             event
         )
+    }
+
+    func testBoyisoWireCanonicalizesUUIDCaseAndDecodesLegacyUppercase() throws {
+        let event = BoyisoEvent(
+            id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            sourceID: UUID(uuidString: "BA65AAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            sourceName: "말할 사람",
+            role: .guest,
+            kind: .sound,
+            monitoring: true,
+            batteryPercent: 80
+        )
+        let wire = try BoyisoCodec.encodeWire(event)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: wire) as? [String: Any])
+
+        XCTAssertEqual(object["id"] as? String, event.id.uuidString.lowercased())
+        XCTAssertEqual(object["sourceID"] as? String, event.sourceID.uuidString.lowercased())
+
+        object["id"] = event.id.uuidString.uppercased()
+        object["sourceID"] = event.sourceID.uuidString.uppercased()
+        let legacyUppercaseWire = try JSONSerialization.data(withJSONObject: object)
+        XCTAssertEqual(try JSONDecoder().decode(BoyisoEvent.self, from: legacyUppercaseWire), event)
     }
 
     func testBluetoothFragmentsReassembleOutOfOrder() throws {
