@@ -279,10 +279,17 @@ struct BoyisoParticipantPresentation: Identifiable, Equatable {
     let isCurrentDevice: Bool
     let state: String
     let batteryPercent: Int?
+    let transports: Set<BoyisoTransportKind>
+
+    var connectionLabels: [String] {
+        if isCurrentDevice { return ["이 기기"] }
+        return BoyisoTransportKind.allCases.filter(transports.contains).map(\.title)
+    }
 
     var accessibilityLabel: String {
         [name, isCurrentDevice ? "나" : nil, role.title, state,
-         batteryPercent.map { "배터리 \($0)퍼센트" }]
+         batteryPercent.map { "배터리 \($0)퍼센트" },
+         connectionLabels.isEmpty ? nil : "연결 경로, \(connectionLabels.joined(separator: ", "))"]
             .compactMap { $0 }.joined(separator: ", ")
     }
 }
@@ -313,7 +320,8 @@ struct BoyisoParticipantSections: Equatable {
                     role: peer.role,
                     isCurrentDevice: isCurrent,
                     state: peer.role == .host ? "연결됨" : Self.guestState(peer),
-                    batteryPercent: peer.batteryPercent
+                    batteryPercent: peer.batteryPercent,
+                    transports: peer.transports
                 )
             }
             .sorted {
@@ -382,6 +390,10 @@ private struct BoyisoParticipantRow: View {
                         .font(.caption.bold()).foregroundStyle(participant.role.tint)
                     Text(participant.state).font(.caption).foregroundStyle(.white.opacity(0.68))
                 }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) { connectionBadges }
+                    VStack(alignment: .leading, spacing: 5) { connectionBadges }
+                }
             }
             Spacer(minLength: 8)
             if let battery = participant.batteryPercent {
@@ -394,6 +406,18 @@ private struct BoyisoParticipantRow: View {
         .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(participant.accessibilityLabel)
+    }
+
+    @ViewBuilder
+    private var connectionBadges: some View {
+        ForEach(participant.connectionLabels, id: \.self) { label in
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.82))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(.white.opacity(0.1), in: Capsule())
+        }
     }
 }
 

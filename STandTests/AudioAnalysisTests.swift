@@ -3329,7 +3329,11 @@ final class BoyisoProtocolTests: XCTestCase {
         XCTAssertEqual(sections.hosts.map(\.id), [currentID])
         XCTAssertTrue(sections.hosts[0].isCurrentDevice)
         XCTAssertEqual(sections.hosts[0].state, "연결됨")
-        XCTAssertEqual(sections.hosts[0].accessibilityLabel, "엄마, 나, 볼 사람, 연결됨, 배터리 82퍼센트")
+        XCTAssertEqual(sections.hosts[0].connectionLabels, ["이 기기"])
+        XCTAssertEqual(
+            sections.hosts[0].accessibilityLabel,
+            "엄마, 나, 볼 사람, 연결됨, 배터리 82퍼센트, 연결 경로, 이 기기"
+        )
         XCTAssertTrue(sections.guests.isEmpty)
     }
 
@@ -3394,6 +3398,14 @@ final class BoyisoProtocolTests: XCTestCase {
         XCTAssertEqual(sections.totalCount, 3)
         XCTAssertEqual(sections.hosts.filter { $0.name == "SM-T500" }.count, 2)
         XCTAssertEqual(sections.hosts.first { $0.id == sharedID }?.batteryPercent, 71)
+        XCTAssertEqual(
+            sections.hosts.first { $0.id == sharedID }?.connectionLabels,
+            ["Wi-Fi", "Bluetooth"]
+        )
+        XCTAssertEqual(
+            sections.hosts.first { $0.id == sameNameDifferentID.id }?.connectionLabels,
+            ["Wi-Fi"]
+        )
     }
 
     func testEncryptedLANFrameRoundTripsWithoutSendingRawAudio() throws {

@@ -5,9 +5,15 @@ import Network
 import UIKit
 import UserNotifications
 
-enum BoyisoTransportKind: String, Hashable {
-    case localNetwork, bluetooth
-    var title: String { self == .localNetwork ? "Wi-Fi" : "Bluetooth" }
+enum BoyisoTransportKind: String, CaseIterable, Hashable {
+    case localNetwork, bluetooth, internet
+    var title: String {
+        switch self {
+        case .localNetwork: "Wi-Fi"
+        case .bluetooth: "Bluetooth"
+        case .internet: "인터넷"
+        }
+    }
 }
 
 struct BoyisoPeerStatus: Identifiable, Equatable {
