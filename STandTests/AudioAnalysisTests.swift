@@ -773,6 +773,7 @@ final class AudioAnalysisTests: XCTestCase {
             LampTorchLightingPolicy.maximumLevel(
                 torchEnabled: true,
                 isMovementTriggered: false,
+                profile: .gentle,
                 environmentDisplayMode: .stand,
                 roomIsDark: true
             ),
@@ -1760,18 +1761,11 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
-    func testSleepMovementUsesFullOrTenPercentTorchOnlyInSleepingMode() {
+    func testStartleTorchUsesLowGeneralAndMaximumUrgentProfilesOnlyWhenEnabledAndDark() {
         XCTAssertEqual(
             SleepMovementLightingPolicy.torchLevel(
                 torchEnabled: true,
-                environmentDisplayMode: .sleeping,
-                roomIsDark: true
-            ),
-            1
-        )
-        XCTAssertEqual(
-            SleepMovementLightingPolicy.torchLevel(
-                torchEnabled: false,
+                profile: .gentle,
                 environmentDisplayMode: .sleeping,
                 roomIsDark: true
             ),
@@ -1780,6 +1774,25 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(
             SleepMovementLightingPolicy.torchLevel(
                 torchEnabled: true,
+                profile: .urgent,
+                environmentDisplayMode: .sleeping,
+                roomIsDark: true
+            ),
+            1
+        )
+        XCTAssertEqual(
+            SleepMovementLightingPolicy.torchLevel(
+                torchEnabled: false,
+                profile: .urgent,
+                environmentDisplayMode: .sleeping,
+                roomIsDark: true
+            ),
+            0
+        )
+        XCTAssertEqual(
+            SleepMovementLightingPolicy.torchLevel(
+                torchEnabled: true,
+                profile: .gentle,
                 environmentDisplayMode: .stand,
                 roomIsDark: true
             ),
@@ -1788,6 +1801,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(
             SleepMovementLightingPolicy.torchLevel(
                 torchEnabled: true,
+                profile: .urgent,
                 environmentDisplayMode: .sleeping,
                 roomIsDark: false
             ),
@@ -1800,6 +1814,7 @@ final class AudioAnalysisTests: XCTestCase {
             LampTorchLightingPolicy.maximumLevel(
                 torchEnabled: true,
                 isMovementTriggered: false,
+                profile: .gentle,
                 environmentDisplayMode: .sleeping,
                 roomIsDark: true
             ),
@@ -1809,6 +1824,7 @@ final class AudioAnalysisTests: XCTestCase {
             LampTorchLightingPolicy.maximumLevel(
                 torchEnabled: false,
                 isMovementTriggered: false,
+                profile: .urgent,
                 environmentDisplayMode: .sleeping,
                 roomIsDark: true
             ),
@@ -1816,13 +1832,75 @@ final class AudioAnalysisTests: XCTestCase {
         )
         XCTAssertEqual(
             LampTorchLightingPolicy.maximumLevel(
-                torchEnabled: false,
+                torchEnabled: true,
                 isMovementTriggered: true,
+                profile: .gentle,
                 environmentDisplayMode: .sleeping,
                 roomIsDark: true
             ),
             0.1
         )
+        XCTAssertEqual(
+            LampTorchLightingPolicy.maximumLevel(
+                torchEnabled: true,
+                isMovementTriggered: true,
+                profile: .urgent,
+                environmentDisplayMode: .sleeping,
+                roomIsDark: true
+            ),
+            1
+        )
+    }
+
+    func testStartleLightingProfilesReachTheirPeaksAndRestoreBaseWithinTenSeconds() {
+        let base = 0.02
+
+        XCTAssertEqual(StartleLightingProfile.totalDuration, 10)
+        XCTAssertEqual(StartleLightingProfile.gentle.riseDuration, 2)
+        XCTAssertEqual(StartleLightingProfile.gentle.peakDisplayIntensity, 0.4)
+        XCTAssertEqual(StartleLightingProfile.gentle.displayIntensity(
+            elapsed: 0,
+            baseIntensity: base
+        ), base, accuracy: 0.0001)
+        XCTAssertLessThan(StartleLightingProfile.gentle.displayIntensity(
+            elapsed: 1,
+            baseIntensity: base
+        ), 0.4)
+        XCTAssertEqual(StartleLightingProfile.gentle.displayIntensity(
+            elapsed: 2,
+            baseIntensity: base
+        ), 0.4, accuracy: 0.0001)
+        XCTAssertEqual(StartleLightingProfile.gentle.displayIntensity(
+            elapsed: 10,
+            baseIntensity: base
+        ), base, accuracy: 0.0001)
+
+        XCTAssertEqual(StartleLightingProfile.urgent.riseDuration, 1)
+        XCTAssertEqual(StartleLightingProfile.urgent.displayIntensity(
+            elapsed: 1,
+            baseIntensity: base
+        ), 1, accuracy: 0.0001)
+        XCTAssertEqual(StartleLightingProfile.urgent.displayIntensity(
+            elapsed: 10,
+            baseIntensity: base
+        ), base, accuracy: 0.0001)
+    }
+
+    func testStartleLightingClassifiesMovementAndFingerSnapAsGentle() {
+        let sourceID = UUID()
+        let movement = BoyisoEvent(sourceID: sourceID, sourceName: "아이 방", role: .guest,
+            kind: .movement, detail: "turning", monitoring: true, batteryPercent: nil)
+        let fingerSnap = BoyisoEvent(sourceID: sourceID, sourceName: "아이 방", role: .guest,
+            kind: .sound, detail: "finger_snap", monitoring: true, batteryPercent: nil)
+        let bigSound = BoyisoEvent(sourceID: sourceID, sourceName: "아이 방", role: .guest,
+            kind: .sound, detail: "big_sound", monitoring: true, batteryPercent: nil)
+        let continuousSound = BoyisoEvent(sourceID: sourceID, sourceName: "아이 방", role: .guest,
+            kind: .sound, detail: "continuous_sound", monitoring: true, batteryPercent: nil)
+
+        XCTAssertEqual(StartleLightingProfile.forEvent(movement), .gentle)
+        XCTAssertEqual(StartleLightingProfile.forEvent(fingerSnap), .gentle)
+        XCTAssertEqual(StartleLightingProfile.forEvent(bigSound), .urgent)
+        XCTAssertEqual(StartleLightingProfile.forEvent(continuousSound), .urgent)
     }
 
     func testStartleTorchRequiresARecentDarkRoomReading() {

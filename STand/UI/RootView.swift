@@ -993,8 +993,8 @@ struct RootView: View {
             ControlButton(
                 title: "플래시 연동",
                 systemImage: settings.value.torchEnabled ? "flashlight.on.fill" : "flashlight.off.fill",
-                status: settings.value.torchEnabled ? "터치·뒤척임 100%" : "터치 0% · 뒤척임 10%",
-                hint: "연동하면 터치와 뒤척임 모두 100퍼센트, 해제하면 터치는 끄고 뒤척임만 10퍼센트로 켭니다",
+                status: settings.value.torchEnabled ? "강한 알림 최대 · 일반 알림 낮게" : "사용하지 않음",
+                hint: "강한 소리 알림은 필요할 때 최대, 일반 움직임과 핑거스냅은 낮은 밝기로 켭니다",
                 width: width
             ) {
                 settings.value.torchEnabled.toggle()

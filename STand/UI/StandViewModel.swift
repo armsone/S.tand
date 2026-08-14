@@ -303,14 +303,54 @@ enum SleepCareMonitoringPolicy {
     }
 }
 
+enum StartleLightingProfile: Equatable {
+    case gentle
+    case urgent
+
+    static let totalDuration: TimeInterval = 10
+
+    var riseDuration: TimeInterval { self == .gentle ? 2 : 1 }
+    var fadeDuration: TimeInterval { self == .gentle ? 2 : 1 }
+    var peakDisplayIntensity: Double { self == .gentle ? 0.4 : 1 }
+    var peakTorchLevel: Double { self == .gentle ? 0.1 : 1 }
+    var fadeStart: TimeInterval { Self.totalDuration - fadeDuration }
+
+    static func forEvent(_ event: BoyisoEvent) -> StartleLightingProfile {
+        event.kind == .sound && ["big_sound", "continuous_sound"].contains(event.detail)
+            ? .urgent
+            : .gentle
+    }
+
+    func displayIntensity(elapsed: TimeInterval, baseIntensity: Double) -> Double {
+        let base = SimplifiedBrightnessModePolicy.clamped(baseIntensity)
+        let peak = max(base, peakDisplayIntensity)
+        if elapsed <= 0 { return base }
+        if elapsed < riseDuration {
+            return base + (peak - base) * eased(elapsed / riseDuration)
+        }
+        if elapsed < fadeStart { return peak }
+        if elapsed < Self.totalDuration {
+            let progress = eased((elapsed - fadeStart) / fadeDuration)
+            return peak + (base - peak) * progress
+        }
+        return base
+    }
+
+    private func eased(_ value: Double) -> Double {
+        let progress = min(1, max(0, value))
+        return progress * progress * (3 - 2 * progress)
+    }
+}
+
 enum SleepMovementLightingPolicy {
     static func torchLevel(
         torchEnabled: Bool,
+        profile: StartleLightingProfile,
         environmentDisplayMode: EnvironmentDisplayMode,
         roomIsDark: Bool
     ) -> Double {
-        guard environmentDisplayMode == .sleeping, roomIsDark else { return 0 }
-        return torchEnabled ? 1 : 0.1
+        guard torchEnabled, environmentDisplayMode == .sleeping, roomIsDark else { return 0 }
+        return profile.peakTorchLevel
     }
 }
 
@@ -318,12 +358,14 @@ enum LampTorchLightingPolicy {
     static func maximumLevel(
         torchEnabled: Bool,
         isMovementTriggered: Bool,
+        profile: StartleLightingProfile,
         environmentDisplayMode: EnvironmentDisplayMode,
         roomIsDark: Bool
     ) -> Double {
         guard environmentDisplayMode == .sleeping, isMovementTriggered else { return 0 }
         return SleepMovementLightingPolicy.torchLevel(
             torchEnabled: torchEnabled,
+            profile: profile,
             environmentDisplayMode: environmentDisplayMode,
             roomIsDark: roomIsDark
         )
@@ -408,6 +450,8 @@ final class StandViewModel: ObservableObject {
     private let postureMonitor = DevicePostureMonitor()
     private let ambientCamera = AmbientCameraBrightnessService()
     private var activeLampMaximumIntensity = 1.0
+    private var activeLampBaseIntensity = 0.0
+    private var activeStartleLightingProfile = StartleLightingProfile.gentle
     private var isMovementTriggeredLamp = false
     private enum MonitoringSuspensionReason: Hashable {
         case recordingPlayback
@@ -441,7 +485,7 @@ final class StandViewModel: ObservableObject {
                 intensity: max(0.2, self.audio.normalizedLevel),
                 detail: "finger_snap"
             )
-            self.wakeForSleepMovement()
+            self.wakeForSleepMovement(profile: .gentle)
         }
         audio.onRelativeSoundRise = { [weak self] in
             guard let self,
@@ -452,7 +496,7 @@ final class StandViewModel: ObservableObject {
                 intensity: max(0.2, self.audio.normalizedLevel),
                 detail: "big_sound"
             )
-            self.wakeForSleepMovement()
+            self.wakeForSleepMovement(profile: .urgent)
         }
         audio.onContinuousSound = { [weak self] in
             guard let self,
@@ -463,7 +507,7 @@ final class StandViewModel: ObservableObject {
                 intensity: max(0.2, self.audio.normalizedLevel),
                 detail: "continuous_sound"
             )
-            self.wakeForSleepMovement()
+            self.wakeForSleepMovement(profile: .urgent)
         }
         audio.onClipSaved = { [weak self] url in
             guard let self else { return }
@@ -483,7 +527,7 @@ final class StandViewModel: ObservableObject {
                   self.settings.value.multiStimulusWakeEnabled
             else { return }
             self.boyiso.sendMovementEvent()
-            self.wakeForSleepMovement()
+            self.wakeForSleepMovement(profile: .gentle)
         }
         boyiso.onRemoteEvent = { [weak self] event in
             guard let self,
@@ -497,7 +541,10 @@ final class StandViewModel: ObservableObject {
                 guard self.isNightSessionActive,
                       self.environmentDisplayMode == .sleeping else { return }
             }
-            self.wakeForSleepMovement(respectsMateWarmup: false)
+            self.wakeForSleepMovement(
+                profile: StartleLightingProfile.forEvent(event),
+                respectsMateWarmup: false
+            )
         }
         postureMonitor.onFaceDownChanged = { [weak self] isFaceDown in
             self?.applyFaceDownState(isFaceDown)
@@ -679,9 +726,16 @@ final class StandViewModel: ObservableObject {
         UIApplication.shared.isIdleTimerDisabled = false
         postureMonitor.stop()
         isFaceDown = false
+        lampTask?.cancel()
+        lampTask = nil
         movementTorchSyncTask?.cancel()
         movementTorchSyncTask = nil
         torch.turnOff()
+        if isMovementTriggeredLamp {
+            lampIntensity = SimplifiedBrightnessModePolicy.clamped(displayBrightness)
+            lampPhase = .holding
+            isMovementTriggeredLamp = false
+        }
         ambientCamera.cancel()
         ambientSamplingTask?.cancel()
         ambientSamplingTask = nil
@@ -704,7 +758,10 @@ final class StandViewModel: ObservableObject {
         applyBaseBrightness(displayBrightness, animated: true)
     }
 
-    private func activateLamp(triggeredBySleepMovement: Bool) {
+    private func activateLamp(
+        triggeredBySleepMovement: Bool,
+        profile: StartleLightingProfile = .gentle
+    ) {
         guard isNightSessionActive else { return }
         guard triggeredBySleepMovement else {
             applyBaseBrightness(displayBrightness, animated: true)
@@ -713,41 +770,25 @@ final class StandViewModel: ObservableObject {
         lampTask?.cancel()
 
         let now = ProcessInfo.processInfo.systemUptime
-        let holdDuration = settings.value.holdDuration
-        let fadeDuration = max(0.1, settings.value.fadeDuration)
         let baseIntensity = SimplifiedBrightnessModePolicy.clamped(displayBrightness)
-        let maximumIntensity = max(0.7, baseIntensity)
+        let maximumIntensity = max(baseIntensity, profile.peakDisplayIntensity)
+        activeLampBaseIntensity = baseIntensity
         activeLampMaximumIntensity = maximumIntensity
+        activeStartleLightingProfile = profile
         isMovementTriggeredLamp = true
         automaticDimmingPaused = false
 
         lampPhase = .holding
-        withAnimation(.easeOut(duration: 0.3)) {
-            lampIntensity = maximumIntensity
-        }
+        lampIntensity = baseIntensity
         syncTorch()
 
         lampTask = Task { [weak self] in
-            var fadeStartedAt: TimeInterval?
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(50))
                 guard let self, !Task.isCancelled else { return }
 
-                let currentTime = ProcessInfo.processInfo.systemUptime
-                if currentTime <= now + holdDuration {
-                    lampPhase = .holding
-                    lampIntensity = maximumIntensity
-                    continue
-                }
-
-                let start = fadeStartedAt ?? currentTime
-                fadeStartedAt = start
-                let progress = min(1, max(0, (currentTime - start) / fadeDuration))
-                lampPhase = .fading
-                lampIntensity = baseIntensity + (maximumIntensity - baseIntensity) * (1 - progress)
-                syncTorch()
-
-                if progress >= 1 {
+                let elapsed = ProcessInfo.processInfo.systemUptime - now
+                if elapsed >= StartleLightingProfile.totalDuration {
                     lampIntensity = baseIntensity
                     lampPhase = .holding
                     torch.turnOff()
@@ -755,6 +796,12 @@ final class StandViewModel: ObservableObject {
                     finishStartleEvent()
                     return
                 }
+                lampPhase = elapsed >= profile.fadeStart ? .fading : .holding
+                lampIntensity = profile.displayIntensity(
+                    elapsed: elapsed,
+                    baseIntensity: baseIntensity
+                )
+                syncTorch()
             }
         }
     }
@@ -770,6 +817,7 @@ final class StandViewModel: ObservableObject {
         automaticDimmingPaused = false
         manualDimmingHoldActive = false
         activeLampMaximumIntensity = max(value, 0.01)
+        activeLampBaseIntensity = value
         lampPhase = .holding
         torch.turnOff()
         if animated {
@@ -779,7 +827,10 @@ final class StandViewModel: ObservableObject {
         }
     }
 
-    private func wakeForSleepMovement(respectsMateWarmup: Bool = true) {
+    private func wakeForSleepMovement(
+        profile: StartleLightingProfile,
+        respectsMateWarmup: Bool = true
+    ) {
         guard isNightSessionActive, environmentDisplayMode == .sleeping else { return }
         if respectsMateWarmup {
             guard StartleActivationPolicy.canActivate(
@@ -796,9 +847,10 @@ final class StandViewModel: ObservableObject {
             )
         }
         ambientCamera.cancel()
-        activateLamp(triggeredBySleepMovement: true)
+        activateLamp(triggeredBySleepMovement: true, profile: profile)
         let torchLevel = SleepMovementLightingPolicy.torchLevel(
             torchEnabled: settings.value.torchEnabled,
+            profile: profile,
             environmentDisplayMode: environmentDisplayMode,
             roomIsDark: roomIsDarkForStartleTorch
         )
@@ -816,6 +868,7 @@ final class StandViewModel: ObservableObject {
                       self.lampPhase != .off,
                       SleepMovementLightingPolicy.torchLevel(
                         torchEnabled: self.settings.value.torchEnabled,
+                        profile: self.activeStartleLightingProfile,
                         environmentDisplayMode: self.environmentDisplayMode,
                         roomIsDark: self.roomIsDarkForStartleTorch
                       ) > 0
@@ -1444,6 +1497,7 @@ final class StandViewModel: ObservableObject {
         let maximumTorchLevel = LampTorchLightingPolicy.maximumLevel(
             torchEnabled: currentSettings.torchEnabled,
             isMovementTriggered: isMovementTriggeredLamp,
+            profile: activeStartleLightingProfile,
             environmentDisplayMode: environmentDisplayMode,
             roomIsDark: roomIsDarkForStartleTorch
         )
@@ -1451,10 +1505,11 @@ final class StandViewModel: ObservableObject {
             torch.turnOff()
             return
         }
-        let progress = activeLampMaximumIntensity > 0
-            ? lampIntensity / activeLampMaximumIntensity
+        let intensityRange = activeLampMaximumIntensity - activeLampBaseIntensity
+        let progress = intensityRange > 0
+            ? (lampIntensity - activeLampBaseIntensity) / intensityRange
             : 0
-        torch.setLevel(progress * maximumTorchLevel)
+        torch.setLevel(min(1, max(0, progress)) * maximumTorchLevel)
     }
 
     private var roomIsDarkForStartleTorch: Bool {
