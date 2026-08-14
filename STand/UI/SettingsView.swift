@@ -299,8 +299,8 @@ struct SettingsView: View {
 
     private var boyisoCard: some View {
         StandSettingsCard(
-            title: "보이소",
-            subtitle: "볼 사람과 말할 사람이 같은 공간에서 소리와 인사를 나눕니다",
+            title: BoyisoBranding.primaryName,
+            subtitle: BoyisoBranding.descriptor,
             systemImage: "waveform.and.magnifyingglass",
             accent: accent
         ) {

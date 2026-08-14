@@ -3300,6 +3300,14 @@ final class AudioAnalysisTests: XCTestCase {
 }
 
 final class BoyisoProtocolTests: XCTestCase {
+    func testKoreanFirstBrandingKeepsAppAndProtocolIdentitiesSeparate() {
+        XCTAssertEqual(BoyisoBranding.primaryName, "보이소")
+        XCTAssertEqual(BoyisoBranding.descriptor, "BOISO · 보이는 소리")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String, "S.tand")
+        XCTAssertEqual(BoyisoInvitation.scheme, "stand")
+        XCTAssertEqual(BoyisoInvitation.host, "boyiso")
+    }
+
     func testConnectedDisplayNameUpdateTrimsPersistsAndRejectsEmptyName() {
         let suite = "BoyisoProtocolTests.\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
@@ -3409,7 +3417,7 @@ final class BoyisoProtocolTests: XCTestCase {
         XCTAssertTrue(sections.guests[0].isCurrentDevice)
     }
 
-    func testParticipantSectionsMergeOnlyMatchingSourceIDs() {
+    func testParticipantSectionsMergeOnlyMatchingSourceIDsAndShowOnlyReportedTransports() {
         let current = BoyisoPeerStatus(
             id: UUID(), name: "나", role: .host, lastSeen: Date(), monitoring: false,
             batteryPercent: 90, displayMode: .mate, sessionActive: true, transports: []
@@ -3442,6 +3450,9 @@ final class BoyisoProtocolTests: XCTestCase {
         XCTAssertEqual(
             sections.hosts.first { $0.id == sharedID }?.connectionLabels,
             ["Wi-Fi", "Bluetooth"]
+        )
+        XCTAssertFalse(
+            sections.hosts.first { $0.id == sharedID }?.connectionLabels.contains("인터넷") ?? true
         )
         XCTAssertEqual(
             sections.hosts.first { $0.id == sameNameDifferentID.id }?.connectionLabels,

@@ -27,12 +27,16 @@ struct BoyisoView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
+                Text(BoyisoBranding.descriptor)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if service.invitation == nil { setupFlow } else { connectedFlow }
             }
             .padding(16)
         }
         .background(Color.black.ignoresSafeArea())
-        .navigationTitle("보이소")
+        .navigationTitle(BoyisoBranding.primaryName)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $scannerPresented) {
             BoyisoQRScanner { result in

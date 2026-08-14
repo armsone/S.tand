@@ -464,7 +464,8 @@ final class BoyisoConnectivityService: NSObject, ObservableObject {
 
     private func scheduleTokTokNotification(from name: String) {
         let content = UNMutableNotificationContent()
-        content.title = "톡톡"
+        content.title = BoyisoBranding.primaryName
+        content.subtitle = "톡톡"
         content.body = "\(name.isEmpty ? "같은 공간의 사람" : name)님이 인사를 보냈어요."
         content.sound = UNNotificationSound(named: UNNotificationSoundName("boyiso_toktok.wav"))
         UNUserNotificationCenter.current().add(.init(identifier: "boyiso-toktok-\(UUID())", content: content, trigger: nil))
@@ -472,7 +473,7 @@ final class BoyisoConnectivityService: NSObject, ObservableObject {
 
     private func scheduleDetectionNotification(for event: BoyisoEvent) {
         let content = UNMutableNotificationContent()
-        content.title = "보이소"
+        content.title = BoyisoBranding.primaryName
         content.body = event.kind == .movement
             ? "말할 사람의 큰 움직임이 감지되었습니다."
             : "말할 사람의 소리가 감지되었습니다."

@@ -1018,7 +1018,7 @@ struct RootView: View {
             }
         case .boyiso:
             BoyisoControlButton(
-                title: "보이소",
+                title: BoyisoBranding.primaryName,
                 systemImage: boyiso.isEnabled ? "pawprint.fill" : "pawprint",
                 status: boyiso.isEnabled ? "나의 역할 · \(boyiso.role.title)" : "연결 안 됨",
                 width: width,
@@ -1075,10 +1075,10 @@ struct RootView: View {
                 .foregroundStyle(.white)
                 .background(.orange.opacity(0.82), in: Capsule())
                 .transition(.move(edge: .top).combined(with: .opacity))
-                .accessibilityLabel("보이소 알림, \(event.sourceName)에서 \(event.kind.title)")
+                .accessibilityLabel("\(BoyisoBranding.primaryName) 알림, \(event.sourceName)에서 \(event.kind.title)")
             }
             if boyiso.isEnabled, !boyiso.peers.isEmpty, boyiso.activePeers.isEmpty {
-                Label("보이소 공간 연결이 끊겼습니다", systemImage: "wifi.exclamationmark")
+                Label("\(BoyisoBranding.primaryName) 공간 연결이 끊겼습니다", systemImage: "wifi.exclamationmark")
                     .font(.subheadline.weight(.bold))
                     .padding(.horizontal, 18)
                     .padding(.vertical, 12)
@@ -3636,7 +3636,7 @@ private struct BoyisoControlButton: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(named: "기본 동작", tap)
-        .accessibilityAction(named: "보이소 설정 열기", longPress)
+        .accessibilityAction(named: "\(BoyisoBranding.primaryName) 설정 열기", longPress)
     }
 }
 

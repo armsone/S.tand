@@ -2,6 +2,11 @@ import CryptoKit
 import Foundation
 import Security
 
+enum BoyisoBranding {
+    static let primaryName = "보이소"
+    static let descriptor = "BOISO · 보이는 소리"
+}
+
 enum BoyisoRole: String, Codable, CaseIterable, Identifiable {
     case host
     case guest
