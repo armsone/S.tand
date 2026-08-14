@@ -5,6 +5,51 @@ import XCTest
 @testable import STand
 
 final class AudioAnalysisTests: XCTestCase {
+    func testSleepSessionInsightBuildsActivityDistributionAndBusiestRange() throws {
+        let start = Date(timeIntervalSinceReferenceDate: 100_000)
+        let end = start.addingTimeInterval(12 * 60 * 60)
+        let clips = [
+            RecordingClip(
+                url: URL(fileURLWithPath: "/tmp/first.m4a"),
+                createdAt: start.addingTimeInterval(60 * 60 + 30),
+                duration: 12
+            ),
+            RecordingClip(
+                url: URL(fileURLWithPath: "/tmp/second.m4a"),
+                createdAt: start.addingTimeInterval(60 * 60 + 90),
+                duration: 18
+            )
+        ]
+        let movement = SleepStartleEvent(
+            id: UUID(),
+            startedAt: start.addingTimeInterval(8 * 60 * 60),
+            endedAt: start.addingTimeInterval(8 * 60 * 60 + 5)
+        )
+        let session = RecordingSessionGroup(
+            id: "insight",
+            startedAt: start,
+            endedAt: end,
+            clips: clips,
+            startleEvents: [movement],
+            isInferred: false
+        )
+
+        let insight = session.insight
+
+        XCTAssertEqual(insight.sessionDuration, 12 * 60 * 60)
+        XCTAssertEqual(insight.soundCount, 2)
+        XCTAssertEqual(insight.soundDuration, 30)
+        XCTAssertEqual(insight.movementCount, 1)
+        XCTAssertEqual(insight.activityBuckets.count, SleepSessionInsight.bucketCount)
+        XCTAssertEqual(insight.activityBuckets[1], 2)
+        XCTAssertEqual(insight.activityBuckets[8], 1)
+        XCTAssertEqual(insight.busiestBucketIndex, 1)
+        XCTAssertEqual(insight.eventsPerHour, 0.25, accuracy: 0.000_001)
+        let range = try XCTUnwrap(insight.busiestRange(sessionStart: start))
+        XCTAssertEqual(range.lowerBound, start.addingTimeInterval(60 * 60))
+        XCTAssertEqual(range.upperBound, start.addingTimeInterval(2 * 60 * 60))
+    }
+
     func testFirstLaunchPermissionPromptShowsFirstThenEveryThreeToSevenLaunches() {
         let first = FirstLaunchPermissionPromptSchedule(
             hasShownPrompt: false,
@@ -818,7 +863,7 @@ final class AudioAnalysisTests: XCTestCase {
         )
         XCTAssertEqual(
             portrait.controlOrder,
-            [.recordings, .settings]
+            [.recordings, .boyiso, .settings]
         )
         XCTAssertEqual(
             portrait.secondaryRadio,
@@ -865,7 +910,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertFalse(landscape.radiosGrouped)
         XCTAssertEqual(
             landscape.controlOrder,
-            [.recordings, .settings]
+            [.recordings, .boyiso, .settings]
         )
     }
 
@@ -873,12 +918,12 @@ final class AudioAnalysisTests: XCTestCase {
         var portrait = StandScreenLayout.portrait
         portrait.radio = PanelTransform(x: -0.18, y: 0.24, scale: 0.52)
         portrait.controlOrder = [
-            .settings, .recordings
+            .settings, .recordings, .boyiso
         ]
         var landscape = StandScreenLayout.landscape
         landscape.radio = PanelTransform(x: 0.31, y: -0.12, scale: 1.35)
         landscape.controlOrder = [
-            .recordings, .settings
+            .recordings, .settings, .boyiso
         ]
 
         let decoded = try JSONDecoder().decode(
@@ -911,7 +956,7 @@ final class AudioAnalysisTests: XCTestCase {
 
         XCTAssertEqual(
             decoded.controlOrder,
-            [.settings, .recordings]
+            [.settings, .recordings, .boyiso]
         )
     }
 
@@ -2153,11 +2198,11 @@ final class AudioAnalysisTests: XCTestCase {
             StandControlKind.normalizedOrder([
                 .flashlight, .settings, .brightness, .recordings, .stopDetection
             ]),
-            [.settings, .recordings]
+            [.settings, .recordings, .boyiso]
         )
     }
 
-    func testAdaptiveNoiseFloorMakesQuietRoomsMoreSensitiveAndNoisyRoomsRelative() {
+    func testAdaptiveNoiseFloorRequiresTenToFourteenDecibelsOfRelativeRise() {
         var quietTracker = AdaptiveNoiseFloorTracker()
         var quietState = quietTracker.state
         for _ in 0..<60 {
@@ -2172,13 +2217,13 @@ final class AudioAnalysisTests: XCTestCase {
 
         XCTAssertTrue(quietState.isCalibrated)
         XCTAssertEqual(quietState.noiseFloorDB, -62)
-        XCTAssertEqual(quietState.effectiveSoundThresholdDB, -58)
+        XCTAssertEqual(quietState.effectiveSoundThresholdDB, -52)
         XCTAssertEqual(noisyState.noiseFloorDB, -30)
-        XCTAssertEqual(noisyState.effectiveSoundThresholdDB, -24)
+        XCTAssertEqual(noisyState.effectiveSoundThresholdDB, -18)
         XCTAssertGreaterThan(noisyState.effectiveSoundThresholdDB, quietState.effectiveSoundThresholdDB)
     }
 
-    func testAdaptiveNoiseFloorIgnoresOneLoudMomentAndWakesOnSmallRelativeRise() {
+    func testAdaptiveNoiseFloorIgnoresSmallRelativeRiseAndAcceptsTenDecibels() {
         var tracker = AdaptiveNoiseFloorTracker()
         for _ in 0..<59 { _ = tracker.observe(rmsDB: -60, duration: 1) }
         let state = tracker.observe(rmsDB: -10, duration: 1)
@@ -2192,13 +2237,66 @@ final class AudioAnalysisTests: XCTestCase {
         _ = detector.analyze(rmsDB: -60, peakDB: -54, bufferDuration: 0.02, now: 1)
         _ = detector.analyze(rmsDB: -54, peakDB: -45, bufferDuration: 0.02, now: 1.02)
         _ = detector.analyze(rmsDB: -54, peakDB: -45, bufferDuration: 0.02, now: 1.04)
-        let rise = detector.analyze(
+        let smallRise = detector.analyze(
             rmsDB: -54,
             peakDB: -45,
             bufferDuration: 0.02,
             now: 1.06
         )
-        XCTAssertTrue(rise.soundBegan)
+        XCTAssertFalse(smallRise.soundBegan)
+
+        detector.reset()
+        _ = detector.analyze(rmsDB: -49, peakDB: -30, bufferDuration: 0.02, now: 2)
+        _ = detector.analyze(rmsDB: -49, peakDB: -30, bufferDuration: 0.02, now: 2.02)
+        let clearRise = detector.analyze(
+            rmsDB: -49,
+            peakDB: -30,
+            bufferDuration: 0.02,
+            now: 2.04
+        )
+        XCTAssertTrue(clearRise.soundBegan)
+    }
+
+    func testUserThresholdLimitsAutomaticSensitivityAndCalibrationSuppressesReactions() {
+        var tracker = AdaptiveNoiseFloorTracker()
+        var state = tracker.state
+        for _ in 0..<59 { state = tracker.observe(rmsDB: -55, duration: 1) }
+
+        XCTAssertFalse(AudioCalibrationPolicy.canReact(state))
+        state = tracker.observe(rmsDB: -55, duration: 1)
+        XCTAssertTrue(AudioCalibrationPolicy.canReact(state))
+        XCTAssertEqual(
+            AdaptiveSoundThresholdPolicy.soundThreshold(
+                noiseFloorDB: state.noiseFloorDB,
+                userThresholdDB: -36
+            ),
+            -36
+        )
+        XCTAssertEqual(
+            AdaptiveSoundThresholdPolicy.clapPeakThreshold(
+                noiseFloorDB: state.noiseFloorDB,
+                userThresholdDB: -36,
+                configuredPeakThresholdDB: -18
+            ),
+            -18
+        )
+    }
+
+    func testReportedQuietClipCannotOpenRecordingOrClapGateAtRecommendedSettings() {
+        var detector = AudioEventDetector(
+            configuration: AudioDetectorConfiguration(soundThresholdDB: -36)
+        )
+        for index in 0..<10 {
+            let detection = detector.analyze(
+                rmsDB: -46.69,
+                peakDB: -36.92,
+                bufferDuration: 0.02,
+                now: Double(index) * 0.02
+            )
+            XCTAssertFalse(detection.soundBegan)
+            XCTAssertFalse(detection.isAboveSoundThreshold)
+            XCTAssertFalse(detection.clapDetected)
+        }
     }
 
     func testWeatherResponseDecodesAndMapsKoreanCondition() throws {

@@ -66,6 +66,10 @@ final class FirstLaunchPermissionCoordinator: NSObject, ObservableObject {
         self.defaults = defaults
         super.init()
         locationManager.delegate = self
+        if UICatalogLaunch.isEnabled {
+            shouldPresentExplanation = UICatalogLaunch.showsPermissionExplanation
+            return
+        }
         evaluateThisProcessLaunch()
     }
 

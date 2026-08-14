@@ -1,5 +1,19 @@
 import SwiftUI
 
+private enum RecordingsPage: String, CaseIterable, Identifiable {
+    case lastNight
+    case sounds
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .lastNight: "수면 리포트"
+        case .sounds: "잠소리 관리"
+        }
+    }
+}
+
 struct RecordingsView: View {
     @ObservedObject var library: RecordingLibrary
     let playbackDisabled: Bool
@@ -19,6 +33,9 @@ struct RecordingsView: View {
     @State private var mergeErrorMessage: String?
     @State private var mergeStatusMessage: String?
     @State private var pendingClipDeletion: RecordingClip?
+    @State private var playbackQueue: [RecordingClip] = []
+    @State private var playbackQueueIndex = 0
+    @State private var selectedPage: RecordingsPage = .lastNight
 
     init(
         library: RecordingLibrary,
@@ -35,57 +52,26 @@ struct RecordingsView: View {
             ZStack {
                 RecordingBackground(accent: accent)
 
-                if library.clips.isEmpty, library.recordingSessions.isEmpty {
-                    ContentUnavailableView(
-                        "저장된 수면 소리가 없습니다",
-                        systemImage: "waveform.badge.mic",
-                        description: Text("매이트 모드에서 코골이와 잠꼬대 후보가 감지되면 필요한 구간만 저장합니다.")
-                    )
-                    .foregroundStyle(.white.opacity(0.82))
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            summaryCard
-                            if !library.mergeableClips.isEmpty {
-                                todayMergeCard
-                            }
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        pagePicker
 
-                            if playbackDisabled {
-                                RecordingNoticeCard(
-                                    text: "재생은 취침 세션을 종료한 뒤 사용할 수 있습니다."
-                                )
-                            }
-
-                            ForEach(library.recordingSessions) { session in
-                                sessionCard(session)
-                            }
-
-                            if !library.mergeableClips.isEmpty {
-                                selectionCard
-                            }
-
-                            if !mergedClips.isEmpty {
-                                mergedRecordingsCard
-                            }
-
-                            if let mergeStatusMessage {
-                                Label(mergeStatusMessage, systemImage: "checkmark.circle.fill")
-                                    .font(.footnote.weight(.medium))
-                                    .foregroundStyle(.white.opacity(0.62))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 4)
-                            }
+                        switch selectedPage {
+                        case .lastNight:
+                            lastNightContent
+                        case .sounds:
+                            soundListContent
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.top, 10)
-                        .padding(.bottom, 30)
                     }
-                    .scrollIndicators(.hidden)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                    .padding(.bottom, 30)
                 }
+                .scrollIndicators(.hidden)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
-                    if !selectedClipURLs.isEmpty {
+                    if selectedPage == .sounds, !selectedClipURLs.isEmpty {
                         RecordingSelectionDock(
                             count: selectedClipURLs.count,
                             accent: accent,
@@ -102,7 +88,7 @@ struct RecordingsView: View {
                     }
                 }
             }
-            .navigationTitle("수면 소리")
+            .navigationTitle("잠소리")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
@@ -112,7 +98,7 @@ struct RecordingsView: View {
                     Button("닫기") { dismiss() }
                         .foregroundStyle(accent)
                 }
-                if !library.clips.isEmpty {
+                if selectedPage == .sounds, !library.clips.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
                         Menu {
                             Button("전체 선택", systemImage: "checkmark.square.fill") {
@@ -146,7 +132,7 @@ struct RecordingsView: View {
                 }
             }
             .confirmationDialog(
-                "저장된 수면 소리를 모두 삭제할까요?",
+                "저장된 잠소리를 모두 삭제할까요?",
                 isPresented: $confirmsDeleteAll,
                 titleVisibility: .visible
             ) {
@@ -218,8 +204,18 @@ struct RecordingsView: View {
             } message: {
                 Text(mergeErrorMessage ?? "알 수 없는 오류가 발생했습니다.")
             }
-            .onAppear { library.reload() }
-            .onDisappear { player.stop() }
+            .onAppear {
+                library.reload()
+                player.onPlaybackFinished = { playNextQueuedClip() }
+                if expandedSessionIDs.isEmpty, let firstSession = library.recordingSessions.first {
+                    expandedSessionIDs.insert(firstSession.id)
+                }
+            }
+            .onDisappear {
+                playbackQueue.removeAll()
+                player.onPlaybackFinished = nil
+                player.stop()
+            }
         }
         .preferredColorScheme(.dark)
         .tint(accent)
@@ -227,6 +223,96 @@ struct RecordingsView: View {
     }
 
     private var accent: Color { theme.accentColor }
+
+    private var pagePicker: some View {
+        Picker("잠소리 보기", selection: $selectedPage) {
+            ForEach(RecordingsPage.allCases) { page in
+                Text(page.title).tag(page)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityHint("수면 리포트와 잠소리 관리 화면을 전환합니다")
+    }
+
+    @ViewBuilder
+    private var lastNightContent: some View {
+        if let session = library.recordingSessions.first {
+            VStack(spacing: 0) {
+                SleepSessionTimelineHeader(
+                    session: session,
+                    isExpanded: true,
+                    selectedCount: 0,
+                    accent: accent,
+                    showsDisclosure: false
+                )
+
+                Rectangle()
+                    .fill(.white.opacity(0.07))
+                    .frame(height: 1)
+                    .padding(.horizontal, 14)
+
+                SleepSessionInsightCard(
+                    session: session,
+                    accent: accent,
+                    playbackDisabled: playbackDisabled,
+                    isPlayingQueue: isPlayingQueue(session),
+                    playHighlights: { playHighlights(in: session) }
+                )
+                .padding(12)
+            }
+            .background { RecordingPanelSurface(accent: accent, cornerRadius: 22) }
+        } else {
+            ContentUnavailableView(
+                "분석할 수면 기록이 없습니다",
+                systemImage: "moon.zzz",
+                description: Text("매이트 모드에서 소리와 움직임이 기록되면 수면 리포트로 정리합니다.")
+            )
+            .foregroundStyle(.white.opacity(0.82))
+        }
+    }
+
+    @ViewBuilder
+    private var soundListContent: some View {
+        if library.clips.isEmpty, library.recordingSessions.isEmpty {
+            ContentUnavailableView(
+                "저장된 잠소리가 없습니다",
+                systemImage: "waveform.badge.mic",
+                description: Text("매이트 모드에서 코골이와 잠꼬대 후보가 감지되면 필요한 구간만 저장합니다.")
+            )
+            .foregroundStyle(.white.opacity(0.82))
+        } else {
+            summaryCard
+            if !library.mergeableClips.isEmpty {
+                todayMergeCard
+            }
+
+            if playbackDisabled {
+                RecordingNoticeCard(
+                    text: "재생은 취침 세션을 종료한 뒤 사용할 수 있습니다."
+                )
+            }
+
+            ForEach(library.recordingSessions) { session in
+                sessionCard(session)
+            }
+
+            if !library.mergeableClips.isEmpty {
+                selectionCard
+            }
+
+            if !mergedClips.isEmpty {
+                mergedRecordingsCard
+            }
+
+            if let mergeStatusMessage {
+                Label(mergeStatusMessage, systemImage: "checkmark.circle.fill")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+            }
+        }
+    }
 
     private var summaryCard: some View {
         HStack(spacing: 14) {
@@ -240,9 +326,9 @@ struct RecordingsView: View {
             .frame(width: 54, height: 54)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("기록 요약")
+                Text("보관 현황")
                     .font(.title3.weight(.bold))
-                Text("잠자리 \(library.recordingSessions.count)회 · 원본 \(library.mergeableClips.count)개")
+                Text("잠자리 \(library.recordingSessions.count)회 · 원본 \(library.mergeableClips.count)개 · \(library.storedAudioByteCount.storageText)")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.56))
             }
@@ -407,7 +493,7 @@ struct RecordingsView: View {
                     .frame(height: 1)
                     .padding(.horizontal, 14)
 
-                VStack(spacing: 8) {
+                VStack(spacing: 10) {
                     ForEach(session.clips) { clip in
                         recordingRow(clip)
                     }
@@ -478,7 +564,7 @@ struct RecordingsView: View {
             isSelected: selectedClipURLs.contains(clip.url),
             accent: accent,
             toggleSelection: { toggleSelection(of: clip) },
-            play: { player.toggle(clip) },
+            play: { toggleManualPlayback(clip) },
             delete: {
                 pendingClipDeletion = clip
             }
@@ -494,6 +580,36 @@ struct RecordingsView: View {
         } catch {
             mergeErrorMessage = error.localizedDescription
         }
+    }
+
+    private func toggleManualPlayback(_ clip: RecordingClip) {
+        playbackQueue.removeAll()
+        playbackQueueIndex = 0
+        player.toggle(clip)
+    }
+
+    private func playHighlights(in session: RecordingSessionGroup) {
+        guard !playbackDisabled, !session.clips.isEmpty else { return }
+        playbackQueue = session.clips.sorted { $0.createdAt < $1.createdAt }
+        playbackQueueIndex = 0
+        player.play(playbackQueue[0])
+    }
+
+    private func playNextQueuedClip() {
+        guard !playbackQueue.isEmpty else { return }
+        let nextIndex = playbackQueueIndex + 1
+        guard playbackQueue.indices.contains(nextIndex) else {
+            playbackQueue.removeAll()
+            playbackQueueIndex = 0
+            return
+        }
+        playbackQueueIndex = nextIndex
+        player.play(playbackQueue[nextIndex])
+    }
+
+    private func isPlayingQueue(_ session: RecordingSessionGroup) -> Bool {
+        guard let playingURL = player.playingURL else { return false }
+        return !playbackQueue.isEmpty && session.clips.contains { $0.url == playingURL }
     }
 
     private var mergedClips: [RecordingClip] {
@@ -767,6 +883,7 @@ private struct SleepSessionTimelineHeader: View {
     let isExpanded: Bool
     let selectedCount: Int
     let accent: Color
+    var showsDisclosure = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -800,10 +917,12 @@ private struct SleepSessionTimelineHeader: View {
                         .background(accent.opacity(0.13), in: Capsule())
                 }
 
-                Image(systemName: "chevron.down")
-                    .font(.caption.weight(.bold))
-                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
-                    .foregroundStyle(.white.opacity(0.64))
+                if showsDisclosure {
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.bold))
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                        .foregroundStyle(.white.opacity(0.64))
+                }
             }
 
             SessionTimelineBar(session: session, accent: accent)
@@ -811,14 +930,24 @@ private struct SleepSessionTimelineHeader: View {
         .padding(16)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityValue(isExpanded ? "녹음 목록 펼쳐짐" : "녹음 목록 접힘")
-        .accessibilityHint("두 번 탭하여 녹음 목록을 \(isExpanded ? "접습니다" : "펼칩니다")")
+        .accessibilityValue(
+            showsDisclosure
+                ? (isExpanded ? "잠소리 목록 펼쳐짐" : "잠소리 목록 접힘")
+                : "수면 리포트"
+        )
+        .accessibilityHint(
+            showsDisclosure
+                ? "두 번 탭하여 잠소리 목록을 \(isExpanded ? "접습니다" : "펼칩니다")"
+                : ""
+        )
     }
 
     private var sessionTitle: String {
-        if Calendar.current.isDateInToday(session.startedAt) { return "오늘 잠자리" }
-        if Calendar.current.isDateInYesterday(session.startedAt) { return "어제 잠자리" }
-        return session.startedAt.formatted(.dateTime.month().day().weekday(.short))
+        let startTime = session.startedAt.formatted(date: .omitted, time: .shortened)
+        if Calendar.current.isDateInToday(session.startedAt) { return "오늘 \(startTime) 잠자리" }
+        if Calendar.current.isDateInYesterday(session.startedAt) { return "어제 \(startTime) 잠자리" }
+        let date = session.startedAt.formatted(.dateTime.month().day().weekday(.short))
+        return "\(date) \(startTime) 잠자리"
     }
 
     private var timeRangeText: String {
@@ -845,6 +974,119 @@ private struct SleepSessionTimelineHeader: View {
             parts.append("화들짝 \(session.startleEvents.count)회")
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+private struct SleepSessionInsightCard: View {
+    let session: RecordingSessionGroup
+    let accent: Color
+    let playbackDisabled: Bool
+    let isPlayingQueue: Bool
+    let playHighlights: () -> Void
+
+    private var insight: SleepSessionInsight { session.insight }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("분석 요약", systemImage: "chart.bar.xaxis")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                ShareLink(item: shareText) {
+                    Label("리포트 공유", systemImage: "square.and.arrow.up")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(accent)
+                        .frame(minHeight: 44)
+                }
+            }
+
+            HStack(spacing: 8) {
+                insightMetric("기록 구간", value: insight.sessionDuration.compactDurationText)
+                insightMetric("소리 후보", value: "\(insight.soundCount)회")
+                insightMetric("화들짝 반응", value: "\(insight.movementCount)회")
+            }
+
+            ActivityDistributionBar(buckets: insight.activityBuckets, accent: accent)
+
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(accent)
+                Text(activityDescription)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.72))
+                Spacer(minLength: 4)
+            }
+
+            if !session.clips.isEmpty {
+                Button(action: playHighlights) {
+                    Label(
+                        isPlayingQueue ? "핵심 소리 이어 듣는 중" : "핵심 소리 \(session.clips.count)개 이어 듣기",
+                        systemImage: isPlayingQueue ? "waveform.circle.fill" : "play.circle.fill"
+                    )
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(accent)
+                    .frame(maxWidth: .infinity, minHeight: 46)
+                    .background(accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 13))
+                }
+                .buttonStyle(.plain)
+                .disabled(playbackDisabled)
+                .opacity(playbackDisabled ? 0.4 : 1)
+            }
+
+            Text("소리와 움직임의 발생 기록을 요약한 참고 정보이며, 수면 단계나 질병을 진단하지 않습니다.")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.48))
+        }
+        .padding(13)
+        .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func insightMetric(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value)
+                .font(.subheadline.monospacedDigit().weight(.bold))
+                .foregroundStyle(.white.opacity(0.94))
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.54))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 11))
+    }
+
+    private var activityDescription: String {
+        guard let range = insight.busiestRange(sessionStart: session.startedAt) else {
+            return "기록된 소리나 뒤척임이 없습니다."
+        }
+        let start = range.lowerBound.formatted(date: .omitted, time: .shortened)
+        let end = range.upperBound.formatted(date: .omitted, time: .shortened)
+        return "가장 기록이 몰린 시간은 \(start)–\(end)입니다 · 시간당 \(insight.eventsPerHour.formatted(.number.precision(.fractionLength(1))))회"
+    }
+
+    private var shareText: String {
+        let date = session.startedAt.formatted(.dateTime.year().month().day())
+        return "S.tand 수면 리포트 · \(date)\n기록 구간 \(insight.sessionDuration.compactDurationText)\n소리 후보 \(insight.soundCount)회 · 화들짝 반응 \(insight.movementCount)회\n\(activityDescription)\n※ 감지 기록을 분석한 참고 정보이며 의료 진단이 아닙니다."
+    }
+}
+
+private struct ActivityDistributionBar: View {
+    let buckets: [Int]
+    let accent: Color
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 3) {
+            ForEach(Array(buckets.enumerated()), id: \.offset) { _, count in
+                Capsule()
+                    .fill(count == 0 ? .white.opacity(0.08) : accent.opacity(0.42 + 0.12 * Double(min(count, 4))))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: CGFloat(5 + min(count, 4) * 5))
+            }
+        }
+        .frame(height: 26, alignment: .bottom)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("수면 중 활동 분포")
+        .accessibilityValue(buckets.map(String.init).joined(separator: ", "))
     }
 }
 
@@ -915,7 +1157,7 @@ private struct SessionTimelineBar: View {
             HStack {
                 Text(session.startedAt.formatted(date: .omitted, time: .shortened))
                 Spacer()
-                Text("수면 소리 · 얇은 선은 화들짝")
+                Text("잠소리 · 얇은 선은 화들짝")
                 Spacer()
                 Text(session.endedAt.formatted(date: .omitted, time: .shortened))
             }
@@ -1022,7 +1264,7 @@ private struct RecordingRow: View {
             }
             .buttonStyle(.plain)
             .disabled(playbackDisabled)
-            .accessibilityLabel("\(clip.mergedTitle ?? "수면 소리") 재생")
+            .accessibilityLabel("\(clip.mergedTitle ?? "잠소리") 재생")
 
             Menu {
                 ShareLink(item: clip.url) {
@@ -1175,5 +1417,19 @@ private extension TimeInterval {
         let seconds = totalSeconds % 60
         if hours > 0 { return String(format: "%d:%02d:%02d", hours, minutes, seconds) }
         return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    var compactDurationText: String {
+        let totalMinutes = max(0, Int((self / 60).rounded()))
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if hours > 0 { return "\(hours)시간 \(minutes)분" }
+        return "\(minutes)분"
+    }
+}
+
+private extension Int64 {
+    var storageText: String {
+        ByteCountFormatter.string(fromByteCount: self, countStyle: .file)
     }
 }

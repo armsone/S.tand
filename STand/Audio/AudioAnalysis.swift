@@ -30,29 +30,46 @@ enum AdaptiveSoundThresholdPolicy {
     static let loudestThresholdDB: Float = -18
 
     static func soundThreshold(
-        noiseFloorDB: Float?
+        noiseFloorDB: Float?,
+        userThresholdDB: Float = quietestThresholdDB
     ) -> Float {
-        guard let noiseFloorDB else { return -50 }
-
-        // 사용자가 숫자를 맞추지 않아도 조용한 방에서는 3 dB 상승,
-        // 지속 소음이 있는 방에서는 6 dB 상승을 자동으로 사건으로 본다.
-        let margin: Float = switch noiseFloorDB {
-        case ..<(-50): 3
-        case ..<(-35): 4
-        default: 6
+        let adaptiveThreshold: Float
+        if let noiseFloorDB {
+            let margin: Float = switch noiseFloorDB {
+            case ..<(-50): 10
+            case ..<(-35): 12
+            default: 14
+            }
+            adaptiveThreshold = clamped(noiseFloorDB + margin)
+        } else {
+            adaptiveThreshold = -50
         }
-        return clamped(noiseFloorDB + margin)
+
+        // 자동 학습은 사용자가 선택한 감도보다 더 민감하게 만들 수 없다.
+        return max(adaptiveThreshold, clamped(userThresholdDB))
     }
 
     static func clapPeakThreshold(
-        noiseFloorDB: Float?
+        noiseFloorDB: Float?,
+        userThresholdDB: Float = quietestThresholdDB,
+        configuredPeakThresholdDB: Float = -18
     ) -> Float {
-        let soundThreshold = soundThreshold(noiseFloorDB: noiseFloorDB)
-        return min(-8, max(-45, soundThreshold + 9))
+        let soundThreshold = soundThreshold(
+            noiseFloorDB: noiseFloorDB,
+            userThresholdDB: userThresholdDB
+        )
+        let adaptivePeak = min(-8, max(-45, soundThreshold + 12))
+        return max(adaptivePeak, min(-8, max(-45, configuredPeakThresholdDB)))
     }
 
     private static func clamped(_ value: Float) -> Float {
         min(loudestThresholdDB, max(quietestThresholdDB, value))
+    }
+}
+
+enum AudioCalibrationPolicy {
+    static func canReact(_ state: AdaptiveNoiseState) -> Bool {
+        state.isCalibrated
     }
 }
 

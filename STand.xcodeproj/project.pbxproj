@@ -53,6 +53,7 @@
 		B00000000000000000000032 /* BoyisoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000032 /* BoyisoView.swift */; };
 		B00000000000000000000033 /* boyiso_toktok.wav in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000033 /* boyiso_toktok.wav */; };
 		B00000000000000000000101 /* AudioAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000101 /* AudioAnalysisTests.swift */; };
+		U00000000000000000000001 /* STandUICatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = U00000000000000000000101 /* STandUICatalogTests.swift */; };
 		D90000000000000000000001 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000001 /* ShareViewController.swift */; };
 		D90000000000000000000002 /* STandRadioShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* STandRadioShare.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		D90000000000000000000003 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000005 /* PrivacyInfo.xcprivacy */; };
@@ -73,6 +74,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = A10000000000000000000003;
 			remoteInfo = STandWidget;
+		};
+		U60000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000001;
+			remoteInfo = STand;
 		};
 		D60000000000000000000001 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -150,6 +158,8 @@
 		F00000000000000000000201 /* STand.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = STand.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000202 /* STandTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = STandTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000203 /* STandWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = STandWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		U00000000000000000000101 /* STandUICatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STandUICatalogTests.swift; sourceTree = "<group>"; };
+		U00000000000000000000201 /* STandUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = STandUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E10000000000000000000001 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		E10000000000000000000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		E10000000000000000000003 /* STandRadioShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = STandRadioShare.entitlements; sourceTree = "<group>"; };
@@ -180,6 +190,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		U30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D30000000000000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -197,6 +214,7 @@
 				A2000000000000000000000E /* STandWidget */,
 				D20000000000000000000001 /* STandRadioShare */,
 				A20000000000000000000009 /* STandTests */,
+				U20000000000000000000001 /* STandUITests */,
 				A2000000000000000000000A /* Configuration */,
 				A2000000000000000000000B /* Products */,
 			);
@@ -291,6 +309,14 @@
 			path = STandTests;
 			sourceTree = "<group>";
 		};
+		U20000000000000000000001 /* STandUITests */ = {
+			isa = PBXGroup;
+			children = (
+				U00000000000000000000101 /* STandUICatalogTests.swift */,
+			);
+			path = STandUITests;
+			sourceTree = "<group>";
+		};
 		A2000000000000000000000A /* Configuration */ = {
 			isa = PBXGroup;
 			children = (
@@ -306,6 +332,7 @@
 				F00000000000000000000202 /* STandTests.xctest */,
 				F00000000000000000000203 /* STandWidget.appex */,
 				E10000000000000000000004 /* STandRadioShare.appex */,
+				U00000000000000000000201 /* STandUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -445,6 +472,26 @@
 			productReference = F00000000000000000000203 /* STandWidget.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		U10000000000000000000001 /* STandUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = U80000000000000000000001 /* Build configuration list for PBXNativeTarget "STandUITests" */;
+			buildPhases = (
+				U40000000000000000000001 /* Sources */,
+				U30000000000000000000001 /* Frameworks */,
+				U50000000000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				U60000000000000000000002 /* PBXTargetDependency */,
+			);
+			name = STandUITests;
+			packageProductDependencies = (
+			);
+			productName = STandUITests;
+			productReference = U00000000000000000000201 /* STandUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		D10000000000000000000001 /* STandRadioShare */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = D80000000000000000000001 /* Build configuration list for PBXNativeTarget "STandRadioShare" */;
@@ -489,6 +536,10 @@
 					A10000000000000000000003 = {
 						CreatedOnToolsVersion = 26.6;
 					};
+					U10000000000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = A10000000000000000000001;
+					};
 					D10000000000000000000001 = {
 						CreatedOnToolsVersion = 26.6;
 						SystemCapabilities = {
@@ -518,6 +569,7 @@
 				A10000000000000000000002 /* STandTests */,
 				A10000000000000000000003 /* STandWidget */,
 				D10000000000000000000001 /* STandRadioShare */,
+				U10000000000000000000001 /* STandUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -577,6 +629,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		U50000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -630,6 +689,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		U40000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				U00000000000000000000001 /* STandUICatalogTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -647,6 +714,11 @@
 			isa = PBXTargetDependency;
 			target = D10000000000000000000001 /* STandRadioShare */;
 			targetProxy = D60000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		U60000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000001 /* STand */;
+			targetProxy = U60000000000000000000001 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -954,6 +1026,36 @@
 			};
 			name = Release;
 		};
+		U70000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = T7B4EPLHPK;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.armsone.stand.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = STand;
+			};
+			name = Debug;
+		};
+		U70000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = T7B4EPLHPK;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.armsone.stand.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = STand;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -998,6 +1100,15 @@
 			buildConfigurations = (
 				D70000000000000000000001 /* Debug */,
 				D70000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		U80000000000000000000001 /* Build configuration list for PBXNativeTarget "STandUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				U70000000000000000000001 /* Debug */,
+				U70000000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

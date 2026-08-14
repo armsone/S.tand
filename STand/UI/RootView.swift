@@ -313,6 +313,7 @@ struct RootView: View {
         _weather = ObservedObject(wrappedValue: model.weather)
         _boyiso = ObservedObject(wrappedValue: model.boyiso)
         _firstLaunchPermissions = ObservedObject(wrappedValue: firstLaunchPermissions)
+        _isEditingScreen = State(initialValue: UICatalogLaunch.startsInEditor)
     }
 
     var body: some View {
@@ -1015,10 +1016,10 @@ struct RootView: View {
             EmptyView()
         case .recordings:
             ControlButton(
-                title: "녹음 목록 보기",
+                title: "잠소리 확인",
                 systemImage: "waveform",
-                status: library.clips.isEmpty ? "녹음 없음" : "\(library.clips.count)개 녹음",
-                hint: "저장된 수면 소리 녹음 목록을 엽니다",
+                status: library.clips.isEmpty ? "잠소리 없음" : "잠소리 \(library.clips.count)개",
+                hint: "저장된 잠소리를 확인합니다",
                 width: width
             ) {
                 model.pauseMonitoringForPlayback()

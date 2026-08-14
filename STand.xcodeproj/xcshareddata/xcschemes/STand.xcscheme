@@ -31,12 +31,23 @@
       <Testables>
          <TestableReference
             skipped = "NO"
-            parallelizable = "YES">
+            parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A10000000000000000000002"
                BuildableName = "STandTests.xctest"
                BlueprintName = "STandTests"
+               ReferencedContainer = "container:STand.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "U10000000000000000000001"
+               BuildableName = "STandUITests.xctest"
+               BlueprintName = "STandUITests"
                ReferencedContainer = "container:STand.xcodeproj">
             </BuildableReference>
          </TestableReference>

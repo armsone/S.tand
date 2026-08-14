@@ -86,6 +86,56 @@ struct RecordingSessionGroup: Identifiable {
     var totalDuration: TimeInterval {
         clips.reduce(0) { $0 + $1.duration }
     }
+
+    var insight: SleepSessionInsight {
+        SleepSessionInsight(session: self)
+    }
+}
+
+struct SleepSessionInsight: Equatable {
+    static let bucketCount = 12
+
+    let sessionDuration: TimeInterval
+    let soundCount: Int
+    let soundDuration: TimeInterval
+    let movementCount: Int
+    let activityBuckets: [Int]
+    let busiestBucketIndex: Int?
+
+    init(session: RecordingSessionGroup) {
+        sessionDuration = max(0, session.endedAt.timeIntervalSince(session.startedAt))
+        soundCount = session.clips.count
+        soundDuration = session.totalDuration
+        movementCount = session.startleEvents.count
+
+        var buckets = Array(repeating: 0, count: Self.bucketCount)
+        let dates = session.clips.map(\.createdAt) + session.startleEvents.map(\.startedAt)
+        for date in dates {
+            let fraction = SleepSessionGroupingPolicy.markerFraction(
+                for: date,
+                sessionStart: session.startedAt,
+                sessionEnd: session.endedAt
+            )
+            let index = min(Self.bucketCount - 1, Int(fraction * Double(Self.bucketCount)))
+            buckets[index] += 1
+        }
+        activityBuckets = buckets
+        busiestBucketIndex = buckets.max().flatMap { maximum in
+            maximum > 0 ? buckets.firstIndex(of: maximum) : nil
+        }
+    }
+
+    var eventsPerHour: Double {
+        guard sessionDuration > 0 else { return 0 }
+        return Double(soundCount + movementCount) / (sessionDuration / 3_600)
+    }
+
+    func busiestRange(sessionStart: Date) -> Range<Date>? {
+        guard let busiestBucketIndex, sessionDuration > 0 else { return nil }
+        let bucketDuration = sessionDuration / Double(Self.bucketCount)
+        let start = sessionStart.addingTimeInterval(Double(busiestBucketIndex) * bucketDuration)
+        return start..<start.addingTimeInterval(bucketDuration)
+    }
 }
 
 enum SleepSessionGroupingPolicy {
@@ -221,6 +271,13 @@ final class RecordingLibrary: ObservableObject {
 
     var totalDuration: TimeInterval {
         clips.reduce(0) { $0 + $1.duration }
+    }
+
+    var storedAudioByteCount: Int64 {
+        clips.reduce(0) { result, clip in
+            let size = (try? clip.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            return result + Int64(size)
+        }
     }
 
     var mergeableClips: [RecordingClip] {
@@ -754,6 +811,8 @@ final class RecordingPlayer: NSObject, ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var boostEnabled = true
 
+    var onPlaybackFinished: (() -> Void)?
+
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private let gainUnit = AVAudioUnitEQ(numberOfBands: 0)
@@ -779,6 +838,10 @@ final class RecordingPlayer: NSObject, ObservableObject {
             return
         }
 
+        play(clip)
+    }
+
+    func play(_ clip: RecordingClip) {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default)
@@ -888,6 +951,7 @@ final class RecordingPlayer: NSObject, ObservableObject {
             Task { @MainActor in
                 guard let self, self.playbackToken == token else { return }
                 self.stop()
+                self.onPlaybackFinished?()
             }
         }
         if shouldPlay {

@@ -23,7 +23,7 @@ final class AudioCaptureService: ObservableObject {
     @Published private(set) var recordingErrorMessage: String?
     @Published private(set) var lastClassifiedSound: SleepSoundClassification?
     @Published private(set) var adaptiveNoiseFloorDB: Float?
-    @Published private(set) var effectiveSoundThresholdDB: Float = -50
+    @Published private(set) var effectiveSoundThresholdDB: Float = AppSettings.recommended.soundThresholdDB
     @Published private(set) var noiseCalibrationProgress: Double = 0
 
     var onClap: (() -> Void)?
@@ -65,6 +65,8 @@ final class AudioCaptureService: ObservableObject {
     private var continuousSoundDuration: TimeInterval = 0
     private var lastContinuousSoundAt: TimeInterval = -.infinity
     private var shouldResumeAfterInterruption = false
+    private var requestedSoundThresholdDB = AppSettings.recommended.soundThresholdDB
+    private let configuredClapPeakThresholdDB: Float = -18
 
     init(recordingsDirectory: URL) {
         self.recordingsDirectory = recordingsDirectory
@@ -84,8 +86,8 @@ final class AudioCaptureService: ObservableObject {
         processingQueue.async { [weak self] in
             guard let self else { return }
             let adaptiveState = adaptiveNoiseTracker.state
-            detector.configuration.soundThresholdDB = adaptiveState.effectiveSoundThresholdDB
-            detector.configuration.clapPeakThresholdDB = adaptiveState.effectiveClapPeakThresholdDB
+            requestedSoundThresholdDB = settings.soundThresholdDB
+            applyEffectiveThresholds(adaptiveState)
             let recordingSettingChanged = recordingEnabled != settings.recordingEnabled
             recordingEnabled = settings.recordingEnabled
             if !settings.recordingEnabled {
@@ -173,7 +175,10 @@ final class AudioCaptureService: ObservableObject {
         }
         normalizedLevel = 0
         adaptiveNoiseFloorDB = nil
-        effectiveSoundThresholdDB = -50
+        effectiveSoundThresholdDB = AdaptiveSoundThresholdPolicy.soundThreshold(
+            noiseFloorDB: nil,
+            userThresholdDB: requestedSoundThresholdDB
+        )
         noiseCalibrationProgress = 0
         state = .stopped
         try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
@@ -204,11 +209,13 @@ final class AudioCaptureService: ObservableObject {
             detector.reset()
             adaptiveNoiseTracker.reset()
             let adaptiveState = adaptiveNoiseTracker.state
-            detector.configuration.soundThresholdDB = adaptiveState.effectiveSoundThresholdDB
-            detector.configuration.clapPeakThresholdDB = adaptiveState.effectiveClapPeakThresholdDB
+            applyEffectiveThresholds(adaptiveState)
         }
         adaptiveNoiseFloorDB = nil
-        effectiveSoundThresholdDB = -50
+        effectiveSoundThresholdDB = AdaptiveSoundThresholdPolicy.soundThreshold(
+            noiseFloorDB: nil,
+            userThresholdDB: requestedSoundThresholdDB
+        )
         noiseCalibrationProgress = 0
 
         do {
@@ -274,14 +281,25 @@ final class AudioCaptureService: ObservableObject {
                 rmsDB: levels.rmsDB,
                 duration: duration
             )
-            detector.configuration.soundThresholdDB = adaptiveState.effectiveSoundThresholdDB
-            detector.configuration.clapPeakThresholdDB = adaptiveState.effectiveClapPeakThresholdDB
-            let detection = detector.analyze(
-                rmsDB: levels.rmsDB,
-                peakDB: levels.peakDB,
-                bufferDuration: duration,
-                now: now
-            )
+            applyEffectiveThresholds(adaptiveState)
+            let detection: AudioDetection
+            if AudioCalibrationPolicy.canReact(adaptiveState) {
+                detection = detector.analyze(
+                    rmsDB: levels.rmsDB,
+                    peakDB: levels.peakDB,
+                    bufferDuration: duration,
+                    now: now
+                )
+            } else {
+                detector.reset()
+                soundClassifier.reset()
+                continuousSoundDuration = 0
+                detection = AudioDetection(
+                    clapDetected: false,
+                    soundBegan: false,
+                    isAboveSoundThreshold: false
+                )
+            }
 
             if detection.clapDetected {
                 DispatchQueue.main.async { self.onClap?() }
@@ -327,11 +345,23 @@ final class AudioCaptureService: ObservableObject {
                 DispatchQueue.main.async {
                     self.normalizedLevel = normalized
                     self.adaptiveNoiseFloorDB = adaptiveState.noiseFloorDB
-                    self.effectiveSoundThresholdDB = adaptiveState.effectiveSoundThresholdDB
+                    self.effectiveSoundThresholdDB = self.detector.configuration.soundThresholdDB
                     self.noiseCalibrationProgress = adaptiveState.calibrationProgress
                 }
             }
         }
+    }
+
+    private func applyEffectiveThresholds(_ adaptiveState: AdaptiveNoiseState) {
+        detector.configuration.soundThresholdDB = AdaptiveSoundThresholdPolicy.soundThreshold(
+            noiseFloorDB: adaptiveState.noiseFloorDB,
+            userThresholdDB: requestedSoundThresholdDB
+        )
+        detector.configuration.clapPeakThresholdDB = AdaptiveSoundThresholdPolicy.clapPeakThreshold(
+            noiseFloorDB: adaptiveState.noiseFloorDB,
+            userThresholdDB: requestedSoundThresholdDB,
+            configuredPeakThresholdDB: configuredClapPeakThresholdDB
+        )
     }
 
     private func installAudioObservers() {

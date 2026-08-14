@@ -283,7 +283,7 @@ struct SettingsView: View {
             )
 
             SettingsInlineButton(
-                title: library.clips.isEmpty ? "수면 소리 열기" : "녹음 \(library.clips.count)개 보기",
+                title: library.clips.isEmpty ? "잠소리 열기" : "잠소리 \(library.clips.count)개 보기",
                 systemImage: "play.circle.fill",
                 accent: accent
             ) {
@@ -591,6 +591,16 @@ struct SettingsView: View {
                 systemImage: "app.badge",
                 accent: accent
             )
+
+            Link(destination: URL(string: "https://github.com/armsone")!) {
+                SettingsNavigationRow(
+                    title: "만든 사람",
+                    value: "armsone · GitHub",
+                    systemImage: "person.crop.circle",
+                    accent: accent
+                )
+            }
+            .buttonStyle(.plain)
 
             NavigationLink {
                 ClockFontLicensesView(accent: accent)
