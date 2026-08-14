@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>S.tand</string>
+	<string>에스텐드</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

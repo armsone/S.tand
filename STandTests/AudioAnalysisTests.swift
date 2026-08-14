@@ -3303,7 +3303,7 @@ final class BoyisoProtocolTests: XCTestCase {
     func testKoreanFirstBrandingKeepsAppAndProtocolIdentitiesSeparate() {
         XCTAssertEqual(BoyisoBranding.primaryName, "보이소")
         XCTAssertEqual(BoyisoBranding.descriptor, "BOISO · 보이는 소리")
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String, "S.tand")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String, "에스텐드")
         XCTAssertEqual(BoyisoInvitation.scheme, "stand")
         XCTAssertEqual(BoyisoInvitation.host, "boyiso")
     }
