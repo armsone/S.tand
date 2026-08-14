@@ -168,6 +168,10 @@ struct BoyisoView: View {
                 }
             }
 
+            BoyisoParticipantSummaryHeader(totalCount: participantSections.totalCount)
+            participantGroupCard(role: .host, participants: participantSections.hosts)
+            participantGroupCard(role: .guest, participants: participantSections.guests)
+
             if let invitation = service.invitation,
                let image = BoyisoQRCode.image(for: invitation.url.absoluteString) {
                 BoyisoCard {
@@ -189,10 +193,6 @@ struct BoyisoView: View {
                     }
                 }
             }
-
-            BoyisoParticipantSummaryHeader(totalCount: participantSections.totalCount)
-            participantGroupCard(role: .host, participants: participantSections.hosts)
-            participantGroupCard(role: .guest, participants: participantSections.guests)
 
             Text("화면 잠금 중에도 iOS가 허용하는 범위에서 Bluetooth·오디오 연결과 수신 알림을 유지합니다. 다만 앱이 정지되거나 종료되면 Wi-Fi·Bluetooth 상시 연결은 보장되지 않으며, 앱을 다시 열면 자동으로 재탐색합니다. 무음 모드·집중 모드·알림 설정은 그대로 따릅니다.")
                 .font(.caption).foregroundStyle(.white.opacity(0.48))
