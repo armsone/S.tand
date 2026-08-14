@@ -637,14 +637,7 @@ struct RootView: View {
     @ViewBuilder
     private func centerContent(isPortrait: Bool, canvasSize: CGSize) -> some View {
         if model.isNightSessionActive {
-            if settings.value.modePreference == .mate, model.experienceMode != .startled {
-                Image(systemName: "lock.fill")
-                    .font(.system(size: isPortrait ? 72 : 92, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.78))
-                    .accessibilityLabel("매이트 모드 잠금")
-            } else {
-                clockAndWeather(isPortrait: isPortrait, isDimmed: false, canvasSize: canvasSize)
-            }
+            clockAndWeather(isPortrait: isPortrait, isDimmed: false, canvasSize: canvasSize)
         } else {
             VStack(spacing: 16) {
                 Image(systemName: "moon.stars.fill")
@@ -708,6 +701,10 @@ struct RootView: View {
             radioConfigurations: settings.value.homeInternetRadios,
             radioState: radio.state,
             activeRadioChannelID: radio.activeChannelID,
+            showsMateLock: MateLockPresentationPolicy.isVisible(
+                modePreference: settings.value.modePreference,
+                experienceMode: model.experienceMode
+            ),
             onToggleRadio: model.toggleInternetRadioPlayback(channelID:),
             onEditRadio: { channelID in
                 radioEditorChannelID = channelID
@@ -1471,6 +1468,7 @@ private struct DashboardCanvas: View {
     let radioConfigurations: [InternetRadioConfiguration]
     let radioState: InternetRadioPlaybackState
     let activeRadioChannelID: UUID?
+    let showsMateLock: Bool
     let onToggleRadio: (UUID) -> Void
     let onEditRadio: (UUID) -> Void
 
@@ -1487,6 +1485,11 @@ private struct DashboardCanvas: View {
                     hourMode: hourMode
                 )
                 .panelTransform(layout.clock, canvasSize: canvasSize)
+
+                if showsMateLock {
+                    MateModeLockOverlay(isPortrait: isPortrait)
+                        .panelTransform(layout.clock, canvasSize: canvasSize)
+                }
 
                 ClockSecondsPanel(
                     date: context.date,
@@ -1563,6 +1566,41 @@ private struct DashboardCanvas: View {
                 .panelTransform(transform, canvasSize: canvasSize)
             }
         }
+    }
+}
+
+enum MateLockPresentationPolicy {
+    static let backgroundOpacity = 0.68
+    static let borderOpacity = 0.12
+    static let foregroundOpacity = 0.35
+
+    static func isVisible(
+        modePreference: StandModePreference,
+        experienceMode: StandExperienceMode
+    ) -> Bool {
+        modePreference == .mate && experienceMode != .startled
+    }
+}
+
+private struct MateModeLockOverlay: View {
+    let isPortrait: Bool
+
+    var body: some View {
+        let size: CGFloat = isPortrait ? 92 : 116
+
+        ZStack {
+            Circle()
+                .fill(.black.opacity(MateLockPresentationPolicy.backgroundOpacity))
+            Circle()
+                .stroke(.white.opacity(MateLockPresentationPolicy.borderOpacity), lineWidth: 2)
+            Image(systemName: "lock.fill")
+                .font(.system(size: size * 0.66, weight: .bold))
+                .foregroundStyle(.white.opacity(MateLockPresentationPolicy.foregroundOpacity))
+                .accessibilityHidden(true)
+        }
+        .frame(width: size, height: size)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("매이트 모드 잠금")
     }
 }
 

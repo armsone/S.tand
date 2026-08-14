@@ -2104,6 +2104,31 @@ final class AudioAnalysisTests: XCTestCase {
         ))
     }
 
+    func testMateLockIsOnlyVisibleWhileFixedInMateOutsideStartle() {
+        XCTAssertTrue(MateLockPresentationPolicy.isVisible(
+            modePreference: .mate,
+            experienceMode: .mate
+        ))
+        XCTAssertFalse(MateLockPresentationPolicy.isVisible(
+            modePreference: .mate,
+            experienceMode: .startled
+        ))
+        XCTAssertFalse(MateLockPresentationPolicy.isVisible(
+            modePreference: .automatic,
+            experienceMode: .mate
+        ))
+        XCTAssertFalse(MateLockPresentationPolicy.isVisible(
+            modePreference: .object,
+            experienceMode: .object
+        ))
+    }
+
+    func testMateLockMatchesAndroidSurfaceBrightness() {
+        XCTAssertEqual(MateLockPresentationPolicy.backgroundOpacity, 0.68)
+        XCTAssertEqual(MateLockPresentationPolicy.borderOpacity, 0.12)
+        XCTAssertEqual(MateLockPresentationPolicy.foregroundOpacity, 0.35)
+    }
+
     func testSecondsPanelLosesItsBackgroundWhenPlacedOnClock() {
         var layout = StandScreenLayout.portrait
         XCTAssertTrue(
