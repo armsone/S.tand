@@ -349,8 +349,9 @@ enum SleepMovementLightingPolicy {
         environmentDisplayMode: EnvironmentDisplayMode,
         roomIsDark: Bool
     ) -> Double {
-        guard torchEnabled, environmentDisplayMode == .sleeping, roomIsDark else { return 0 }
-        return profile.peakTorchLevel
+        guard torchEnabled, environmentDisplayMode == .sleeping else { return 0 }
+        if profile == .gentle { return profile.peakTorchLevel }
+        return roomIsDark ? profile.peakTorchLevel : 0
     }
 }
 

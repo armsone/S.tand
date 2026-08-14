@@ -196,7 +196,7 @@ struct SettingsView: View {
             SettingsToggleRow(
                 title: "플래시 사용",
                 subtitle: store.value.torchEnabled
-                    ? "강한 알림은 최대, 일반 알림은 낮게 켜짐"
+                    ? "일반 알림 10% · 강한 알림은 어두움 확인 후 최대"
                     : "사용하지 않음",
                 systemImage: "flashlight.on.fill",
                 isOn: $store.value.torchEnabled,

@@ -1801,6 +1801,15 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(
             SleepMovementLightingPolicy.torchLevel(
                 torchEnabled: true,
+                profile: .gentle,
+                environmentDisplayMode: .sleeping,
+                roomIsDark: false
+            ),
+            0.1
+        )
+        XCTAssertEqual(
+            SleepMovementLightingPolicy.torchLevel(
+                torchEnabled: true,
                 profile: .urgent,
                 environmentDisplayMode: .sleeping,
                 roomIsDark: false
