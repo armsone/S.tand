@@ -254,6 +254,25 @@ struct SettingsView: View {
             systemImage: "checkmark.shield.fill",
             accent: accent
         ) {
+            VStack(alignment: .leading, spacing: 8) {
+                SettingsFieldLabel("백그라운드 모드")
+                Picker(
+                    "백그라운드 모드",
+                    selection: $store.value.backgroundModeEnabled
+                ) {
+                    Text("꺼짐").tag(false)
+                    Text("켜짐").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(minHeight: 44)
+
+                SettingsHelpText(
+                    store.value.backgroundModeEnabled
+                        ? "앱을 벗어나도 매이트 모드의 허용된 감시를 유지합니다."
+                        : "기본값입니다. 앱을 벗어나면 카메라·마이크·움직임 감시를 멈춥니다."
+                )
+            }
+
             SettingsToggleRow(
                 title: "플래시 사용",
                 subtitle: store.value.torchEnabled
@@ -826,6 +845,16 @@ struct SettingsView: View {
                     title: "만든 사람",
                     value: "armsone · GitHub",
                     systemImage: "person.crop.circle",
+                    accent: accent
+                )
+            }
+            .buttonStyle(.plain)
+
+            Link(destination: URL(string: "https://nasfinder.com")!) {
+                SettingsNavigationRow(
+                    title: "공식 사이트",
+                    value: "nasfinder.com",
+                    systemImage: "globe",
                     accent: accent
                 )
             }

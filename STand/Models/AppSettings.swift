@@ -366,6 +366,7 @@ struct AppSettings: Codable, Equatable {
     var multiStimulusWakeEnabled = true
     var modePreference = StandModePreference.automatic
     var cameraAmbientSensingEnabled = false
+    var backgroundModeEnabled = false
     var weatherLocationEnabled = true
     private(set) var internetRadioChannels: [InternetRadioConfiguration] = []
     private(set) var selectedInternetRadioID: UUID?
@@ -450,6 +451,7 @@ struct AppSettings: Codable, Equatable {
         multiStimulusWakeEnabled: Bool = true,
         modePreference: StandModePreference = .automatic,
         cameraAmbientSensingEnabled: Bool = false,
+        backgroundModeEnabled: Bool = false,
         weatherLocationEnabled: Bool = true,
         internetRadio: InternetRadioConfiguration? = nil,
         internetRadioChannels: [InternetRadioConfiguration] = [],
@@ -478,6 +480,7 @@ struct AppSettings: Codable, Equatable {
         self.multiStimulusWakeEnabled = multiStimulusWakeEnabled
         self.modePreference = modePreference
         self.cameraAmbientSensingEnabled = cameraAmbientSensingEnabled
+        self.backgroundModeEnabled = backgroundModeEnabled
         self.weatherLocationEnabled = weatherLocationEnabled
         let initialChannels = internetRadioChannels.isEmpty
             ? internetRadio.map { [$0] } ?? []
@@ -520,6 +523,7 @@ struct AppSettings: Codable, Equatable {
         case multiStimulusWakeEnabled
         case modePreference
         case cameraAmbientSensingEnabled
+        case backgroundModeEnabled
         case weatherLocationEnabled
         case internetRadioChannels
         case selectedInternetRadioID
@@ -594,6 +598,10 @@ struct AppSettings: Codable, Equatable {
             Bool.self,
             forKey: .cameraAmbientSensingEnabled
         ) ?? false
+        backgroundModeEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .backgroundModeEnabled
+        ) ?? false
         weatherLocationEnabled = try container.decodeIfPresent(
             Bool.self,
             forKey: .weatherLocationEnabled
@@ -655,6 +663,7 @@ struct AppSettings: Codable, Equatable {
         try container.encode(multiStimulusWakeEnabled, forKey: .multiStimulusWakeEnabled)
         try container.encode(modePreference, forKey: .modePreference)
         try container.encode(cameraAmbientSensingEnabled, forKey: .cameraAmbientSensingEnabled)
+        try container.encode(backgroundModeEnabled, forKey: .backgroundModeEnabled)
         try container.encode(weatherLocationEnabled, forKey: .weatherLocationEnabled)
         try container.encode(internetRadioChannels, forKey: .internetRadioChannels)
         try container.encodeIfPresent(selectedInternetRadioID, forKey: .selectedInternetRadioID)

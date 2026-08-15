@@ -97,6 +97,10 @@ final class FirstLaunchPermissionCoordinator: NSObject, ObservableObject {
             )
     }
 
+    var isCameraAuthorized: Bool {
+        AVCaptureDevice.authorizationStatus(for: .video) == .authorized
+    }
+
     private func evaluateThisProcessLaunch() {
         let storedRemaining = defaults.object(forKey: StorageKey.launchesUntilNextPrompt) == nil
             ? nil

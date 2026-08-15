@@ -263,7 +263,7 @@ final class RecordingLibrary: ObservableObject {
     init(directory: URL = RecordingLibrary.defaultDirectory) {
         self.directory = directory
         if directory.standardizedFileURL == Self.defaultDirectory.standardizedFileURL {
-            installEmbeddedSamplesIfNeeded()
+            removeEmbeddedSamplesIfPresent()
         }
         reload()
         closeOpenSessionsForRecovery()
@@ -549,52 +549,17 @@ final class RecordingLibrary: ObservableObject {
         try await merge(mergeableClips(on: date, calendar: calendar), kind: .today)
     }
 
-    private func installEmbeddedSamplesIfNeeded() {
+    private func removeEmbeddedSamplesIfPresent() {
         let markerURL = directory.appendingPathComponent(".embedded-snore-samples-v1")
-        guard !FileManager.default.fileExists(atPath: markerURL.path) else { return }
-
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let calendar = Calendar.current
-            guard let yesterday = calendar.date(byAdding: .day, value: -1, to: Date()),
-                  let firstTime = calendar.date(
-                    bySettingHour: 1,
-                    minute: 0,
-                    second: 0,
-                    of: yesterday
-                  )
-            else { return }
-
-            let samples = [
-                (resource: "sample-snore-5s", minuteOffset: 0),
-                (resource: "sample-snore-10s", minuteOffset: 20),
-                (resource: "sample-snore-15s", minuteOffset: 40)
-            ]
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
-
-            for sample in samples {
-                guard let sourceURL = Bundle.main.url(
-                    forResource: sample.resource,
-                    withExtension: "m4a"
-                ), let recordingDate = calendar.date(
-                    byAdding: .minute,
-                    value: sample.minuteOffset,
-                    to: firstTime
-                ) else { continue }
-
-                let filename = "sleep-sound-\(formatter.string(from: recordingDate))-embedded-snore.m4a"
-                let destinationURL = directory.appendingPathComponent(filename)
-                if !FileManager.default.fileExists(atPath: destinationURL.path) {
-                    try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
-                }
-            }
-
-            try Data().write(to: markerURL, options: .atomic)
-        } catch {
-            // 샘플은 테스트 편의 기능이므로 실패해도 실제 녹음 보관함은 정상 동작해야 합니다.
-        }
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        urls.filter {
+            $0.deletingPathExtension().lastPathComponent.contains("-embedded-snore")
+        }.forEach { try? FileManager.default.removeItem(at: $0) }
+        try? FileManager.default.removeItem(at: markerURL)
     }
 
     private func makeClip(_ url: URL) -> RecordingClip? {

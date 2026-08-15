@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import MediaPlayer
 import MusicKit
 import SwiftUI
 import UIKit
@@ -28,6 +29,17 @@ struct DeviceBatteryStatus: Equatable {
     var shouldProtectBattery: Bool {
         guard let level else { return false }
         return level <= 0.2 && !isCharging
+    }
+
+    var systemImage: String {
+        if isCharging { return "battery.100percent.bolt" }
+        guard let level else { return "battery.0percent" }
+        return switch level {
+        case ...0.2: "battery.25percent"
+        case ...0.5: "battery.50percent"
+        case ...0.75: "battery.75percent"
+        default: "battery.100percent"
+        }
     }
 
     static func current(device: UIDevice = .current) -> DeviceBatteryStatus {
@@ -217,7 +229,7 @@ enum AmbientCameraSamplingPolicy {
 }
 
 enum StartleActivationPolicy {
-    static let delay: TimeInterval = 60
+    static let delay: TimeInterval = 120
 
     static func canActivate(
         mateModeEnteredAt: TimeInterval?,
@@ -485,6 +497,7 @@ final class StandViewModel: ObservableObject {
     private var settingsSubscription: AnyCancellable?
     private var screenBrightnessSubscription: AnyCancellable?
     private var batterySubscriptions: Set<AnyCancellable> = []
+    private var musicSubscriptions: Set<AnyCancellable> = []
     private let torch = TorchController()
     private let motionMonitor = WakeMotionMonitor()
     private let postureMonitor = DevicePostureMonitor()
@@ -502,6 +515,7 @@ final class StandViewModel: ObservableObject {
     private var monitoringSuspensions: Set<MonitoringSuspensionReason> = []
     // SystemMusicPlayer takes over the Music app's current queue without opening its UI.
     private let appleMusicPlayer = SystemMusicPlayer.shared
+    private let mediaSystemMusicPlayer = MPMusicPlayerController.systemMusicPlayer
     private var appIsActive = true
     private var isAdjustingBrightness = false
     private var activeRecordingSessionID: UUID?
@@ -657,6 +671,8 @@ final class StandViewModel: ObservableObject {
         #endif
 
         startBatteryMonitoring()
+        startSystemMusicMonitoring()
+        syncSystemMusicPlayback()
     }
 
     func startNightSession() {
@@ -720,6 +736,7 @@ final class StandViewModel: ObservableObject {
 
     func appDidBecomeActive() {
         appIsActive = true
+        syncSystemMusicPlayback()
         importSharedInternetRadioIfNeeded()
         manualDimmingHoldActive = false
         if settings.value.modePreference == .automatic {
@@ -761,11 +778,10 @@ final class StandViewModel: ObservableObject {
 
     func appWillResignActive() {
         appIsActive = false
-        let keepsBoyisoMonitoring = boyiso.isEnabled
-            && boyiso.role == .guest
+        let keepsBackgroundMonitoring = settings.value.backgroundModeEnabled
             && isNightSessionActive
             && environmentDisplayMode == .sleeping
-        updateBoyisoLocalState(monitoring: keepsBoyisoMonitoring)
+        updateBoyisoLocalState(monitoring: keepsBackgroundMonitoring)
         isAdjustingBrightness = false
         brightnessEndpointLockTask?.cancel()
         brightnessEndpointLockTask = nil
@@ -792,7 +808,7 @@ final class StandViewModel: ObservableObject {
             ? ambientCamera.currentState
             : .disabled
         guard isNightSessionActive else { return }
-        if !keepsBoyisoMonitoring {
+        if !keepsBackgroundMonitoring {
             audio.stop()
             motionMonitor.stop()
         }
@@ -1032,6 +1048,7 @@ final class StandViewModel: ObservableObject {
 
     func endExternalMusicSession() {
         appleMusicPlayer.stop()
+        mediaSystemMusicPlayer.stop()
         activeExternalMusicService = nil
         externalMusicPlaybackState = .idle
         externalMusicTrackTitle = nil
@@ -1041,11 +1058,23 @@ final class StandViewModel: ObservableObject {
     }
 
     private func toggleAppleMusicPlayback(_ service: ExternalMusicService) async {
+        syncSystemMusicPlayback()
         if activeExternalMusicService == service,
-           appleMusicPlayer.state.playbackStatus == .playing {
-            appleMusicPlayer.pause()
+           mediaSystemMusicPlayer.playbackState == .playing {
+            mediaSystemMusicPlayer.pause()
             externalMusicPlaybackState = .paused
             externalMusicMessage = "S.tand 안에서 일시 정지했습니다. 다시 누르면 이어서 재생합니다."
+            return
+        }
+
+        if let item = mediaSystemMusicPlayer.nowPlayingItem,
+           systemMusicService(for: item) == service,
+           mediaSystemMusicPlayer.playbackState != .stopped {
+            beginExternalMusicSession(service)
+            externalMusicTrackTitle = systemMusicTitle(for: item)
+            mediaSystemMusicPlayer.play()
+            externalMusicPlaybackState = .playing
+            externalMusicMessage = "Music 앱에서 듣던 음악을 현재 위치부터 이어서 재생합니다."
             return
         }
 
@@ -1065,6 +1094,7 @@ final class StandViewModel: ObservableObject {
                entryMatchesService(currentEntry, service: service) {
                 externalMusicTrackTitle = musicEntryTitle(currentEntry)
                 try await appleMusicPlayer.play()
+                syncSystemMusicPlayback()
                 externalMusicPlaybackState = .playing
                 externalMusicMessage = service == .appleClassical
                     ? "재생 중이던 클래식 음악을 S.tand에서 이어서 재생합니다."
@@ -1080,6 +1110,7 @@ final class StandViewModel: ObservableObject {
                 )
                 externalMusicTrackTitle = "\(firstLibrarySong.title) · \(firstLibrarySong.artistName)"
                 try await appleMusicPlayer.play()
+                syncSystemMusicPlayback()
                 externalMusicPlaybackState = .playing
                 externalMusicMessage = service == .appleClassical
                     ? "보관함에서 클래식 음악을 임의로 골라 재생합니다."
@@ -1091,6 +1122,7 @@ final class StandViewModel: ObservableObject {
                 appleMusicPlayer.queue = MusicKit.MusicPlayer.Queue(for: [station])
                 externalMusicTrackTitle = station.name
                 try await appleMusicPlayer.play()
+                syncSystemMusicPlayback()
                 externalMusicPlaybackState = .playing
                 externalMusicMessage = "Apple Music이 추천한 음악을 재생합니다."
                 return
@@ -1107,6 +1139,7 @@ final class StandViewModel: ObservableObject {
             )
             externalMusicTrackTitle = "\(firstSong.title) · \(firstSong.artistName)"
             try await appleMusicPlayer.play()
+            syncSystemMusicPlayback()
             externalMusicPlaybackState = .playing
             externalMusicMessage = service == .appleClassical
                 ? "Apple Music의 클래식 추천 음악을 재생합니다."
@@ -1119,6 +1152,67 @@ final class StandViewModel: ObservableObject {
     private func musicEntryTitle(_ entry: MusicKit.MusicPlayer.Queue.Entry) -> String {
         guard let subtitle = entry.subtitle, !subtitle.isEmpty else { return entry.title }
         return "\(entry.title) · \(subtitle)"
+    }
+
+    private func startSystemMusicMonitoring() {
+        mediaSystemMusicPlayer.beginGeneratingPlaybackNotifications()
+
+        NotificationCenter.default.publisher(
+            for: .MPMusicPlayerControllerNowPlayingItemDidChange,
+            object: mediaSystemMusicPlayer
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] _ in self?.syncSystemMusicPlayback() }
+        .store(in: &musicSubscriptions)
+
+        NotificationCenter.default.publisher(
+            for: .MPMusicPlayerControllerPlaybackStateDidChange,
+            object: mediaSystemMusicPlayer
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] _ in self?.syncSystemMusicPlayback() }
+        .store(in: &musicSubscriptions)
+    }
+
+    private func syncSystemMusicPlayback() {
+        guard let item = mediaSystemMusicPlayer.nowPlayingItem else { return }
+        let state = mediaSystemMusicPlayer.playbackState
+        guard state != .stopped else { return }
+
+        let service = systemMusicService(for: item)
+        if activeExternalMusicService != service {
+            beginExternalMusicSession(service)
+        }
+        externalMusicTrackTitle = systemMusicTitle(for: item)
+        externalMusicPlaybackState = switch state {
+        case .playing, .seekingForward, .seekingBackward: .playing
+        case .paused, .interrupted: .paused
+        case .stopped: .idle
+        @unknown default: .paused
+        }
+        externalMusicMessage = externalMusicPlaybackState == .playing
+            ? "Music 앱에서 재생 중인 음악과 실시간으로 연결되었습니다."
+            : "Music 앱의 현재 음악이 일시 정지되어 있습니다."
+    }
+
+    private func systemMusicService(for item: MPMediaItem) -> ExternalMusicService {
+        let values = [
+            item.title ?? "",
+            item.albumTitle ?? "",
+            item.artist ?? "",
+            item.composer ?? "",
+            item.genre ?? ""
+        ]
+        return containsClassicalKeyword(values) ? .appleClassical : .appleMusic
+    }
+
+    private func systemMusicTitle(for item: MPMediaItem) -> String {
+        let values = [item.title, item.artist]
+            .compactMap { value -> String? in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+        return values.isEmpty ? "재생 중인 음악" : values.joined(separator: " · ")
     }
 
     private func entryMatchesService(
@@ -1701,26 +1795,16 @@ final class StandViewModel: ObservableObject {
         guard isNightSessionActive else { return }
         tapBrightnessTransitionTask?.cancel()
         let target = SimplifiedBrightnessModePolicy.tapLevel(from: environmentDisplayMode)
-        let start = displayBrightness
-        tapBrightnessTransitionTask = Task { [weak self] in
-            guard let self else { return }
-            let steps = 40
-            for step in 1...steps {
-                guard !Task.isCancelled else { return }
-                let progress = Double(step) / Double(steps)
-                let value = start + (target - start) * progress
-                displayBrightness = value
-                applyBaseBrightness(value, animated: false)
-                try? await Task.sleep(for: .milliseconds(50))
-            }
-            guard !Task.isCancelled else { return }
-            var updated = settings.value
-            updated.lampIntensity = target
-            updated.modePreference = .automatic
-            settings.value = updated
-            refreshEnvironmentDisplayMode(preference: .automatic, performTransition: true)
-            tapBrightnessTransitionTask = nil
-        }
+        displayBrightness = target
+        applyBaseBrightness(target, animated: false)
+        var updated = settings.value
+        updated.lampIntensity = target
+        updated.modePreference = .automatic
+        settings.value = updated
+        applyEnvironmentDisplayMode(
+            environmentDisplayMode == .stand ? .sleeping : .stand,
+            performTransition: false
+        )
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 

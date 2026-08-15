@@ -85,6 +85,7 @@ struct BoyisoView: View {
     @State private var validationMessage: String?
     @State private var shareURL: URL?
     @State private var nameEditorExpanded = false
+    @State private var confirmsLeavingRoom = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     init(service: BoyisoConnectivityService, accent: Color) {
@@ -122,6 +123,18 @@ struct BoyisoView: View {
             .ignoresSafeArea()
         }
         .onChange(of: service.invitation?.url) { _, _ in prepareShareImage() }
+        .confirmationDialog(
+            "같은 공간에서 나올까요?",
+            isPresented: $confirmsLeavingRoom,
+            titleVisibility: .visible
+        ) {
+            Button("공간에서 나오기", role: .destructive) {
+                service.leaveRoom()
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("연결된 사람들과의 보이소 연결이 종료됩니다.")
+        }
     }
 
     private var setupFlow: some View {
@@ -278,7 +291,7 @@ struct BoyisoView: View {
                 .font(.caption).foregroundStyle(.white.opacity(0.48))
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button(role: .destructive) { service.leaveRoom() } label: {
+            Button(role: .destructive) { confirmsLeavingRoom = true } label: {
                 Text("공간에서 나오기").font(.headline).frame(maxWidth: .infinity, minHeight: 48)
             }
             .buttonStyle(.bordered)

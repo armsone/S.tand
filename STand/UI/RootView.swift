@@ -407,6 +407,7 @@ struct RootView: View {
                         ),
                         hourMode: .twelve,
                         batteryText: silhouetteBatteryText,
+                        batterySystemImage: model.batteryStatus.systemImage,
                         onConfigureRadio: { channelID in
                             radioEditorChannelID = channelID
                             presentedSheet = .internetRadio
@@ -452,7 +453,12 @@ struct RootView: View {
                     FirstLaunchPermissionView(
                         coordinator: firstLaunchPermissions,
                         accent: settings.value.displayTheme.accentColor,
-                        onComplete: startAppIfNeeded
+                        onComplete: {
+                            if firstLaunchPermissions.isCameraAuthorized {
+                                model.setAmbientCameraSensingEnabled(true)
+                            }
+                            startAppIfNeeded()
+                        }
                     )
                     .zIndex(200)
                 }
@@ -696,14 +702,13 @@ struct RootView: View {
             clockFont: settings.value.clockFont,
             hourMode: .twelve,
             batteryText: silhouetteBatteryText,
-            batterySystemImage: model.batteryStatus.isCharging
-                ? "battery.100percent.bolt"
-                : "battery.50percent",
+            batterySystemImage: model.batteryStatus.systemImage,
             musicChannels: homeMusicChannels,
             radioState: radio.state,
             activeRadioChannelID: radio.activeChannelID,
             activeExternalMusicService: model.activeExternalMusicService,
             externalMusicPlaybackState: model.externalMusicPlaybackState,
+            externalMusicTrackTitle: model.externalMusicTrackTitle,
             showsMateLock: MateLockPresentationPolicy.isVisible(
                 modePreference: settings.value.modePreference,
                 experienceMode: model.experienceMode
@@ -1507,6 +1512,7 @@ private struct DashboardCanvas: View {
     let activeRadioChannelID: UUID?
     let activeExternalMusicService: ExternalMusicService?
     let externalMusicPlaybackState: ExternalMusicPlaybackState
+    let externalMusicTrackTitle: String?
     let showsMateLock: Bool
     let onToggleRadio: (UUID) -> Void
     let onToggleExternalMusic: (ExternalMusicService) -> Void
@@ -1589,6 +1595,7 @@ private struct DashboardCanvas: View {
                         activeRadioChannelID: activeRadioChannelID,
                         activeExternalMusicService: activeExternalMusicService,
                         externalMusicPlaybackState: externalMusicPlaybackState,
+                        externalMusicTrackTitle: externalMusicTrackTitle,
                         isDimmed: isDimmed,
                         dimmedIntensity: dimmedIntensity,
                         renderedScale: 1,
@@ -1622,6 +1629,7 @@ private struct DashboardCanvas: View {
                     activeRadioChannelID: activeRadioChannelID,
                     activeExternalMusicService: activeExternalMusicService,
                     externalMusicPlaybackState: externalMusicPlaybackState,
+                    externalMusicTrackTitle: externalMusicTrackTitle,
                     isDimmed: isDimmed,
                     dimmedIntensity: dimmedIntensity,
                     renderedScale: transform.scale * clockScale,
@@ -1643,6 +1651,7 @@ private struct HomeMusicPanel: View {
     let activeRadioChannelID: UUID?
     let activeExternalMusicService: ExternalMusicService?
     let externalMusicPlaybackState: ExternalMusicPlaybackState
+    let externalMusicTrackTitle: String?
     let isDimmed: Bool
     let dimmedIntensity: Double
     let renderedScale: Double
@@ -1672,6 +1681,7 @@ private struct HomeMusicPanel: View {
                 service: service,
                 isActive: activeExternalMusicService == service,
                 playbackState: externalMusicPlaybackState,
+                trackTitle: externalMusicTrackTitle,
                 isDimmed: isDimmed,
                 dimmedIntensity: dimmedIntensity,
                 renderedScale: renderedScale,
@@ -1687,6 +1697,7 @@ private struct ExternalMusicPanel: View {
     let service: ExternalMusicService
     let isActive: Bool
     let playbackState: ExternalMusicPlaybackState
+    let trackTitle: String?
     let isDimmed: Bool
     let dimmedIntensity: Double
     let renderedScale: Double
@@ -1695,22 +1706,22 @@ private struct ExternalMusicPanel: View {
     let onEnd: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: service.systemImage)
-                .symbolRenderingMode(.hierarchical)
-                .font(.system(size: 17, weight: .semibold))
-                .frame(width: 24)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(service.displayName)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.65)
+        HStack(spacing: 7) {
+            VStack(spacing: 2) {
+                Image(systemName: service.systemImage)
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(height: 20)
                 Text(statusText)
-                    .font(.system(size: 8.5, weight: .medium))
+                    .font(.system(size: 7.5, weight: .medium))
                     .foregroundStyle(.white.opacity(isDimmed ? 0.40 : 0.52))
+                    .lineLimit(1)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: 36)
+
+            MarqueeText(text: displayTitle)
+                .font(.system(size: 10.5, weight: .semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 11)
         .frame(width: InternetRadioPanelMetrics.width, height: InternetRadioPanelMetrics.height)
@@ -1761,6 +1772,54 @@ private struct ExternalMusicPanel: View {
         case .paused: "일시 정지"
         case .idle, .unavailable: "대기 중"
         }
+    }
+
+    private var displayTitle: String {
+        guard isActive, let trackTitle, !trackTitle.isEmpty else { return service.displayName }
+        return trackTitle
+    }
+}
+
+private struct MarqueeTextWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct MarqueeText: View {
+    let text: String
+    @State private var contentWidth: CGFloat = 0
+    @State private var animationStartedAt = Date()
+
+    var body: some View {
+        GeometryReader { proxy in
+            TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
+                let overflow = max(0, contentWidth - proxy.size.width)
+                let travelDuration = max(2.5, Double(overflow / 22))
+                let cycleDuration = travelDuration + 2
+                let elapsed = timeline.date.timeIntervalSince(animationStartedAt)
+                    .truncatingRemainder(dividingBy: cycleDuration)
+                let progress = min(1, max(0, (elapsed - 1) / travelDuration))
+
+                Text(text)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .background {
+                        GeometryReader { textProxy in
+                            Color.clear.preference(
+                                key: MarqueeTextWidthKey.self,
+                                value: textProxy.size.width
+                            )
+                        }
+                    }
+                    .offset(x: overflow > 0 ? -overflow * progress : 0)
+            }
+        }
+        .clipped()
+        .onPreferenceChange(MarqueeTextWidthKey.self) { contentWidth = $0 }
+        .onChange(of: text) { _, _ in animationStartedAt = .now }
+        .accessibilityLabel(text)
     }
 }
 
@@ -2563,6 +2622,7 @@ private struct ScreenEditorView: View {
     @Binding var clockFont: ClockFontChoice
     let hourMode: ClockHourMode
     let batteryText: String
+    let batterySystemImage: String
     let onConfigureRadio: (UUID?) -> Void
     let onManageRadios: () -> Void
     let onReset: () -> Void
@@ -2653,7 +2713,7 @@ private struct ScreenEditorView: View {
                     editingInsets: editingInsets,
                     accessibilityName: "배터리 패널"
                 ) {
-                    Label(batteryText, systemImage: "battery.100percent.bolt")
+                    Label(batteryText, systemImage: batterySystemImage)
                         .font(.caption.monospacedDigit())
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -2721,8 +2781,7 @@ private struct ScreenEditorView: View {
                 transform: $layout.radio,
                 canvasSize: canvasSize,
                 editingInsets: editingInsets,
-                accessibilityName: "인터넷 라디오 묶음 패널",
-                onTap: splitRadioPanels
+                accessibilityName: "인터넷 라디오 묶음 패널"
             ) {
                 InternetRadioGroupedPanel(
                     configurations: radioConfigurations,
@@ -2731,8 +2790,8 @@ private struct ScreenEditorView: View {
                     isDimmed: false,
                     dimmedIntensity: 1,
                     showsEditBadge: true,
-                    actions: { _ in },
-                    allowsChildInteraction: false
+                    actions: onConfigureRadio,
+                    allowsChildInteraction: true
                 )
                 .onTapGesture(count: 2, perform: splitRadioPanels)
             }
@@ -3786,7 +3845,7 @@ private struct BatteryStatusPill: View {
     let status: DeviceBatteryStatus
 
     var body: some View {
-        Label(levelText, systemImage: systemImage)
+        Label(levelText, systemImage: status.systemImage)
             .font(.caption2.monospacedDigit().weight(.semibold))
             .foregroundStyle(status.shouldProtectBattery ? Color.orange : Color.white.opacity(0.72))
             .padding(.horizontal, 9)
@@ -3799,17 +3858,6 @@ private struct BatteryStatusPill: View {
     private var levelText: String {
         guard let level = status.level else { return "--%" }
         return "\(Int((level * 100).rounded()))%"
-    }
-
-    private var systemImage: String {
-        if status.isCharging { return "battery.100percent.bolt" }
-        guard let level = status.level else { return "battery.0percent" }
-        return switch level {
-        case ...0.2: "battery.25percent"
-        case ...0.5: "battery.50percent"
-        case ...0.75: "battery.75percent"
-        default: "battery.100percent"
-        }
     }
 
     private var accessibilityText: String {
