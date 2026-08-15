@@ -37,6 +37,14 @@ struct RecordingsView: View {
     @State private var playbackQueueIndex = 0
     @State private var selectedPage: RecordingsPage = .lastNight
 
+    private var recordingsContentMaxWidth: CGFloat? {
+        #if targetEnvironment(macCatalyst)
+        900
+        #else
+        nil
+        #endif
+    }
+
     init(
         library: RecordingLibrary,
         playbackDisabled: Bool,
@@ -63,6 +71,8 @@ struct RecordingsView: View {
                             soundListContent
                         }
                     }
+                    .frame(maxWidth: recordingsContentMaxWidth)
+                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, 14)
                     .padding(.top, 10)
                     .padding(.bottom, 30)

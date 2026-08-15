@@ -40,6 +40,14 @@ struct SettingsView: View {
         store.value.displayTheme.accentColor
     }
 
+    private var settingsContentMaxWidth: CGFloat? {
+        #if targetEnvironment(macCatalyst)
+        980
+        #else
+        nil
+        #endif
+    }
+
     var body: some View {
         NavigationStack {
             GeometryReader { proxy in
@@ -74,6 +82,8 @@ struct SettingsView: View {
 
                             internetRadioCard
                         }
+                        .frame(maxWidth: settingsContentMaxWidth)
+                        .frame(maxWidth: .infinity)
                         .padding(.horizontal, proxy.size.width >= 720 ? 24 : 14)
                         .padding(.top, 8)
                         .padding(.bottom, max(28, proxy.safeAreaInsets.bottom + 16))
@@ -105,7 +115,7 @@ struct SettingsView: View {
                 theme: store.value.displayTheme
             )
         }
-        .fullScreenCover(isPresented: $showsRadioBrowser) {
+        .standAdaptiveCover(isPresented: $showsRadioBrowser) {
             InternetRadioBrowserView(accent: accent)
         }
         .confirmationDialog(
@@ -750,6 +760,20 @@ private final class SettingsRuntimeState: ObservableObject {
         model.audio.$microphoneAccess
             .removeDuplicates()
             .assign(to: &$microphoneAccess)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func standAdaptiveCover<CoverContent: View>(
+        isPresented: Binding<Bool>,
+        @ViewBuilder content: @escaping () -> CoverContent
+    ) -> some View {
+        #if targetEnvironment(macCatalyst)
+        sheet(isPresented: isPresented, content: content)
+        #else
+        fullScreenCover(isPresented: isPresented, content: content)
+        #endif
     }
 }
 
@@ -1747,7 +1771,7 @@ struct InternetRadioChannelManagementView: View {
         .preferredColorScheme(.dark)
         .tint(accent)
         .grayscale(store.value.displayTheme == .grayscale ? 1 : 0)
-        .fullScreenCover(isPresented: $showsBrowser) {
+        .standAdaptiveCover(isPresented: $showsBrowser) {
             InternetRadioBrowserView(accent: accent)
         }
         .confirmationDialog(
@@ -2012,7 +2036,7 @@ struct InternetRadioChannelEditorView: View {
                     .fontWeight(.semibold)
             }
         }
-        .fullScreenCover(isPresented: $showsBrowser) {
+        .standAdaptiveCover(isPresented: $showsBrowser) {
             InternetRadioBrowserView(accent: accent)
         }
         .confirmationDialog(
