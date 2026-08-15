@@ -33,7 +33,7 @@
 		B0000000000000000000001C /* WeatherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* WeatherService.swift */; };
 		B0000000000000000000001D /* WakeMotionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001D /* WakeMotionMonitor.swift */; };
 		B0000000000000000000001E /* STandWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001E /* STandWidget.swift */; };
-		B0000000000000000000001F /* STandWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F00000000000000000000203 /* STandWidget.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		B0000000000000000000001F /* STandWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F00000000000000000000203 /* STandWidget.appex */; platformFilter = ios; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		B00000000000000000000020 /* sample-snore-5s.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000020 /* sample-snore-5s.m4a */; };
 		B00000000000000000000021 /* sample-snore-10s.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000021 /* sample-snore-10s.m4a */; };
 		B00000000000000000000022 /* sample-snore-15s.m4a in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000022 /* sample-snore-15s.m4a */; };
@@ -55,7 +55,7 @@
 		B00000000000000000000101 /* AudioAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000101 /* AudioAnalysisTests.swift */; };
 		U00000000000000000000001 /* STandUICatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = U00000000000000000000101 /* STandUICatalogTests.swift */; };
 		D90000000000000000000001 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000001 /* ShareViewController.swift */; };
-		D90000000000000000000002 /* STandRadioShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* STandRadioShare.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		D90000000000000000000002 /* STandRadioShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* STandRadioShare.appex */; platformFilter = ios; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		D90000000000000000000003 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000005 /* PrivacyInfo.xcprivacy */; };
 		D90000000000000000000004 /* InternetRadioConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002B /* InternetRadioConfiguration.swift */; };
 /* End PBXBuildFile section */
@@ -707,11 +707,13 @@
 		};
 		A60000000000000000000004 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilter = ios;
 			target = A10000000000000000000003 /* STandWidget */;
 			targetProxy = A60000000000000000000003 /* PBXContainerItemProxy */;
 		};
 		D60000000000000000000002 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilter = ios;
 			target = D10000000000000000000001 /* STandRadioShare */;
 			targetProxy = D60000000000000000000001 /* PBXContainerItemProxy */;
 		};
@@ -742,8 +744,8 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.armsone.stand;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -769,8 +771,8 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.armsone.stand;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
-				SUPPORTS_MACCATALYST = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";

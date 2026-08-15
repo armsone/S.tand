@@ -8,12 +8,12 @@ iOS 화면을 Android 구현 자료로 전달하기 위한 자동 스크린샷 �
 ./scripts/capture-ui-catalog.sh
 ```
 
-결과는 `artifacts/ui-catalog/index.html`과 `artifacts/ui-catalog/attachments/`에 생성된다. 캡처는 `iPhone 17 Pro` 시뮬레이터 하나에서 직렬로 실행한다.
+결과는 `artifacts/ui-catalog/index.html`과 `artifacts/ui-catalog/` 아래에 생성된다. `originals/`는 XCUITest가 만든 무손실 원본, `screenshots/`는 비교 좌표계에 맞게 방향만 정규화한 PNG이며, `manifest.json`에는 두 파일의 SHA-256·픽셀 크기·방향·`fixtureId`/`sharedProfile`·고정 시각·revision/dirty 상태와 dirty 소스 fingerprint가 기록된다. 캡처는 `iPhone 17 Pro` 시뮬레이터 하나에서 직렬로 실행한다.
 
 ## 포함 범위
 
 - 최초 권한 설명
-- 홈 세로·가로 화면
+- 홈 세로·가로 화면(가로 원본은 보존하고 비교본만 방향 정규화)
 - 홈 패널 편집
 - 수면 소리 목록
 - 보이소 초기 설정

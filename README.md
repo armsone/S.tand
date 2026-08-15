@@ -1,6 +1,8 @@
 # S.tand
 
-밤에는 은은한 스탠드가 되고, 잠든 동안에는 필요한 수면 소리 구간만 기기에 저장하는 iPhone·iPad 앱입니다.
+밤에는 은은한 스탠드가 되고, 잠든 동안에는 필요한 수면 소리 구간만 기기에 저장하는 iPhone·iPad·Android·Mac 앱입니다.
+
+[S.tand 홈페이지](https://nasfinder.com/apps/stand)에서 지원 플랫폼, 핵심 기능과 iOS↔Android 재현 가능 UI 매치업 현황을 볼 수 있습니다.
 
 ## 현재 구현 범위
 
@@ -43,7 +45,7 @@
 
 ## 프로젝트 규칙
 
-개발, 테스트, 실기기 설치, Git 배포, 버전 관리에 관한 모든 규칙은 루트의 [`AGENTS.md`](AGENTS.md)만을 단일 원본으로 사용합니다.
+개발, 테스트, 실기기 설치, Git 배포, 버전 관리에 관한 모든 규칙은 루트의 [`PROJECT_RULES.md`](PROJECT_RULES.md)를 단일 원본으로 사용합니다. [`AGENTS.md`](AGENTS.md)는 이 문서를 안내하는 진입점입니다.
 
 ## 중요한 iOS 제약
 

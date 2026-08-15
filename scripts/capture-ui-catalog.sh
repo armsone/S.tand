@@ -8,9 +8,10 @@ derived_data_dir="${project_dir}/DerivedData/UICatalog"
 result_bundle="${artifact_dir}/STand-UICatalog.xcresult"
 attachment_dir="${artifact_dir}/attachments"
 screenshot_dir="${artifact_dir}/screenshots"
+original_dir="${artifact_dir}/originals"
 
 mkdir -p "${artifact_dir}"
-rm -rf "${result_bundle}" "${attachment_dir}" "${screenshot_dir}"
+rm -rf "${result_bundle}" "${attachment_dir}" "${screenshot_dir}" "${original_dir}"
 rm -f "${artifact_dir}/index.html" "${artifact_dir}/manifest.json"
 
 xcodebuild test \
@@ -28,6 +29,9 @@ xcrun xcresulttool export attachments \
   --path "${result_bundle}" \
   --output-path "${attachment_dir}"
 
-"${script_dir}/make-ui-catalog-index.sh" "${attachment_dir}" "${artifact_dir}"
+"${script_dir}/make-ui-catalog-index.sh" \
+  "${attachment_dir}" \
+  "${artifact_dir}" \
+  "${project_dir}"
 
 echo "UI catalog: ${artifact_dir}/index.html"

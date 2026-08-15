@@ -56,6 +56,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
 enum UICatalogLaunch {
     #if DEBUG
+    static let fixtureID = "ui_catalog_v2"
+    static let fixedDate: Date? = Date(timeIntervalSince1970: 1_786_747_325)
+
     static var isEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains("--ui-catalog")
     }
@@ -103,11 +106,54 @@ enum UICatalogLaunch {
         defaults.set(true, forKey: SettingsMigration.fiveSecondHoldDurationKey)
         defaults.set(true, forKey: SettingsMigration.internetRadioChannelsKey)
         defaults.set(true, forKey: SettingsMigration.currentExperienceDefaultsKey)
+        prepareRecordingFixture()
+    }
+
+    static var recordingsDirectory: URL? {
+        guard isEnabled else { return nil }
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent("S.tand-\(fixtureID)", isDirectory: true)
+            .appendingPathComponent("Recordings", isDirectory: true)
+    }
+
+    private static func prepareRecordingFixture() {
+        guard let directory = recordingsDirectory else { return }
+        let fileManager = FileManager.default
+        try? fileManager.removeItem(at: directory)
+        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let samples = [
+            (resource: "sample-snore-5s", minuteOffset: 0),
+            (resource: "sample-snore-10s", minuteOffset: 20),
+            (resource: "sample-snore-15s", minuteOffset: 40)
+        ]
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Seoul")
+        formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        guard let fixedDate else { return }
+        let sessionStart = fixedDate.addingTimeInterval(-6 * 60 * 60)
+
+        for sample in samples {
+            guard let sourceURL = Bundle.main.url(
+                forResource: sample.resource,
+                withExtension: "m4a"
+            ) else { continue }
+            let date = sessionStart.addingTimeInterval(Double(sample.minuteOffset * 60))
+            let filename = "sleep-sound-\(formatter.string(from: date))-embedded-snore.m4a"
+            try? fileManager.copyItem(
+                at: sourceURL,
+                to: directory.appendingPathComponent(filename)
+            )
+        }
     }
     #else
+    static let fixtureID = "disabled"
+    static let fixedDate: Date? = nil
     static let isEnabled = false
     static let showsPermissionExplanation = false
     static let startsInEditor = false
+    static let recordingsDirectory: URL? = nil
     static func prepareDefaults() {}
     #endif
 }
@@ -129,6 +175,11 @@ struct STandApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(model: model, firstLaunchPermissions: firstLaunchPermissions)
+                .transaction { transaction in
+                    if UICatalogLaunch.isEnabled {
+                        transaction.disablesAnimations = true
+                    }
+                }
                 .preferredColorScheme(.dark)
                 .statusBarHidden(true)
         }

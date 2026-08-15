@@ -468,7 +468,10 @@ final class StandViewModel: ObservableObject {
 
     init() {
         let settings = SettingsStore()
-        let library = RecordingLibrary()
+        let library = RecordingLibrary(
+            directory: UICatalogLaunch.recordingsDirectory
+                ?? RecordingLibrary.defaultDirectory
+        )
         self.settings = settings
         self.library = library
         weather = WeatherService()

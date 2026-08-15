@@ -1475,10 +1475,11 @@ private struct DashboardCanvas: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            let drift = BurnInProtection.offset(at: context.date)
+            let date = UICatalogLaunch.fixedDate ?? context.date
+            let drift = BurnInProtection.offset(at: date)
             ZStack {
                 FlipClockFace(
-                    date: context.date,
+                    date: date,
                     isPortrait: isPortrait,
                     isDimmed: isDimmed,
                     clockScale: 1,
@@ -1493,7 +1494,7 @@ private struct DashboardCanvas: View {
                 }
 
                 ClockSecondsPanel(
-                    date: context.date,
+                    date: date,
                     isPortrait: isPortrait,
                     isDimmed: isDimmed,
                     clockFont: clockFont,
@@ -1505,7 +1506,7 @@ private struct DashboardCanvas: View {
                 )
                 .panelTransform(layout.seconds, canvasSize: canvasSize)
 
-                StandDatePanel(date: context.date, isPortrait: isPortrait)
+                StandDatePanel(date: date, isPortrait: isPortrait)
                     .panelTransform(layout.date, canvasSize: canvasSize)
 
                 if isDimmed {
@@ -2404,7 +2405,7 @@ private struct ScreenEditorView: View {
                 ) {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         FlipClockFace(
-                            date: context.date,
+                            date: UICatalogLaunch.fixedDate ?? context.date,
                             isPortrait: isPortrait,
                             isDimmed: false,
                             clockScale: 1,
@@ -2424,7 +2425,7 @@ private struct ScreenEditorView: View {
                 ) {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         ClockSecondsPanel(
-                            date: context.date,
+                            date: UICatalogLaunch.fixedDate ?? context.date,
                             isPortrait: isPortrait,
                             isDimmed: false,
                             clockFont: clockFont,
