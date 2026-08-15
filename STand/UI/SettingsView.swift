@@ -5,7 +5,12 @@ import SwiftUI
 import UIKit
 
 struct SettingsView: View {
-    private let model: StandViewModel
+    private enum RadioEditorField: Hashable {
+        case name
+        case address
+    }
+
+    @ObservedObject private var model: StandViewModel
     @StateObject private var runtime: SettingsRuntimeState
     @ObservedObject private var store: SettingsStore
     @ObservedObject private var library: RecordingLibrary
@@ -25,9 +30,10 @@ struct SettingsView: View {
     @State private var radioValidationMessage: String?
     @State private var pendingRadioDeletion: InternetRadioConfiguration?
     @State private var confirmsRestore = false
+    @FocusState private var focusedRadioField: RadioEditorField?
 
     init(model: StandViewModel) {
-        self.model = model
+        _model = ObservedObject(wrappedValue: model)
         _runtime = StateObject(wrappedValue: SettingsRuntimeState(model: model))
         _store = ObservedObject(wrappedValue: model.settings)
         _library = ObservedObject(wrappedValue: model.library)
@@ -54,8 +60,9 @@ struct SettingsView: View {
                 ZStack {
                     StandSettingsBackground(accent: accent)
 
-                    ScrollView {
-                        LazyVStack(spacing: 14) {
+                    ScrollViewReader { scrollProxy in
+                        ScrollView {
+                            LazyVStack(spacing: 14) {
                             SettingsHero(
                                 isNightSessionActive: runtime.isNightSessionActive,
                                 environmentDisplayMode: runtime.environmentDisplayMode,
@@ -80,15 +87,25 @@ struct SettingsView: View {
                                 informationCard
                             }
 
-                            internetRadioCard
+                                musicCard
+                            }
+                            .frame(maxWidth: settingsContentMaxWidth)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, proxy.size.width >= 720 ? 24 : 14)
+                            .padding(.top, 8)
+                            .padding(.bottom, max(28, proxy.safeAreaInsets.bottom + 16))
                         }
-                        .frame(maxWidth: settingsContentMaxWidth)
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, proxy.size.width >= 720 ? 24 : 14)
-                        .padding(.top, 8)
-                        .padding(.bottom, max(28, proxy.safeAreaInsets.bottom + 16))
+                        .scrollDismissesKeyboard(.interactively)
+                        .onChange(of: focusedRadioField) { _, field in
+                            guard field != nil else { return }
+                            DispatchQueue.main.async {
+                                withAnimation(.easeInOut(duration: 0.22)) {
+                                    scrollProxy.scrollTo("inline-radio-editor", anchor: .bottom)
+                                }
+                            }
+                        }
+                        .scrollIndicators(.hidden)
                     }
-                    .scrollIndicators(.hidden)
                 }
             }
             .navigationTitle("설정")
@@ -101,6 +118,40 @@ struct SettingsView: View {
                     Button("완료") { dismiss() }
                         .fontWeight(.semibold)
                         .foregroundStyle(accent)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Button(action: pasteRadioAddress) {
+                        Image(systemName: "doc.on.clipboard")
+                    }
+                    .accessibilityLabel("주소 붙여넣기")
+
+                    Button {
+                        focusedRadioField = nil
+                        showsRadioBrowser = true
+                    } label: {
+                        Image(systemName: "safari.fill")
+                    }
+                    .accessibilityLabel("웹에서 주소 찾기")
+
+                    if let editingRadioChannel {
+                        Button(role: .destructive) {
+                            focusedRadioField = nil
+                            pendingRadioDeletion = editingRadioChannel
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .accessibilityLabel("채널 삭제")
+                    }
+
+                    Spacer()
+                    Button("저장", action: saveInlineRadioChannel)
+                        .fontWeight(.semibold)
+                    Button {
+                        focusedRadioField = nil
+                    } label: {
+                        Image(systemName: "keyboard.chevron.compact.down")
+                    }
+                    .accessibilityLabel("키보드 닫기")
                 }
             }
         }
@@ -335,17 +386,38 @@ struct SettingsView: View {
         }
     }
 
-    private var internetRadioCard: some View {
+    private var musicCard: some View {
         let channels = store.value.internetRadioChannels
+        let channelCount = channels.count + ExternalMusicService.allCases.count
+        let activeRadioTitle = channels.first { channel in
+            radio.state.isActive && radio.activeChannelID == channel.id
+        }?.displayName
 
         return StandSettingsCard(
-            title: "인터넷 라디오",
-            subtitle: channels.isEmpty
-                ? "이 화면에서 채널을 추가하고 바로 재생합니다"
-                : "\(channels.count)개 채널 · 선택과 재생을 한곳에서",
-            systemImage: "radio.fill",
+            title: "음악",
+            subtitle: model.activeExternalMusicService.map {
+                "\($0.displayName) 재생 중"
+            } ?? activeRadioTitle.map { "\($0) 재생 중" }
+                ?? "\(channelCount)개 채널 · 한곳에서 바로 전환",
+            systemImage: "music.note.list",
             accent: accent
         ) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("홈 버튼 배치")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.52))
+
+                ForEach(Array(store.value.homeMusicChannels.enumerated()), id: \.offset) { slot, selection in
+                    homeMusicSlotRow(slot: slot, selection: selection)
+                }
+            }
+
+            VStack(spacing: 8) {
+                ForEach(ExternalMusicService.allCases) { service in
+                    externalMusicServiceRow(service)
+                }
+            }
+
             if channels.isEmpty, !radioEditorVisible {
                 Label("등록한 채널이 없습니다", systemImage: "radio")
                     .font(.subheadline.weight(.semibold))
@@ -378,9 +450,140 @@ struct SettingsView: View {
             }
 
             SettingsHelpText(
-                "목록의 첫 두 채널이 홈 패널에 순서대로 표시됩니다. 왼쪽 버튼으로 바로 듣고, 연결이 끊기면 자동 재연결합니다. 재생 중에는 소리 감지와 녹음을 잠시 멈춥니다."
+                model.externalMusicMessage
+                    ?? "Apple Music은 재생 중인 음악, 보관함의 임의 음악, Apple 추천 순서로 바로 재생합니다. 재생 중에는 잠꼬대·코골이 감지와 녹음을 잠시 멈춥니다."
             )
         }
+    }
+
+    private func homeMusicSlotRow(
+        slot: Int,
+        selection: HomeMusicChannelSelection
+    ) -> some View {
+        HStack(spacing: 10) {
+            Text(slot == 0 ? "첫 번째 버튼" : "두 번째 버튼")
+                .font(.subheadline.weight(.semibold))
+            Spacer(minLength: 8)
+            Menu {
+                ForEach(homeMusicChannelChoices) { choice in
+                    Button {
+                        model.assignHomeMusicChannel(choice, to: slot)
+                    } label: {
+                        if choice == selection {
+                            Label(homeMusicChannelName(choice), systemImage: "checkmark")
+                        } else {
+                            Text(homeMusicChannelName(choice))
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(homeMusicChannelName(selection))
+                        .lineLimit(1)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2.weight(.semibold))
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(accent)
+                .padding(.horizontal, 10)
+                .frame(minHeight: 36)
+                .background(accent.opacity(0.12), in: Capsule())
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: 48)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 13))
+    }
+
+    private var homeMusicChannelChoices: [HomeMusicChannelSelection] {
+        [.appleMusic, .appleClassical] + store.value.internetRadioChannels.map {
+            .internetRadio($0.id)
+        }
+    }
+
+    private func homeMusicChannelName(_ selection: HomeMusicChannelSelection) -> String {
+        switch selection.kind {
+        case .appleMusic:
+            "Apple Music"
+        case .appleClassical:
+            "Apple Music Classical"
+        case .internetRadio:
+            selection.radioID.flatMap(store.value.internetRadioChannel(id:))?.displayName
+                ?? "인터넷 라디오"
+        }
+    }
+
+    private func externalMusicServiceRow(_ service: ExternalMusicService) -> some View {
+        let isActive = model.activeExternalMusicService == service
+
+        return Button {
+            model.toggleExternalMusicPlayback(service)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: isActive ? "play.circle.fill" : service.systemImage)
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(isActive ? accent : .white.opacity(0.72))
+                    .frame(width: 44, height: 48)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(service.displayName)
+                        .font(.subheadline.weight(.semibold))
+                    Text(externalMusicServiceSubtitle(service, isActive: isActive))
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.54))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 2)
+                Image(systemName: externalMusicServiceTrailingIcon(service, isActive: isActive))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.48))
+                    .frame(width: 34, height: 44)
+            }
+            .padding(.horizontal, 10)
+            .frame(minHeight: 58)
+            .background(
+                isActive ? accent.opacity(0.15) : Color.white.opacity(0.06),
+                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .stroke(isActive ? accent.opacity(0.30) : .white.opacity(0.08), lineWidth: 1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(service.displayName), \(isActive ? "음악 듣기 모드 사용 중" : "열기")")
+        .accessibilityHint("S.tand 화면 안에서 음악 재생을 제어합니다")
+    }
+
+    private func externalMusicServiceSubtitle(
+        _ service: ExternalMusicService,
+        isActive: Bool
+    ) -> String {
+        switch service {
+        case .appleMusic, .appleClassical:
+            if isActive, let title = model.externalMusicTrackTitle { return title }
+            switch model.externalMusicPlaybackState {
+            case .loading: return "Apple Music 준비 중"
+            case .paused where isActive: return "일시 정지 · 누르면 이어서 재생"
+            case .playing where isActive: return "S.tand 안에서 재생 중"
+            default:
+                return service == .appleClassical
+                    ? "재생 중 · 보관함 클래식 · 추천 순서"
+                    : "재생 중 · 보관함 랜덤 · 추천 순서"
+            }
+        }
+    }
+
+    private func externalMusicServiceTrailingIcon(
+        _ service: ExternalMusicService,
+        isActive: Bool
+    ) -> String {
+        if model.externalMusicPlaybackState == .loading { return "hourglass" }
+        return isActive && model.externalMusicPlaybackState == .playing
+            ? "pause.circle.fill"
+            : "play.circle.fill"
     }
 
     private func inlineRadioChannelRow(
@@ -456,6 +659,7 @@ struct SettingsView: View {
 
             TextField("이름 (선택)", text: $radioDraftName)
                 .textInputAutocapitalization(.never)
+                .focused($focusedRadioField, equals: .name)
                 .padding(11)
                 .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
 
@@ -464,6 +668,7 @@ struct SettingsView: View {
                 .textContentType(.URL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .focused($focusedRadioField, equals: .address)
                 .lineLimit(1...3)
                 .padding(11)
                 .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
@@ -474,45 +679,52 @@ struct SettingsView: View {
                     .foregroundStyle(.orange)
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 PasteButton(payloadType: String.self) { values in
                     guard let pasted = values.first else { return }
                     radioDraftAddress = pasted
                     radioValidationMessage = nil
                 }
-                .buttonBorderShape(.roundedRectangle(radius: 12))
+                .labelStyle(.iconOnly)
+                .controlSize(.small)
+                .frame(minWidth: 38, minHeight: 38)
+                .buttonBorderShape(.roundedRectangle(radius: 10))
+                .accessibilityLabel("주소 붙여넣기")
 
                 Button {
+                    focusedRadioField = nil
                     showsRadioBrowser = true
                 } label: {
-                    Label("웹에서 찾기", systemImage: "safari.fill")
-                        .frame(maxWidth: .infinity, minHeight: 48)
+                    Label("찾기", systemImage: "safari.fill")
+                        .frame(maxWidth: .infinity, minHeight: 38)
                 }
                 .buttonStyle(.bordered)
-            }
+                .controlSize(.small)
 
-            HStack(spacing: 8) {
                 if let editingRadioChannel {
                     Button(role: .destructive) {
                         pendingRadioDeletion = editingRadioChannel
                     } label: {
                         Image(systemName: "trash")
-                            .frame(width: 48, height: 48)
+                            .frame(width: 38, height: 38)
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
                     .accessibilityLabel("\(editingRadioChannel.displayName) 삭제")
                 }
 
                 Button(action: saveInlineRadioChannel) {
                     Label("저장", systemImage: "checkmark.circle.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 38)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.small)
                 .tint(accent)
             }
         }
         .padding(12)
+        .id("inline-radio-editor")
         .background(.black.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
         .onChange(of: radioDraftName) { _, _ in radioValidationMessage = nil }
         .onChange(of: radioDraftAddress) { _, _ in radioValidationMessage = nil }
@@ -555,6 +767,7 @@ struct SettingsView: View {
     }
 
     private func closeInlineRadioEditor() {
+        focusedRadioField = nil
         withAnimation(.easeInOut(duration: 0.22)) { radioEditorVisible = false }
         editingRadioChannel = nil
         radioDraftName = ""
@@ -586,6 +799,12 @@ struct SettingsView: View {
             radioValidationMessage = error.localizedDescription
             UINotificationFeedbackGenerator().notificationOccurred(.error)
         }
+    }
+
+    private func pasteRadioAddress() {
+        guard let pasted = UIPasteboard.general.string else { return }
+        radioDraftAddress = pasted
+        radioValidationMessage = nil
     }
 
     private var informationCard: some View {

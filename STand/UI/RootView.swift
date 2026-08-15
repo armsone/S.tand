@@ -699,19 +699,38 @@ struct RootView: View {
             batterySystemImage: model.batteryStatus.isCharging
                 ? "battery.100percent.bolt"
                 : "battery.50percent",
-            radioConfigurations: settings.value.homeInternetRadios,
+            musicChannels: homeMusicChannels,
             radioState: radio.state,
             activeRadioChannelID: radio.activeChannelID,
+            activeExternalMusicService: model.activeExternalMusicService,
+            externalMusicPlaybackState: model.externalMusicPlaybackState,
             showsMateLock: MateLockPresentationPolicy.isVisible(
                 modePreference: settings.value.modePreference,
                 experienceMode: model.experienceMode
             ),
             onToggleRadio: model.toggleInternetRadioPlayback(channelID:),
+            onToggleExternalMusic: model.toggleExternalMusicPlayback,
+            onEndExternalMusic: model.endExternalMusicSession,
             onEditRadio: { channelID in
                 radioEditorChannelID = channelID
                 presentedSheet = .internetRadio
             }
         )
+    }
+
+    private var homeMusicChannels: [HomeMusicChannel] {
+        settings.value.homeMusicChannels.compactMap { selection in
+            switch selection.kind {
+            case .appleMusic:
+                .external(.appleMusic)
+            case .appleClassical:
+                .external(.appleClassical)
+            case .internetRadio:
+                selection.radioID
+                    .flatMap(settings.value.internetRadioChannel(id:))
+                    .map(HomeMusicChannel.radio)
+            }
+        }
     }
 
     private var internetRadioEditorIdentity: String {
@@ -1173,14 +1192,19 @@ private struct LampBackground: View {
     let theme: StandDisplayTheme
 
     var body: some View {
-        ZStack {
-            Color.black
-            RadialGradient(
-                colors: gradientColors,
-                center: .center,
-                startRadius: 20,
-                endRadius: 700
-            )
+        GeometryReader { proxy in
+            let diagonal = (proxy.size.width * proxy.size.width
+                + proxy.size.height * proxy.size.height).squareRoot()
+
+            ZStack {
+                Color.black
+                RadialGradient(
+                    colors: gradientColors,
+                    center: .center,
+                    startRadius: 20,
+                    endRadius: max(700, diagonal * 0.72)
+                )
+            }
         }
         .ignoresSafeArea()
         .animation(.linear(duration: 0.08), value: intensity)
@@ -1453,6 +1477,18 @@ private extension StandScreenLayout {
     }
 }
 
+private enum HomeMusicChannel: Identifiable {
+    case radio(InternetRadioConfiguration)
+    case external(ExternalMusicService)
+
+    var id: String {
+        switch self {
+        case let .radio(configuration): "radio:\(configuration.id.uuidString)"
+        case let .external(service): "external:\(service.id)"
+        }
+    }
+}
+
 private struct DashboardCanvas: View {
     @ObservedObject var service: WeatherService
     let layout: StandScreenLayout
@@ -1466,11 +1502,15 @@ private struct DashboardCanvas: View {
     let hourMode: ClockHourMode
     let batteryText: String
     let batterySystemImage: String
-    let radioConfigurations: [InternetRadioConfiguration]
+    let musicChannels: [HomeMusicChannel]
     let radioState: InternetRadioPlaybackState
     let activeRadioChannelID: UUID?
+    let activeExternalMusicService: ExternalMusicService?
+    let externalMusicPlaybackState: ExternalMusicPlaybackState
     let showsMateLock: Bool
     let onToggleRadio: (UUID) -> Void
+    let onToggleExternalMusic: (ExternalMusicService) -> Void
+    let onEndExternalMusic: () -> Void
     let onEditRadio: (UUID) -> Void
 
     var body: some View {
@@ -1540,33 +1580,186 @@ private struct DashboardCanvas: View {
 
     @ViewBuilder
     private var radioPanels: some View {
-        if radioConfigurations.count == 2, layout.radiosGrouped {
-            InternetRadioGroupedPanel(
-                configurations: radioConfigurations,
-                state: radioState,
-                activeChannelID: activeRadioChannelID,
-                isDimmed: isDimmed,
-                dimmedIntensity: dimmedIntensity,
-                showsEditBadge: false,
-                actions: onToggleRadio,
-                editActions: onEditRadio
+        if musicChannels.count == 2, layout.radiosGrouped {
+            HStack(spacing: 0) {
+                ForEach(musicChannels) { channel in
+                    HomeMusicPanel(
+                        channel: channel,
+                        radioState: radioState,
+                        activeRadioChannelID: activeRadioChannelID,
+                        activeExternalMusicService: activeExternalMusicService,
+                        externalMusicPlaybackState: externalMusicPlaybackState,
+                        isDimmed: isDimmed,
+                        dimmedIntensity: dimmedIntensity,
+                        renderedScale: 1,
+                        drawsSurface: false,
+                        onToggleRadio: onToggleRadio,
+                        onToggleExternalMusic: onToggleExternalMusic,
+                        onEndExternalMusic: onEndExternalMusic,
+                        onEditRadio: onEditRadio
+                    )
+                }
+            }
+            .background(
+                FlipPanelSurface(
+                    isDimmed: isDimmed,
+                    cornerRadius: InternetRadioPanelMetrics.cornerRadius,
+                    splitGap: 2
+                )
             )
+            .overlay {
+                Rectangle()
+                    .fill(.white.opacity(isDimmed ? 0.025 : 0.08))
+                    .frame(width: 1)
+            }
             .panelTransform(layout.radio, canvasSize: canvasSize)
         } else {
-            ForEach(Array(radioConfigurations.enumerated()), id: \.element.id) { index, configuration in
+            ForEach(Array(musicChannels.enumerated()), id: \.element.id) { index, channel in
                 let transform = index == 0 ? layout.radio : layout.secondaryRadio
-                InternetRadioPanel(
-                    configuration: configuration,
-                    state: activeRadioChannelID == configuration.id ? radioState : .idle,
+                HomeMusicPanel(
+                    channel: channel,
+                    radioState: radioState,
+                    activeRadioChannelID: activeRadioChannelID,
+                    activeExternalMusicService: activeExternalMusicService,
+                    externalMusicPlaybackState: externalMusicPlaybackState,
                     isDimmed: isDimmed,
                     dimmedIntensity: dimmedIntensity,
-                    showsEditBadge: false,
                     renderedScale: transform.scale * clockScale,
-                    action: { onToggleRadio(configuration.id) },
-                    editAction: { onEditRadio(configuration.id) }
+                    drawsSurface: true,
+                    onToggleRadio: onToggleRadio,
+                    onToggleExternalMusic: onToggleExternalMusic,
+                    onEndExternalMusic: onEndExternalMusic,
+                    onEditRadio: onEditRadio
                 )
                 .panelTransform(transform, canvasSize: canvasSize)
             }
+        }
+    }
+}
+
+private struct HomeMusicPanel: View {
+    let channel: HomeMusicChannel
+    let radioState: InternetRadioPlaybackState
+    let activeRadioChannelID: UUID?
+    let activeExternalMusicService: ExternalMusicService?
+    let externalMusicPlaybackState: ExternalMusicPlaybackState
+    let isDimmed: Bool
+    let dimmedIntensity: Double
+    let renderedScale: Double
+    let drawsSurface: Bool
+    let onToggleRadio: (UUID) -> Void
+    let onToggleExternalMusic: (ExternalMusicService) -> Void
+    let onEndExternalMusic: () -> Void
+    let onEditRadio: (UUID) -> Void
+
+    @ViewBuilder
+    var body: some View {
+        switch channel {
+        case let .radio(configuration):
+            InternetRadioPanel(
+                configuration: configuration,
+                state: activeRadioChannelID == configuration.id ? radioState : .idle,
+                isDimmed: isDimmed,
+                dimmedIntensity: dimmedIntensity,
+                showsEditBadge: false,
+                renderedScale: renderedScale,
+                action: { onToggleRadio(configuration.id) },
+                editAction: { onEditRadio(configuration.id) },
+                drawsSurface: drawsSurface
+            )
+        case let .external(service):
+            ExternalMusicPanel(
+                service: service,
+                isActive: activeExternalMusicService == service,
+                playbackState: externalMusicPlaybackState,
+                isDimmed: isDimmed,
+                dimmedIntensity: dimmedIntensity,
+                renderedScale: renderedScale,
+                drawsSurface: drawsSurface,
+                onToggle: { onToggleExternalMusic(service) },
+                onEnd: onEndExternalMusic
+            )
+        }
+    }
+}
+
+private struct ExternalMusicPanel: View {
+    let service: ExternalMusicService
+    let isActive: Bool
+    let playbackState: ExternalMusicPlaybackState
+    let isDimmed: Bool
+    let dimmedIntensity: Double
+    let renderedScale: Double
+    let drawsSurface: Bool
+    let onToggle: () -> Void
+    let onEnd: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: service.systemImage)
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(service.displayName)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                Text(statusText)
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(isDimmed ? 0.40 : 0.52))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 11)
+        .frame(width: InternetRadioPanelMetrics.width, height: InternetRadioPanelMetrics.height)
+        .background {
+            if drawsSurface {
+                FlipPanelSurface(
+                    isDimmed: isDimmed,
+                    cornerRadius: InternetRadioPanelMetrics.cornerRadius,
+                    splitGap: 2
+                )
+            }
+        }
+        .frame(
+            width: InternetRadioPanelMetrics.interactionSize(renderedScale: renderedScale).width,
+            height: InternetRadioPanelMetrics.interactionSize(renderedScale: renderedScale).height
+        )
+        .foregroundStyle(.white.opacity(isDimmed ? 0.46 : 0.78))
+        .opacity(isDimmed ? min(1, max(0, dimmedIntensity)) : 1)
+        .contentShape(Rectangle())
+        .highPriorityGesture(
+            LongPressGesture(minimumDuration: 0.8, maximumDistance: 12)
+                .exclusively(before: TapGesture())
+                .onEnded { result in
+                    switch result {
+                    case .first(true):
+                        onEnd()
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    case .second:
+                        onToggle()
+                    default:
+                        break
+                    }
+                }
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("\(service.displayName), 음악 듣기 모드")
+        .accessibilityHint("두 번 탭하면 S.tand 안에서 재생 또는 일시 정지하고, 길게 누르면 음악 듣기 모드를 끝냅니다")
+        .accessibilityAction { onToggle() }
+        .accessibilityAction(named: Text("음악 듣기 모드 끝내기"), onEnd)
+    }
+
+    private var statusText: String {
+        guard isActive else { return "대기 중" }
+        return switch playbackState {
+        case .loading: "준비 중"
+        case .playing: "재생 중"
+        case .paused: "일시 정지"
+        case .idle, .unavailable: "대기 중"
         }
     }
 }

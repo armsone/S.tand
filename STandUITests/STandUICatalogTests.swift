@@ -61,7 +61,7 @@ final class STandUICatalogTests: XCTestCase {
         capture("clock_font_options")
         app.navigationBars.buttons.element(boundBy: 0).tap()
 
-        scrollTo(text: "인터넷 라디오")
+        scrollTo(text: "음악")
         capture("settings_lower_sections")
 
         let firstChannelEditor = app.buttons["편안한 재즈 수정"]

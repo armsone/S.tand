@@ -315,6 +315,32 @@ struct StandScreenLayout: Codable, Equatable {
     )
 }
 
+struct HomeMusicChannelSelection: Codable, Equatable, Hashable, Identifiable {
+    enum Kind: String, Codable {
+        case appleMusic
+        case appleClassical
+        case internetRadio
+    }
+
+    let kind: Kind
+    let radioID: UUID?
+
+    var id: String {
+        switch kind {
+        case .appleMusic: "appleMusic"
+        case .appleClassical: "appleClassical"
+        case .internetRadio: "internetRadio:\(radioID?.uuidString ?? "missing")"
+        }
+    }
+
+    static let appleMusic = Self(kind: .appleMusic, radioID: nil)
+    static let appleClassical = Self(kind: .appleClassical, radioID: nil)
+
+    static func internetRadio(_ id: UUID) -> Self {
+        Self(kind: .internetRadio, radioID: id)
+    }
+}
+
 struct AppSettings: Codable, Equatable {
     static let maximumInternetRadioChannelCount = 2
     static let defaultClockScale = 1.0059052830861586
@@ -344,6 +370,7 @@ struct AppSettings: Codable, Equatable {
     private(set) var internetRadioChannels: [InternetRadioConfiguration] = []
     private(set) var selectedInternetRadioID: UUID?
     private(set) var secondaryInternetRadioID: UUID?
+    private(set) var homeMusicChannels: [HomeMusicChannelSelection] = []
 
     /// The selected channel kept as a compatibility surface for the original
     /// single-station UI. New channel-management code should use the collection
@@ -427,7 +454,8 @@ struct AppSettings: Codable, Equatable {
         internetRadio: InternetRadioConfiguration? = nil,
         internetRadioChannels: [InternetRadioConfiguration] = [],
         selectedInternetRadioID: UUID? = nil,
-        secondaryInternetRadioID: UUID? = nil
+        secondaryInternetRadioID: UUID? = nil,
+        homeMusicChannels: [HomeMusicChannelSelection] = []
     ) {
         self.lampIntensity = lampIntensity
         self.silhouetteIntensity = silhouetteIntensity
@@ -464,6 +492,10 @@ struct AppSettings: Codable, Equatable {
             primaryID: self.selectedInternetRadioID,
             channels: self.internetRadioChannels
         )
+        self.homeMusicChannels = Self.normalizedHomeMusicChannels(
+            homeMusicChannels,
+            radioChannels: self.internetRadioChannels
+        )
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -492,6 +524,7 @@ struct AppSettings: Codable, Equatable {
         case internetRadioChannels
         case selectedInternetRadioID
         case secondaryInternetRadioID
+        case homeMusicChannels
         case internetRadio
     }
 
@@ -590,6 +623,10 @@ struct AppSettings: Codable, Equatable {
             primaryID: selectedInternetRadioID,
             channels: internetRadioChannels
         )
+        homeMusicChannels = Self.normalizedHomeMusicChannels(
+            (try? container.decode([HomeMusicChannelSelection].self, forKey: .homeMusicChannels)) ?? [],
+            radioChannels: internetRadioChannels
+        )
     }
 
     func encode(to encoder: Encoder) throws {
@@ -622,6 +659,7 @@ struct AppSettings: Codable, Equatable {
         try container.encode(internetRadioChannels, forKey: .internetRadioChannels)
         try container.encodeIfPresent(selectedInternetRadioID, forKey: .selectedInternetRadioID)
         try container.encodeIfPresent(secondaryInternetRadioID, forKey: .secondaryInternetRadioID)
+        try container.encode(homeMusicChannels, forKey: .homeMusicChannels)
 
         // Keep the selected station in the former key so a downgraded build can
         // still open the user's current station. New builds read the array first.
@@ -643,6 +681,10 @@ struct AppSettings: Codable, Equatable {
         if select || selectedInternetRadioID == nil {
             selectedInternetRadioID = configuration.id
         }
+        homeMusicChannels = Self.normalizedHomeMusicChannels(
+            homeMusicChannels,
+            radioChannels: internetRadioChannels
+        )
     }
 
     @discardableResult
@@ -688,6 +730,10 @@ struct AppSettings: Codable, Equatable {
         }
         if secondaryInternetRadioID == id { secondaryInternetRadioID = nil }
         if secondaryInternetRadioID == selectedInternetRadioID { secondaryInternetRadioID = nil }
+        homeMusicChannels = Self.normalizedHomeMusicChannels(
+            homeMusicChannels,
+            radioChannels: internetRadioChannels
+        )
         return removed
     }
 
@@ -699,6 +745,23 @@ struct AppSettings: Codable, Equatable {
         let channel = internetRadioChannels.remove(at: sourceIndex)
         let boundedDestination = min(max(0, destinationIndex), internetRadioChannels.count)
         internetRadioChannels.insert(channel, at: boundedDestination)
+        return true
+    }
+
+    @discardableResult
+    mutating func assignHomeMusicChannel(
+        _ selection: HomeMusicChannelSelection,
+        to slot: Int
+    ) -> Bool {
+        guard homeMusicChannels.indices.contains(slot),
+              Self.isValidHomeMusicChannel(selection, radioChannels: internetRadioChannels)
+        else { return false }
+
+        if let otherSlot = homeMusicChannels.firstIndex(of: selection), otherSlot != slot {
+            homeMusicChannels.swapAt(slot, otherSlot)
+        } else {
+            homeMusicChannels[slot] = selection
+        }
         return true
     }
 
@@ -729,6 +792,42 @@ struct AppSettings: Codable, Equatable {
             primaryID: selectedInternetRadioID,
             channels: internetRadioChannels
         )
+        homeMusicChannels = Self.normalizedHomeMusicChannels(
+            homeMusicChannels,
+            radioChannels: internetRadioChannels
+        )
+    }
+
+    private static func normalizedHomeMusicChannels(
+        _ requested: [HomeMusicChannelSelection],
+        radioChannels: [InternetRadioConfiguration]
+    ) -> [HomeMusicChannelSelection] {
+        var result: [HomeMusicChannelSelection] = []
+        let candidates = requested + radioChannels.map {
+            HomeMusicChannelSelection.internetRadio($0.id)
+        } + [.appleMusic, .appleClassical]
+
+        for candidate in candidates where result.count < 2 {
+            guard isValidHomeMusicChannel(candidate, radioChannels: radioChannels),
+                  !result.contains(candidate)
+            else { continue }
+            result.append(candidate)
+        }
+        return result
+    }
+
+    private static func isValidHomeMusicChannel(
+        _ selection: HomeMusicChannelSelection,
+        radioChannels: [InternetRadioConfiguration]
+    ) -> Bool {
+        switch selection.kind {
+        case .appleMusic, .appleClassical:
+            true
+        case .internetRadio:
+            selection.radioID.map { id in
+                radioChannels.contains(where: { $0.id == id })
+            } ?? false
+        }
     }
 
     private static func resolvedSelection(

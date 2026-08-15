@@ -475,6 +475,35 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(settings.homeInternetRadios.map(\.id), [second.id, previewOnly.id])
     }
 
+    func testHomeMusicChannelsCanAssignAndSwapRadioAndAppleSources() throws {
+        let first = try InternetRadioConfiguration(
+            displayName: "첫 채널",
+            urlString: "https://radio.example.com/first"
+        )
+        let second = try InternetRadioConfiguration(
+            displayName: "둘째 채널",
+            urlString: "https://radio.example.com/second"
+        )
+        var settings = AppSettings(internetRadioChannels: [first, second])
+
+        XCTAssertEqual(
+            settings.homeMusicChannels,
+            [.internetRadio(first.id), .internetRadio(second.id)]
+        )
+        XCTAssertTrue(settings.assignHomeMusicChannel(.appleMusic, to: 0))
+        XCTAssertTrue(settings.assignHomeMusicChannel(.appleClassical, to: 1))
+        XCTAssertEqual(settings.homeMusicChannels, [.appleMusic, .appleClassical])
+
+        XCTAssertTrue(settings.assignHomeMusicChannel(.appleClassical, to: 0))
+        XCTAssertEqual(settings.homeMusicChannels, [.appleClassical, .appleMusic])
+
+        let decoded = try JSONDecoder().decode(
+            AppSettings.self,
+            from: JSONEncoder().encode(settings)
+        )
+        XCTAssertEqual(decoded.homeMusicChannels, [.appleClassical, .appleMusic])
+    }
+
     func testInternetRadioReconnectUsesCappedBackoff() {
         XCTAssertEqual(InternetRadioReconnectPolicy.delay(forAttempt: 1), 2)
         XCTAssertEqual(InternetRadioReconnectPolicy.delay(forAttempt: 2), 4)
@@ -631,6 +660,15 @@ final class AudioAnalysisTests: XCTestCase {
                 removedChannelID: inactive.id
             )
         )
+    }
+
+    func testExternalMusicServicesExposeOnlySupportedProviders() {
+        XCTAssertEqual(
+            ExternalMusicService.allCases,
+            [.appleMusic, .appleClassical]
+        )
+        XCTAssertEqual(ExternalMusicService.appleMusic.displayName, "Apple Music")
+        XCTAssertEqual(ExternalMusicService.appleClassical.displayName, "Apple Music Classical")
     }
 
     func testSharedImportReusesOnlyAnExactExistingStream() throws {
@@ -3514,7 +3552,7 @@ final class BoyisoProtocolTests: XCTestCase {
         XCTAssertEqual(BoyisoBranding.primaryName, "보이소")
         XCTAssertEqual(BoyisoBranding.descriptor, "BOISO · 보이는 소리")
         XCTAssertEqual(BoyisoBranding.representativeIconAccessibilityLabel, "보이소")
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String, "에스텐드")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String, "S.tand")
         XCTAssertEqual(BoyisoInvitation.scheme, "stand")
         XCTAssertEqual(BoyisoInvitation.host, "boyiso")
     }

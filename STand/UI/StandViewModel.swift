@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import MusicKit
 import SwiftUI
 import UIKit
 
@@ -398,6 +399,36 @@ enum InternetRadioPlaybackMutationPolicy {
     }
 }
 
+enum ExternalMusicService: String, CaseIterable, Identifiable {
+    case appleMusic
+    case appleClassical
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .appleMusic: "Apple Music"
+        case .appleClassical: "Apple Music Classical"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .appleMusic: "music.note"
+        case .appleClassical: "music.quarternote.3"
+        }
+    }
+
+}
+
+enum ExternalMusicPlaybackState: Equatable {
+    case idle
+    case loading
+    case playing
+    case paused
+    case unavailable
+}
+
 @MainActor
 final class StandViewModel: ObservableObject {
     @Published private(set) var isNightSessionActive = false
@@ -409,7 +440,11 @@ final class StandViewModel: ObservableObject {
     )
     @Published private(set) var batteryProtectionActive = false
     /// S.tand 화면 안에만 적용하는 조명 밝기입니다.
+    #if targetEnvironment(macCatalyst)
+    @Published private(set) var displayBrightness = 1.0
+    #else
     @Published private(set) var displayBrightness = Double(UIScreen.main.brightness)
+    #endif
     @Published private(set) var automaticDimmingPaused = false
     @Published private(set) var manualDimmingHoldActive = false
     @Published private(set) var environmentDisplayMode: EnvironmentDisplayMode = .stand
@@ -417,6 +452,10 @@ final class StandViewModel: ObservableObject {
     @Published private(set) var lastAmbientBrightnessReading: AmbientBrightnessReading?
     @Published private(set) var isFaceDown = false
     @Published private(set) var sharedInternetRadioDraft: InternetRadioConfiguration?
+    @Published private(set) var activeExternalMusicService: ExternalMusicService?
+    @Published private(set) var externalMusicPlaybackState: ExternalMusicPlaybackState = .idle
+    @Published private(set) var externalMusicTrackTitle: String?
+    @Published private(set) var externalMusicMessage: String?
     @Published var controlsVisible = true
 
     var experienceMode: StandExperienceMode {
@@ -457,9 +496,12 @@ final class StandViewModel: ObservableObject {
     private enum MonitoringSuspensionReason: Hashable {
         case recordingPlayback
         case internetRadio
+        case externalMusic
     }
 
     private var monitoringSuspensions: Set<MonitoringSuspensionReason> = []
+    // SystemMusicPlayer takes over the Music app's current queue without opening its UI.
+    private let appleMusicPlayer = SystemMusicPlayer.shared
     private var appIsActive = true
     private var isAdjustingBrightness = false
     private var activeRecordingSessionID: UUID?
@@ -592,6 +634,7 @@ final class StandViewModel: ObservableObject {
                 syncSleepCareMonitoring()
             }
 
+        #if !targetEnvironment(macCatalyst)
         screenBrightnessSubscription = NotificationCenter.default
             .publisher(for: UIScreen.brightnessDidChangeNotification)
             .receive(on: RunLoop.main)
@@ -611,6 +654,7 @@ final class StandViewModel: ObservableObject {
                     performTransition: true
                 )
             }
+        #endif
 
         startBatteryMonitoring()
     }
@@ -626,7 +670,7 @@ final class StandViewModel: ObservableObject {
         }
         batteryProtectionActive = false
         isNightSessionActive = true
-        displayBrightness = Double(UIScreen.main.brightness)
+        displayBrightness = platformDisplayBrightness
         var initialSettings = settings.value
         initialSettings.modePreference = .automatic
         initialSettings.lampIntensity = displayBrightness
@@ -652,6 +696,7 @@ final class StandViewModel: ObservableObject {
         guard isNightSessionActive else { return }
         isNightSessionActive = false
         stopInternetRadioPlayback()
+        endExternalMusicSession()
         audio.stop()
         motionMonitor.stop()
         postureMonitor.stop()
@@ -678,7 +723,7 @@ final class StandViewModel: ObservableObject {
         importSharedInternetRadioIfNeeded()
         manualDimmingHoldActive = false
         if settings.value.modePreference == .automatic {
-            displayBrightness = Double(UIScreen.main.brightness)
+            displayBrightness = platformDisplayBrightness
         } else {
             displayBrightness = SimplifiedBrightnessModePolicy.clamped(
                 settings.value.lampIntensity
@@ -944,6 +989,14 @@ final class StandViewModel: ObservableObject {
         startAmbientSamplingIfNeeded()
     }
 
+    private var platformDisplayBrightness: Double {
+        #if targetEnvironment(macCatalyst)
+        1
+        #else
+        Double(UIScreen.main.brightness)
+        #endif
+    }
+
     func toggleInternetRadioPlayback(channelID: UUID) {
         guard let configuration = settings.value.internetRadioChannel(id: channelID) else { return }
         if radio.state.isActive, radio.activeChannelID == channelID {
@@ -955,6 +1008,210 @@ final class StandViewModel: ObservableObject {
 
     func stopInternetRadioPlayback() {
         radio.stop()
+    }
+
+    func toggleExternalMusicPlayback(_ service: ExternalMusicService) {
+        switch service {
+        case .appleMusic, .appleClassical:
+            Task { await toggleAppleMusicPlayback(service) }
+        }
+    }
+
+    func assignHomeMusicChannel(_ selection: HomeMusicChannelSelection, to slot: Int) {
+        var value = settings.value
+        guard value.assignHomeMusicChannel(selection, to: slot) else { return }
+        settings.value = value
+    }
+
+    private func beginExternalMusicSession(_ service: ExternalMusicService) {
+        stopInternetRadioPlayback()
+        activeExternalMusicService = service
+        monitoringSuspensions.insert(.externalMusic)
+        audio.stop()
+    }
+
+    func endExternalMusicSession() {
+        appleMusicPlayer.stop()
+        activeExternalMusicService = nil
+        externalMusicPlaybackState = .idle
+        externalMusicTrackTitle = nil
+        externalMusicMessage = nil
+        monitoringSuspensions.remove(.externalMusic)
+        syncSleepCareMonitoring()
+    }
+
+    private func toggleAppleMusicPlayback(_ service: ExternalMusicService) async {
+        if activeExternalMusicService == service,
+           appleMusicPlayer.state.playbackStatus == .playing {
+            appleMusicPlayer.pause()
+            externalMusicPlaybackState = .paused
+            externalMusicMessage = "S.tand 안에서 일시 정지했습니다. 다시 누르면 이어서 재생합니다."
+            return
+        }
+
+        beginExternalMusicSession(service)
+        externalMusicPlaybackState = .loading
+        externalMusicMessage = "Apple Music을 준비하고 있습니다."
+
+        let authorization = await MusicAuthorization.request()
+        guard authorization == .authorized else {
+            failExternalMusic("Apple Music 접근을 허용해야 S.tand 안에서 재생할 수 있습니다.")
+            return
+        }
+
+        do {
+            if appleMusicPlayer.state.playbackStatus != .stopped,
+               let currentEntry = appleMusicPlayer.queue.currentEntry,
+               entryMatchesService(currentEntry, service: service) {
+                externalMusicTrackTitle = musicEntryTitle(currentEntry)
+                try await appleMusicPlayer.play()
+                externalMusicPlaybackState = .playing
+                externalMusicMessage = service == .appleClassical
+                    ? "재생 중이던 클래식 음악을 S.tand에서 이어서 재생합니다."
+                    : "재생 중이던 Apple Music 음악을 S.tand에서 이어서 재생합니다."
+                return
+            }
+
+            let librarySongs = await shuffledLibrarySongs(for: service)
+            if let firstLibrarySong = librarySongs.first {
+                appleMusicPlayer.queue = MusicKit.MusicPlayer.Queue(
+                    for: librarySongs,
+                    startingAt: firstLibrarySong
+                )
+                externalMusicTrackTitle = "\(firstLibrarySong.title) · \(firstLibrarySong.artistName)"
+                try await appleMusicPlayer.play()
+                externalMusicPlaybackState = .playing
+                externalMusicMessage = service == .appleClassical
+                    ? "보관함에서 클래식 음악을 임의로 골라 재생합니다."
+                    : "보관함에서 음악을 임의로 골라 재생합니다."
+                return
+            }
+
+            if let station = await randomRecommendedStation(for: service) {
+                appleMusicPlayer.queue = MusicKit.MusicPlayer.Queue(for: [station])
+                externalMusicTrackTitle = station.name
+                try await appleMusicPlayer.play()
+                externalMusicPlaybackState = .playing
+                externalMusicMessage = "Apple Music이 추천한 음악을 재생합니다."
+                return
+            }
+
+            let recommendedSongs = try await catalogRecommendations(for: service)
+            guard let firstSong = recommendedSongs.randomElement() else {
+                failExternalMusic("Apple Music 추천 음악을 찾지 못했습니다. 잠시 후 다시 시도해 주세요.")
+                return
+            }
+            appleMusicPlayer.queue = MusicKit.MusicPlayer.Queue(
+                for: recommendedSongs.shuffled(),
+                startingAt: firstSong
+            )
+            externalMusicTrackTitle = "\(firstSong.title) · \(firstSong.artistName)"
+            try await appleMusicPlayer.play()
+            externalMusicPlaybackState = .playing
+            externalMusicMessage = service == .appleClassical
+                ? "Apple Music의 클래식 추천 음악을 재생합니다."
+                : "Apple Music의 추천 음악을 재생합니다."
+        } catch {
+            failExternalMusic("Apple Music을 재생하지 못했습니다. 구독 상태와 네트워크를 확인해 주세요.")
+        }
+    }
+
+    private func musicEntryTitle(_ entry: MusicKit.MusicPlayer.Queue.Entry) -> String {
+        guard let subtitle = entry.subtitle, !subtitle.isEmpty else { return entry.title }
+        return "\(entry.title) · \(subtitle)"
+    }
+
+    private func entryMatchesService(
+        _ entry: MusicKit.MusicPlayer.Queue.Entry,
+        service: ExternalMusicService
+    ) -> Bool {
+        let isClassical: Bool
+        switch entry.item {
+        case .some(.song(let song)):
+            isClassical = isClassicalSong(song)
+        case .some(.musicVideo(let video)):
+            isClassical = containsClassicalKeyword(
+                video.genreNames + [video.title, video.albumTitle ?? "", video.artistName]
+            )
+        case .none:
+            isClassical = containsClassicalKeyword([entry.title, entry.subtitle ?? ""])
+        @unknown default:
+            isClassical = containsClassicalKeyword([entry.title, entry.subtitle ?? ""])
+        }
+        return service == .appleClassical ? isClassical : !isClassical
+    }
+
+    private func shuffledLibrarySongs(for service: ExternalMusicService) async -> [Song] {
+        do {
+            var request = MusicLibraryRequest<Song>()
+            request.limit = 250
+            let songs = Array(try await request.response().items)
+            let candidates = service == .appleClassical
+                ? songs.filter(isClassicalSong)
+                : songs.filter { !isClassicalSong($0) }
+            return candidates.shuffled()
+        } catch {
+            return []
+        }
+    }
+
+    private func randomRecommendedStation(for service: ExternalMusicService) async -> Station? {
+        do {
+            var request = MusicPersonalRecommendationsRequest()
+            request.limit = 20
+            let recommendations = try await request.response().recommendations
+            let stations = recommendations.flatMap { recommendation in
+                Array(recommendation.stations).filter { station in
+                    let isClassical = containsClassicalKeyword([
+                        recommendation.title ?? "",
+                        recommendation.reason ?? "",
+                        station.name
+                    ])
+                    return service == .appleClassical ? isClassical : !isClassical
+                }
+            }
+            return stations.randomElement()
+        } catch {
+            return nil
+        }
+    }
+
+    private func catalogRecommendations(for service: ExternalMusicService) async throws -> [Song] {
+        let term = service == .appleClassical ? "Classical Essentials" : "Apple Music Today’s Hits"
+        var request = MusicCatalogSearchRequest(term: term, types: [Song.self])
+        request.limit = 50
+        let songs = Array(try await request.response().songs)
+        return service == .appleClassical
+            ? songs.filter(isClassicalSong)
+            : songs.filter { !isClassicalSong($0) }
+    }
+
+    private func isClassicalSong(_ song: Song) -> Bool {
+        containsClassicalKeyword(
+            song.genreNames + [song.title, song.albumTitle ?? "", song.composerName ?? ""]
+        )
+    }
+
+    private func containsClassicalKeyword(_ values: [String]) -> Bool {
+        values.contains { value in
+            let normalized = value.folding(
+                options: [.caseInsensitive, .diacriticInsensitive],
+                locale: .current
+            )
+            return normalized.contains("classical")
+                || normalized.contains("클래식")
+                || normalized.contains("클라식")
+        }
+    }
+
+    private func failExternalMusic(_ message: String) {
+        appleMusicPlayer.stop()
+        activeExternalMusicService = nil
+        externalMusicPlaybackState = .unavailable
+        externalMusicTrackTitle = nil
+        externalMusicMessage = message
+        monitoringSuspensions.remove(.externalMusic)
+        syncSleepCareMonitoring()
     }
 
     func addInternetRadioChannel(
@@ -1096,6 +1353,12 @@ final class StandViewModel: ObservableObject {
     }
 
     private func startInternetRadioPlayback(_ configuration: InternetRadioConfiguration) {
+        appleMusicPlayer.stop()
+        activeExternalMusicService = nil
+        externalMusicPlaybackState = .idle
+        externalMusicTrackTitle = nil
+        externalMusicMessage = nil
+        monitoringSuspensions.remove(.externalMusic)
         monitoringSuspensions.insert(.internetRadio)
         audio.stop()
         radio.switchChannel(to: configuration)
@@ -1552,6 +1815,7 @@ final class StandViewModel: ObservableObject {
         let wasNightSessionActive = isNightSessionActive
         isNightSessionActive = false
         stopInternetRadioPlayback()
+        endExternalMusicSession()
         guard wasNightSessionActive else { return }
         audio.stop()
         motionMonitor.stop()

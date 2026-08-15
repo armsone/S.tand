@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>에스텐드</string>
+	<string>S.tand</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -24,7 +24,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
+	<string>S.tand</string>
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
@@ -53,6 +53,8 @@
 	<string>취침 중 기기 움직임을 감지해 화면 조명을 다시 켜려면 동작 센서 접근이 필요합니다.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>현재 날씨를 표시하기 위해 앱을 사용하는 동안 위치를 요청하며, 가능한 최소 정확도로 사용합니다.</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>S.tand 화면 안에서 사용자의 Apple Music과 클래식 음악을 재생하기 위해 접근합니다.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

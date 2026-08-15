@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A10000000000000000000001"
-               BuildableName = "STand.app"
+               BuildableName = "S.tand.app"
                BlueprintName = "STand"
                ReferencedContainer = "container:STand.xcodeproj">
             </BuildableReference>
@@ -67,7 +67,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A10000000000000000000001"
-            BuildableName = "STand.app"
+            BuildableName = "S.tand.app"
             BlueprintName = "STand"
             ReferencedContainer = "container:STand.xcodeproj">
          </BuildableReference>
@@ -83,7 +83,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A10000000000000000000001"
-            BuildableName = "STand.app"
+            BuildableName = "S.tand.app"
             BlueprintName = "STand"
             ReferencedContainer = "container:STand.xcodeproj">
          </BuildableReference>
