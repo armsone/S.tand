@@ -1,4 +1,5 @@
 import AudioToolbox
+import MediaPlayer
 import SwiftUI
 import UIKit
 
@@ -88,6 +89,45 @@ private enum PresentedSheet: String, Identifiable {
 private enum ScreenAdjustmentDragState {
     case brightness(startingValue: Double)
     case volume(startingValue: Double)
+}
+
+@MainActor
+private final class SystemVolumeController: ObservableObject {
+    @Published private(set) var level: Double
+
+    fileprivate let volumeView = MPVolumeView(frame: .zero)
+
+    init() {
+        level = Double(AVAudioSession.sharedInstance().outputVolume)
+        volumeView.showsRouteButton = false
+        volumeView.showsVolumeSlider = true
+    }
+
+    func refresh() {
+        level = VolumeAdjustmentPolicy.clamped(
+            Double(AVAudioSession.sharedInstance().outputVolume)
+        )
+    }
+
+    func update(_ requestedLevel: Double) {
+        let adjustedLevel = VolumeAdjustmentPolicy.clamped(requestedLevel)
+        level = adjustedLevel
+        guard let slider = volumeView.subviews.compactMap({ $0 as? UISlider }).first else {
+            return
+        }
+        slider.setValue(Float(adjustedLevel), animated: false)
+        slider.sendActions(for: .valueChanged)
+    }
+}
+
+private struct SystemVolumeBridge: UIViewRepresentable {
+    let controller: SystemVolumeController
+
+    func makeUIView(context: Context) -> MPVolumeView {
+        controller.volumeView
+    }
+
+    func updateUIView(_ uiView: MPVolumeView, context: Context) {}
 }
 
 enum HomeEditorResetPolicy {
@@ -280,6 +320,7 @@ struct RootView: View {
     @ObservedObject private var weather: WeatherService
     @ObservedObject private var boyiso: BoyisoConnectivityService
     @ObservedObject private var firstLaunchPermissions: FirstLaunchPermissionCoordinator
+    @StateObject private var systemVolume = SystemVolumeController()
     @Environment(\.scenePhase) private var scenePhase
     @State private var presentedSheet: PresentedSheet?
     @State private var didInitialize = false
@@ -321,6 +362,12 @@ struct RootView: View {
             let isPortrait = proxy.size.height > proxy.size.width
 
             ZStack {
+                SystemVolumeBridge(controller: systemVolume)
+                    .frame(width: 1, height: 1)
+                    .opacity(0.001)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+
                 LampBackground(
                     intensity: model.lampIntensity,
                     theme: settings.value.displayTheme
@@ -784,12 +831,12 @@ struct RootView: View {
                     )
                     model.updateBrightnessLevel(adjustedValue)
                 case .volume(let startingValue):
-                    let adjustedValue = RadioVolumePolicy.level(
+                    let adjustedValue = VolumeAdjustmentPolicy.level(
                         startingAt: startingValue,
                         horizontalTranslation: value.translation.width,
                         viewportWidth: currentCanvasSize.width
                     )
-                    radio.updateVolume(adjustedValue)
+                    systemVolume.update(adjustedValue)
                 }
             }
             .onEnded { _ in
@@ -808,7 +855,8 @@ struct RootView: View {
             model.beginBrightnessAdjustment()
             return .brightness(startingValue: model.displayBrightness)
         }
-        return .volume(startingValue: radio.volume)
+        systemVolume.refresh()
+        return .volume(startingValue: systemVolume.level)
     }
 
     @ViewBuilder
@@ -817,7 +865,7 @@ struct RootView: View {
         case .brightness:
             AppBrightnessHUD(level: model.displayBrightness)
         case .volume:
-            RadioVolumeHUD(level: radio.volume)
+            SystemVolumeHUD(level: systemVolume.level)
         }
     }
 
@@ -1275,7 +1323,7 @@ private struct AppBrightnessHUD: View {
     }
 }
 
-private struct RadioVolumeHUD: View {
+private struct SystemVolumeHUD: View {
     let level: Double
 
     var body: some View {
@@ -1283,7 +1331,7 @@ private struct RadioVolumeHUD: View {
             Image(systemName: level == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
                 .font(.system(size: 16, weight: .semibold))
 
-            Text("라디오 볼륨")
+            Text("시스템 볼륨")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
 
             Text("\(percent)%")
@@ -1300,7 +1348,7 @@ private struct RadioVolumeHUD: View {
     }
 
     private var percent: Int {
-        Int((RadioVolumePolicy.clamped(level) * 100).rounded())
+        Int((VolumeAdjustmentPolicy.clamped(level) * 100).rounded())
     }
 }
 
@@ -3314,16 +3362,7 @@ enum PanelEditingPolicy {
         canvasSize: CGSize,
         insets: EdgeInsets
     ) -> CGPoint {
-        let halfWidth = panelSize.width / 2
-        let halfHeight = panelSize.height / 2
-        let minimumX = insets.leading + halfWidth
-        let maximumX = max(minimumX, canvasSize.width - insets.trailing - halfWidth)
-        let minimumY = insets.top + halfHeight
-        let maximumY = max(minimumY, canvasSize.height - insets.bottom - halfHeight)
-        return CGPoint(
-            x: min(maximumX, max(minimumX, proposed.x)),
-            y: min(maximumY, max(minimumY, proposed.y))
-        )
+        proposed
     }
 
     static func clampedTransform(

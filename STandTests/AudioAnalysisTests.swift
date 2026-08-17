@@ -515,10 +515,10 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertFalse(InternetRadioReconnectPolicy.shouldRetry(attempt: 6))
     }
 
-    func testHorizontalDragCoversFullRadioVolumeRangeAndClamps() {
-        XCTAssertEqual(RadioVolumePolicy.horizontalDragTravelRatio, 0.5)
+    func testHorizontalDragCoversFullSystemVolumeRangeAndClamps() {
+        XCTAssertEqual(VolumeAdjustmentPolicy.horizontalDragTravelRatio, 0.5)
         XCTAssertEqual(
-            RadioVolumePolicy.level(
+            VolumeAdjustmentPolicy.level(
                 startingAt: 0.5,
                 horizontalTranslation: 100,
                 viewportWidth: 400
@@ -526,7 +526,7 @@ final class AudioAnalysisTests: XCTestCase {
             1
         )
         XCTAssertEqual(
-            RadioVolumePolicy.level(
+            VolumeAdjustmentPolicy.level(
                 startingAt: 0.5,
                 horizontalTranslation: -100,
                 viewportWidth: 400
@@ -534,7 +534,7 @@ final class AudioAnalysisTests: XCTestCase {
             0
         )
         XCTAssertEqual(
-            RadioVolumePolicy.level(
+            VolumeAdjustmentPolicy.level(
                 startingAt: 0.8,
                 horizontalTranslation: 1_000,
                 viewportWidth: 400
@@ -542,7 +542,7 @@ final class AudioAnalysisTests: XCTestCase {
             1
         )
         XCTAssertEqual(
-            RadioVolumePolicy.level(
+            VolumeAdjustmentPolicy.level(
                 startingAt: 0.2,
                 horizontalTranslation: -1_000,
                 viewportWidth: 400
@@ -1412,7 +1412,7 @@ final class AudioAnalysisTests: XCTestCase {
         }
     }
 
-    func testEditablePanelCenterStaysInsideProtectedControls() {
+    func testEditablePanelCenterIsNotRestrictedByProtectedControls() {
         let center = PanelEditingPolicy.clampedCenter(
             CGPoint(x: 160, y: 20),
             panelSize: CGSize(width: 100, height: 80),
@@ -1421,7 +1421,7 @@ final class AudioAnalysisTests: XCTestCase {
         )
 
         XCTAssertEqual(center.x, 160)
-        XCTAssertEqual(center.y, 140)
+        XCTAssertEqual(center.y, 20)
 
         let bottomRight = PanelEditingPolicy.clampedCenter(
             CGPoint(x: 400, y: 800),
@@ -1429,8 +1429,8 @@ final class AudioAnalysisTests: XCTestCase {
             canvasSize: CGSize(width: 320, height: 700),
             insets: EdgeInsets(top: 100, leading: 20, bottom: 120, trailing: 20)
         )
-        XCTAssertEqual(bottomRight.x, 250)
-        XCTAssertEqual(bottomRight.y, 540)
+        XCTAssertEqual(bottomRight.x, 400)
+        XCTAssertEqual(bottomRight.y, 800)
     }
 
     func testEditorBoundaryGuidesMatchCurrentPortraitControlRows() {

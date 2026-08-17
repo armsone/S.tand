@@ -57,7 +57,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 enum UICatalogLaunch {
     #if DEBUG
     static let fixtureID = "ui_catalog_v2"
-    static let fixedDate: Date? = Date(timeIntervalSince1970: 1_786_747_325)
+    private static let catalogDate = Date(timeIntervalSince1970: 1_786_747_325)
+
+    static var fixedDate: Date? {
+        isEnabled ? catalogDate : nil
+    }
 
     static var isEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains("--ui-catalog")

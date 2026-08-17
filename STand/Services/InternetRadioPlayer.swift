@@ -32,7 +32,7 @@ enum InternetRadioReconnectPolicy {
     }
 }
 
-enum RadioVolumePolicy {
+enum VolumeAdjustmentPolicy {
     static let horizontalDragTravelRatio = 0.5
 
     static func clamped(_ level: Double) -> Double {
@@ -128,7 +128,7 @@ final class InternetRadioPlayer: ObservableObject {
     }
 
     func updateVolume(_ level: Double) {
-        volume = RadioVolumePolicy.clamped(level)
+        volume = VolumeAdjustmentPolicy.clamped(level)
         player?.volume = Float(volume)
     }
 
