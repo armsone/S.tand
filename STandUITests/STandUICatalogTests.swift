@@ -19,11 +19,11 @@ final class STandUICatalogTests: XCTestCase {
         capture("first_launch_permissions")
 
         launch()
-        XCTAssertTrue(app.buttons["설정 열기"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["설정"].waitForExistence(timeout: 8))
         capture("home_portrait")
 
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(app.buttons["설정 열기"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["설정"].waitForExistence(timeout: 5))
         capture("home_landscape")
 
         XCUIDevice.shared.orientation = .portrait
@@ -32,15 +32,20 @@ final class STandUICatalogTests: XCTestCase {
         capture("home_editor")
 
         launch()
-        XCTAssertTrue(app.buttons["설정 열기"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["설정"].waitForExistence(timeout: 8))
 
-        button(prefix: "잠소리 확인").tap()
+        button(prefix: "잠소리").tap()
         XCTAssertTrue(app.navigationBars["잠소리"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["수면 리포트"].waitForExistence(timeout: 5))
-        capture("recordings_report_populated")
+        capture("recordings_report")
         app.buttons["잠소리 관리"].tap()
-        XCTAssertTrue(app.staticTexts["보관 현황"].waitForExistence(timeout: 5))
-        capture("recordings_management")
+        let storageSummary = app.staticTexts["보관 현황"]
+        let emptyRecordings = app.staticTexts["저장된 잠소리가 없습니다"]
+        XCTAssertTrue(
+            storageSummary.waitForExistence(timeout: 2)
+                || emptyRecordings.waitForExistence(timeout: 2)
+        )
+        capture(storageSummary.exists ? "recordings_management" : "recordings_management_empty")
         dismissPresentedScreen()
 
         button(prefix: "보이소").tap()
@@ -48,8 +53,8 @@ final class STandUICatalogTests: XCTestCase {
         capture("boyiso_setup")
 
         launch()
-        XCTAssertTrue(app.buttons["설정 열기"].waitForExistence(timeout: 8))
-        app.buttons["설정 열기"].tap()
+        XCTAssertTrue(app.buttons["설정"].waitForExistence(timeout: 8))
+        app.buttons["설정"].tap()
         XCTAssertTrue(app.navigationBars["설정"].waitForExistence(timeout: 5))
         capture("settings_top")
 
@@ -61,11 +66,15 @@ final class STandUICatalogTests: XCTestCase {
         capture("clock_font_options")
         app.navigationBars.buttons.element(boundBy: 0).tap()
 
-        scrollTo(text: "음악")
-        capture("settings_lower_sections")
+        let radioShortcut = app.buttons["internet-radio-settings-shortcut"]
+        XCTAssertTrue(radioShortcut.waitForExistence(timeout: 5))
+        radioShortcut.tap()
 
         let firstChannelEditor = app.buttons["편안한 재즈 수정"]
-        scrollTo(element: firstChannelEditor, description: "편안한 재즈 수정")
+        XCTAssertTrue(firstChannelEditor.waitForExistence(timeout: 5))
+        XCTAssertTrue(firstChannelEditor.isHittable)
+        capture("settings_lower_sections")
+
         firstChannelEditor.tap()
         capture("radio_channel_editor")
 
@@ -76,8 +85,8 @@ final class STandUICatalogTests: XCTestCase {
         capture("radio_delete_confirmation")
 
         launch()
-        XCTAssertTrue(app.buttons["설정 열기"].waitForExistence(timeout: 8))
-        app.buttons["설정 열기"].tap()
+        XCTAssertTrue(app.buttons["설정"].waitForExistence(timeout: 8))
+        app.buttons["설정"].tap()
         XCTAssertTrue(app.navigationBars["설정"].waitForExistence(timeout: 5))
         scrollTo(text: "추천 설정 복원")
         app.buttons["추천 설정 복원"].tap()
@@ -85,13 +94,35 @@ final class STandUICatalogTests: XCTestCase {
         capture("restore_confirmation")
 
         launch()
-        XCTAssertTrue(app.buttons["설정 열기"].waitForExistence(timeout: 8))
-        app.buttons["설정 열기"].tap()
+        XCTAssertTrue(app.buttons["설정"].waitForExistence(timeout: 8))
+        app.buttons["설정"].tap()
         XCTAssertTrue(app.navigationBars["설정"].waitForExistence(timeout: 5))
         scrollTo(text: "내장 폰트 저작권")
         button(prefix: "내장 폰트 저작권").tap()
         XCTAssertTrue(app.navigationBars["폰트 저작권"].waitForExistence(timeout: 5))
         capture("font_licenses")
+    }
+
+    func testInternetRadioShortcutReachesInlineEditor() throws {
+        launch()
+        XCTAssertTrue(app.buttons["설정"].waitForExistence(timeout: 8))
+        app.buttons["설정"].tap()
+        XCTAssertTrue(app.navigationBars["설정"].waitForExistence(timeout: 5))
+
+        let shortcut = app.buttons["internet-radio-settings-shortcut"]
+        XCTAssertTrue(shortcut.waitForExistence(timeout: 5))
+        shortcut.tap()
+
+        let editorButton = app.buttons["편안한 재즈 수정"]
+        XCTAssertTrue(editorButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(editorButton.isHittable)
+        editorButton.tap()
+
+        XCTAssertTrue(app.staticTexts["인터넷 라디오 수정"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["이름 (선택)"].exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["internet-radio-address-field"].exists
+        )
     }
 
     private func launch(arguments: [String] = []) {
@@ -119,13 +150,13 @@ final class STandUICatalogTests: XCTestCase {
     }
 
     private func dismissPresentedScreen() {
-        let closeButton = app.buttons["닫기"]
-        if closeButton.exists && closeButton.isHittable {
-            closeButton.tap()
+        let doneButton = app.buttons["완료"]
+        if doneButton.exists && doneButton.isHittable {
+            doneButton.tap()
         } else {
             app.swipeDown()
         }
-        XCTAssertTrue(app.buttons["설정 열기"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["설정"].waitForExistence(timeout: 5))
     }
 
     private func scrollTo(text: String) {

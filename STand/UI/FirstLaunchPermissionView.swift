@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreLocation
 import SwiftUI
+import UIKit
 
 struct FirstLaunchPermissionPromptSchedule: Equatable {
     var hasShownPrompt: Bool
@@ -61,6 +62,8 @@ final class FirstLaunchPermissionCoordinator: NSObject, ObservableObject {
     private let defaults: UserDefaults
     private let locationManager = CLLocationManager()
     private var locationContinuation: CheckedContinuation<Void, Never>?
+    private var locationAuthorizationTimeoutTask: Task<Void, Never>?
+    private var locationForegroundCheckTask: Task<Void, Never>?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -164,10 +167,38 @@ final class FirstLaunchPermissionCoordinator: NSObject, ObservableObject {
 
     private func requestLocationIfNeeded() async {
         guard locationManager.authorizationStatus == .notDetermined else { return }
+        guard CLLocationManager.locationServicesEnabled() else { return }
         await withCheckedContinuation { continuation in
             locationContinuation = continuation
+            locationAuthorizationTimeoutTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(8))
+                guard !Task.isCancelled else { return }
+                self?.finishLocationAuthorizationRequest()
+            }
+            locationForegroundCheckTask = Task { @MainActor [weak self] in
+                for await _ in NotificationCenter.default.notifications(
+                    named: UIApplication.didBecomeActiveNotification
+                ) {
+                    guard let self, self.locationContinuation != nil else { return }
+                    guard self.locationManager.authorizationStatus != .notDetermined else {
+                        continue
+                    }
+                    self.finishLocationAuthorizationRequest()
+                    return
+                }
+            }
             locationManager.requestWhenInUseAuthorization()
         }
+    }
+
+    private func finishLocationAuthorizationRequest() {
+        locationAuthorizationTimeoutTask?.cancel()
+        locationAuthorizationTimeoutTask = nil
+        locationForegroundCheckTask?.cancel()
+        locationForegroundCheckTask = nil
+        guard let continuation = locationContinuation else { return }
+        locationContinuation = nil
+        continuation.resume()
     }
 }
 
@@ -175,9 +206,16 @@ extension FirstLaunchPermissionCoordinator: CLLocationManagerDelegate {
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         guard manager.authorizationStatus != .notDetermined else { return }
         Task { @MainActor [weak self] in
-            guard let self, let continuation = locationContinuation else { return }
-            locationContinuation = nil
-            continuation.resume()
+            self?.finishLocationAuthorizationRequest()
+        }
+    }
+
+    nonisolated func locationManager(
+        _ manager: CLLocationManager,
+        didFailWithError error: Error
+    ) {
+        Task { @MainActor [weak self] in
+            self?.finishLocationAuthorizationRequest()
         }
     }
 }
@@ -206,7 +244,7 @@ struct FirstLaunchPermissionView: View {
                             .font(.title2.weight(.bold))
                         Text("S.tand가 필요한 이유를 먼저 알려드릴게요.")
                             .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.60))
+                            .foregroundStyle(.white.opacity(0.80))
                             .multilineTextAlignment(.center)
                     }
 
@@ -230,7 +268,7 @@ struct FirstLaunchPermissionView: View {
 
                     Text("허용하지 않아도 앱은 시작됩니다. 허용한 기능만 작동합니다.")
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.58))
+                        .foregroundStyle(.white.opacity(0.78))
                         .multilineTextAlignment(.center)
 
                     Button {
@@ -276,7 +314,7 @@ struct FirstLaunchPermissionView: View {
                 Text(title).font(.subheadline.weight(.bold))
                 Text(detail)
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.72))
+                    .foregroundStyle(.white.opacity(0.86))
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)

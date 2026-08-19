@@ -14,10 +14,25 @@ private enum RecordingsPage: String, CaseIterable, Identifiable {
     }
 }
 
+enum RecordingSwipeDeletePolicy {
+    static let deleteThreshold: CGFloat = 56
+    static let maximumReveal: CGFloat = 112
+
+    static func isDeleteGesture(
+        translation: CGSize,
+        predictedEndTranslation: CGSize
+    ) -> Bool {
+        let horizontalDistance = min(translation.width, predictedEndTranslation.width)
+        return horizontalDistance <= -deleteThreshold
+            && abs(translation.width) > abs(translation.height)
+    }
+}
+
 struct RecordingsView: View {
     @ObservedObject var library: RecordingLibrary
     let playbackDisabled: Bool
     let theme: StandDisplayTheme
+    private let onClose: (() -> Void)?
 
     @StateObject private var player = RecordingPlayer()
     @Environment(\.dismiss) private var dismiss
@@ -48,11 +63,13 @@ struct RecordingsView: View {
     init(
         library: RecordingLibrary,
         playbackDisabled: Bool,
-        theme: StandDisplayTheme = .color
+        theme: StandDisplayTheme = .color,
+        onClose: (() -> Void)? = nil
     ) {
         self.library = library
         self.playbackDisabled = playbackDisabled
         self.theme = theme
+        self.onClose = onClose
     }
 
     var body: some View {
@@ -104,8 +121,15 @@ struct RecordingsView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("닫기") { dismiss() }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("완료") {
+                        if let onClose {
+                            onClose()
+                        } else {
+                            dismiss()
+                        }
+                    }
+                        .fontWeight(.semibold)
                         .foregroundStyle(accent)
                 }
                 if selectedPage == .sounds, !library.clips.isEmpty {
@@ -196,7 +220,7 @@ struct RecordingsView: View {
             ) {
                 if let clip = pendingClipDeletion {
                     Button("녹음 삭제", role: .destructive) {
-                        deleteClip(clip)
+                        _ = deleteClip(clip)
                     }
                 }
                 Button("취소", role: .cancel) { pendingClipDeletion = nil }
@@ -565,30 +589,42 @@ struct RecordingsView: View {
 
     @ViewBuilder
     private func recordingRow(_ clip: RecordingClip) -> some View {
-        RecordingRow(
-            clip: clip,
-            isActive: player.playingURL == clip.url,
-            isPlaying: player.playingURL == clip.url && player.isPlaying,
-            playbackDisabled: playbackDisabled,
-            mutationDisabled: isMerging,
-            isSelected: selectedClipURLs.contains(clip.url),
-            accent: accent,
-            toggleSelection: { toggleSelection(of: clip) },
-            play: { toggleManualPlayback(clip) },
-            delete: {
-                pendingClipDeletion = clip
-            }
-        )
+        SwipeToDeleteRecordingRow(
+            isEnabled: !isMerging,
+            delete: { deleteClip(clip) }
+        ) {
+            RecordingRow(
+                clip: clip,
+                isActive: player.playingURL == clip.url,
+                isPlaying: player.playingURL == clip.url && player.isPlaying,
+                playbackDisabled: playbackDisabled,
+                mutationDisabled: isMerging,
+                isSelected: selectedClipURLs.contains(clip.url),
+                accent: accent,
+                toggleSelection: { toggleSelection(of: clip) },
+                play: { toggleManualPlayback(clip) },
+                delete: {
+                    pendingClipDeletion = clip
+                }
+            )
+        }
     }
 
-    private func deleteClip(_ clip: RecordingClip) {
+    @discardableResult
+    private func deleteClip(_ clip: RecordingClip) -> Bool {
         if player.playingURL == clip.url { player.stop() }
         pendingClipDeletion = nil
         do {
             try library.delete(clip)
+            playbackQueue.removeAll { $0.url == clip.url }
+            playbackQueueIndex = playbackQueue.isEmpty
+                ? 0
+                : min(playbackQueueIndex, playbackQueue.count - 1)
             selectedClipURLs.remove(clip.url)
+            return true
         } catch {
             mergeErrorMessage = error.localizedDescription
+            return false
         }
     }
 
@@ -1222,6 +1258,77 @@ private struct StartleTimelineMarker: View {
             .frame(width: markerWidth, height: 2)
             .shadow(color: accent.opacity(0.75), radius: 2)
             .position(x: center, y: 1)
+    }
+}
+
+private struct SwipeToDeleteRecordingRow<Content: View>: View {
+    let isEnabled: Bool
+    let delete: () -> Bool
+    @ViewBuilder let content: () -> Content
+
+    @State private var horizontalOffset: CGFloat = 0
+    @State private var isDeleting = false
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .fill(.red.opacity(0.78))
+                .overlay(alignment: .trailing) {
+                    Image(systemName: "trash.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .padding(.trailing, 25)
+                }
+
+            content()
+                .offset(x: horizontalOffset)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .contentShape(Rectangle())
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 14)
+                .onChanged { value in
+                    guard isEnabled, !isDeleting,
+                          value.translation.width < 0,
+                          abs(value.translation.width) > abs(value.translation.height) else { return }
+                    horizontalOffset = max(
+                        -RecordingSwipeDeletePolicy.maximumReveal,
+                        value.translation.width
+                    )
+                }
+                .onEnded { value in
+                    guard isEnabled, !isDeleting else {
+                        horizontalOffset = 0
+                        return
+                    }
+                    let isLeftSwipe = RecordingSwipeDeletePolicy.isDeleteGesture(
+                        translation: value.translation,
+                        predictedEndTranslation: value.predictedEndTranslation
+                    )
+                    if isLeftSwipe {
+                        isDeleting = true
+                        if !delete() {
+                            isDeleting = false
+                            withAnimation(.snappy(duration: 0.2)) {
+                                horizontalOffset = 0
+                            }
+                        }
+                    } else {
+                        withAnimation(.snappy(duration: 0.2)) {
+                            horizontalOffset = 0
+                        }
+                    }
+                },
+            including: .all
+        )
+        .accessibilityAction(named: "바로 삭제") {
+            guard isEnabled, !isDeleting else { return }
+            isDeleting = true
+            if !delete() {
+                isDeleting = false
+                horizontalOffset = 0
+            }
+        }
     }
 }
 

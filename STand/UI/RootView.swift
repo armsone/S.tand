@@ -2,6 +2,7 @@ import AudioToolbox
 import MediaPlayer
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct STandBrandIcon: View {
     let size: CGFloat
@@ -23,6 +24,36 @@ struct STandBrandIcon: View {
 enum DatePanelMetrics {
     static func width(isPortrait: Bool) -> CGFloat {
         isPortrait ? 200 : 240
+    }
+}
+
+enum MusicChannelStripLayoutPolicy {
+    static let spacing: CGFloat = 8
+    static let sideInset: CGFloat = 12
+
+    static func cardWidth(viewportWidth: CGFloat) -> CGFloat {
+        viewportWidth < 700 ? max(148, (viewportWidth - 46) / 2) : 168
+    }
+
+    static func contentWidth(cardCount: Int, cardWidth: CGFloat) -> CGFloat {
+        guard cardCount > 0 else { return 0 }
+        return CGFloat(cardCount) * cardWidth + CGFloat(cardCount - 1) * spacing
+    }
+
+    static func maximumScroll(
+        viewportWidth: CGFloat,
+        cardCount: Int,
+        cardWidth: CGFloat
+    ) -> CGFloat {
+        max(
+            0,
+            contentWidth(cardCount: cardCount, cardWidth: cardWidth)
+                - max(0, viewportWidth - sideInset * 2)
+        )
+    }
+
+    static func clampedOffset(_ offset: CGFloat, maximumScroll: CGFloat) -> CGFloat {
+        min(0, max(-maximumScroll, offset))
     }
 }
 
@@ -89,37 +120,63 @@ private enum PresentedSheet: String, Identifiable {
 private enum ScreenAdjustmentDragState {
     case brightness(startingValue: Double)
     case volume(startingValue: Double)
+    case ignored
 }
 
 @MainActor
 private final class SystemVolumeController: ObservableObject {
     @Published private(set) var level: Double
 
+    #if !targetEnvironment(macCatalyst)
     fileprivate let volumeView = MPVolumeView(frame: .zero)
+    #endif
 
     init() {
+        #if targetEnvironment(macCatalyst)
+        // Catalyst는 iOS의 MPVolumeView로 Mac 시스템 볼륨을 안전하게 바꿀 수
+        // 없으므로 가짜 시작값을 만들지 않고 전역 가로 볼륨 제스처를 사용하지 않는다.
+        level = 0
+        #else
         level = Double(AVAudioSession.sharedInstance().outputVolume)
         volumeView.showsRouteButton = false
         volumeView.showsVolumeSlider = true
+        #endif
     }
 
     func refresh() {
+        #if targetEnvironment(macCatalyst)
+        return
+        #else
         level = VolumeAdjustmentPolicy.clamped(
             Double(AVAudioSession.sharedInstance().outputVolume)
         )
+        #endif
     }
 
     func update(_ requestedLevel: Double) {
         let adjustedLevel = VolumeAdjustmentPolicy.clamped(requestedLevel)
+        #if targetEnvironment(macCatalyst)
+        _ = adjustedLevel
+        return
+        #else
         level = adjustedLevel
         guard let slider = volumeView.subviews.compactMap({ $0 as? UISlider }).first else {
             return
         }
         slider.setValue(Float(adjustedLevel), animated: false)
         slider.sendActions(for: .valueChanged)
+        #endif
     }
 }
 
+#if targetEnvironment(macCatalyst)
+private struct SystemVolumeBridge: UIViewRepresentable {
+    let controller: SystemVolumeController
+
+    func makeUIView(context: Context) -> UIView { UIView(frame: .zero) }
+    func updateUIView(_ uiView: UIView, context: Context) {}
+}
+#else
 private struct SystemVolumeBridge: UIViewRepresentable {
     let controller: SystemVolumeController
 
@@ -128,6 +185,19 @@ private struct SystemVolumeBridge: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: MPVolumeView, context: Context) {}
+}
+#endif
+
+private enum RootCoordinateSpace {
+    static let name = "stand.root"
+}
+
+private struct MusicChannelStripFramePreferenceKey: PreferenceKey {
+    static var defaultValue = CGRect(x: 0, y: 0, width: 100_000, height: 160)
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
 }
 
 enum HomeEditorResetPolicy {
@@ -236,6 +306,37 @@ enum StatusPanelMetrics {
     }
 }
 
+enum StandPresentationMetrics {
+    static let macHomeScale: CGFloat = 1.5
+
+    static var homeScale: CGFloat {
+        #if targetEnvironment(macCatalyst)
+        macHomeScale
+        #else
+        1
+        #endif
+    }
+
+    static func contentSize(for viewport: CGSize, scale: CGFloat) -> CGSize {
+        guard scale > 0 else { return viewport }
+        return CGSize(width: viewport.width / scale, height: viewport.height / scale)
+    }
+}
+
+enum ExternalMusicTitleTapAction: Equatable {
+    case play
+    case next
+}
+
+enum ExternalMusicTitleTapPolicy {
+    static func action(
+        isActive: Bool,
+        playbackState: ExternalMusicPlaybackState
+    ) -> ExternalMusicTitleTapAction {
+        isActive && playbackState == .playing ? .next : .play
+    }
+}
+
 private struct WrappingControlLayout: Layout {
     var spacing = StandControlLayoutMetrics.rowSpacing
 
@@ -323,6 +424,9 @@ struct RootView: View {
     @StateObject private var systemVolume = SystemVolumeController()
     @Environment(\.scenePhase) private var scenePhase
     @State private var presentedSheet: PresentedSheet?
+    @State private var showsCatalystSettings = false
+    @State private var showsCatalystRecordings = false
+    @State private var showsCatalystBoyiso = false
     @State private var didInitialize = false
     @State private var screenAdjustmentDragState: ScreenAdjustmentDragState?
     @State private var clockScaleGestureStart: Double?
@@ -341,6 +445,12 @@ struct RootView: View {
     @State private var boyisoOverlayTask: Task<Void, Never>?
     @State private var boyisoBannerEvent: BoyisoEvent?
     @State private var boyisoBannerTask: Task<Void, Never>?
+    @State private var musicChannelStripOffset: CGFloat = 0
+    @State private var musicChannelStripDragStartOffset: CGFloat?
+    @State private var musicChannelStripFrame = MusicChannelStripFramePreferenceKey.defaultValue
+    // Mac Catalyst 전용 카드 순서 편집 모드. 다른 플랫폼에서는 항상 false로 유지되어 동작에 영향을 주지 않습니다.
+    @State private var isMusicStripReorderingCatalyst = false
+    @State private var musicStripDraggingChannelID: String?
 
     init(
         model: StandViewModel,
@@ -359,7 +469,12 @@ struct RootView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let isPortrait = proxy.size.height > proxy.size.width
+            let presentationScale = StandPresentationMetrics.homeScale
+            let contentSize = StandPresentationMetrics.contentSize(
+                for: proxy.size,
+                scale: presentationScale
+            )
+            let isPortrait = contentSize.height > contentSize.width
 
             ZStack {
                 SystemVolumeBridge(controller: systemVolume)
@@ -375,13 +490,15 @@ struct RootView: View {
 
                 if !isEditingScreen {
                     if model.isDisplayDark, didInitialize {
-                        silhouetteInfo(isPortrait: isPortrait, canvasSize: proxy.size)
+                        silhouetteInfo(isPortrait: isPortrait, canvasSize: contentSize)
                             .transition(.opacity)
                     }
 
                     VStack(spacing: 0) {
                         topBar(isPortrait: isPortrait)
                             .padding(.horizontal, isPortrait ? 20 : 32)
+                        musicChannelStrip(isPortrait: isPortrait)
+                            .padding(.top, 8)
                         statusBanners
                             .padding(.horizontal, isPortrait ? 20 : 32)
                         Spacer(minLength: 0)
@@ -389,7 +506,7 @@ struct RootView: View {
                             isPortrait: isPortrait,
                             availableWidth: max(
                                 0,
-                                proxy.size.width - StandControlLayoutMetrics.rowSpacing * 2
+                                contentSize.width - StandControlLayoutMetrics.rowSpacing * 2
                             )
                         )
                         .padding(.horizontal, StandControlLayoutMetrics.rowSpacing)
@@ -399,7 +516,7 @@ struct RootView: View {
                     .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
                     .zIndex(5)
 
-                    centerContent(isPortrait: isPortrait, canvasSize: proxy.size)
+                    centerContent(isPortrait: isPortrait, canvasSize: contentSize)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.horizontal, isPortrait ? 20 : 32)
                         .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
@@ -446,8 +563,6 @@ struct RootView: View {
                         layout: $editingLayout,
                         isPortrait: editingIsPortrait,
                         weather: weather,
-                        radioConfigurations: settings.value.homeInternetRadios,
-                        availableRadioCount: settings.value.internetRadioChannels.count,
                         clockFont: Binding(
                             get: { settings.value.clockFont },
                             set: { settings.value.clockFont = $0 }
@@ -455,13 +570,6 @@ struct RootView: View {
                         hourMode: .twelve,
                         batteryText: silhouetteBatteryText,
                         batterySystemImage: model.batteryStatus.systemImage,
-                        onConfigureRadio: { channelID in
-                            radioEditorChannelID = channelID
-                            presentedSheet = .internetRadio
-                        },
-                        onManageRadios: {
-                            presentedSheet = .internetRadioChannels
-                        },
                         onReset: {
                             editingLayout = HomeEditorResetPolicy.panels(
                                 in: editingLayout,
@@ -511,6 +619,9 @@ struct RootView: View {
                 }
 
             }
+            .frame(width: contentSize.width, height: contentSize.height)
+            .scaleEffect(presentationScale, anchor: .center)
+            .frame(width: proxy.size.width, height: proxy.size.height)
             .grayscale(settings.value.displayTheme == .grayscale ? 1 : 0)
             .onAppear {
                 currentIsPortrait = isPortrait
@@ -532,6 +643,7 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.28), value: settings.value.displayTheme)
         .contentShape(Rectangle())
+        .coordinateSpace(name: RootCoordinateSpace.name)
         .gesture(screenAdjustmentGesture.exclusively(before: screenPressGesture))
         .simultaneousGesture(clockMagnificationGesture)
         .persistentSystemOverlays(.hidden)
@@ -543,7 +655,8 @@ struct RootView: View {
                 RecordingsView(
                     library: library,
                     playbackDisabled: false,
-                    theme: settings.value.displayTheme
+                    theme: settings.value.displayTheme,
+                    onClose: { presentedSheet = nil }
                 )
             case .internetRadio:
                 InternetRadioConfigurationView(
@@ -577,9 +690,44 @@ struct RootView: View {
             case .boyiso:
                 NavigationStack {
                     BoyisoView(service: boyiso, accent: settings.value.displayTheme.accentColor)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("완료") { presentedSheet = nil }
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(settings.value.displayTheme.accentColor)
+                            }
+                        }
                 }
             }
         }
+        #if targetEnvironment(macCatalyst)
+        .fullScreenCover(
+            isPresented: $showsCatalystRecordings,
+            onDismiss: { model.resumeMonitoringAfterPlayback() }
+        ) {
+            RecordingsView(
+                library: library,
+                playbackDisabled: false,
+                theme: settings.value.displayTheme,
+                onClose: { showsCatalystRecordings = false }
+            )
+        }
+        .fullScreenCover(isPresented: $showsCatalystBoyiso) {
+            NavigationStack {
+                BoyisoView(service: boyiso, accent: settings.value.displayTheme.accentColor)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("완료") { showsCatalystBoyiso = false }
+                                .fontWeight(.semibold)
+                                .foregroundStyle(settings.value.displayTheme.accentColor)
+                        }
+                    }
+            }
+        }
+        .fullScreenCover(isPresented: $showsCatalystSettings) {
+            SettingsView(model: model)
+        }
+        #endif
         .onAppear {
             resetTransientInterface()
             if !firstLaunchPermissions.shouldPresentExplanation {
@@ -688,6 +836,195 @@ struct RootView: View {
         .animation(.easeOut(duration: 0.3), value: model.controlsVisible)
     }
 
+    private func musicChannelStrip(isPortrait: Bool) -> some View {
+        VStack(spacing: 6) {
+            #if targetEnvironment(macCatalyst)
+            if isMusicStripReorderingCatalyst {
+                musicChannelStripEditingBar(isPortrait: isPortrait)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            #endif
+
+            GeometryReader { proxy in
+                let channels = homeMusicChannels
+                let cardWidth = MusicChannelStripLayoutPolicy.cardWidth(
+                    viewportWidth: proxy.size.width
+                )
+                let maximumScroll = MusicChannelStripLayoutPolicy.maximumScroll(
+                    viewportWidth: proxy.size.width,
+                    cardCount: channels.count,
+                    cardWidth: cardWidth
+                )
+
+                Group {
+                    if maximumScroll == 0 {
+                        HStack(spacing: MusicChannelStripLayoutPolicy.spacing) {
+                            musicChannelCards(channels, cardWidth: cardWidth)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    } else {
+                        Group {
+                            #if targetEnvironment(macCatalyst)
+                            if isMusicStripReorderingCatalyst {
+                                HStack(spacing: MusicChannelStripLayoutPolicy.spacing) {
+                                    musicChannelCards(channels, cardWidth: cardWidth)
+                                }
+                                .offset(x: MusicChannelStripLayoutPolicy.sideInset + musicChannelStripOffset)
+                                .frame(width: proxy.size.width, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .clipped()
+                            } else {
+                                HStack(spacing: MusicChannelStripLayoutPolicy.spacing) {
+                                    musicChannelCards(channels, cardWidth: cardWidth)
+                                }
+                                .offset(x: MusicChannelStripLayoutPolicy.sideInset + musicChannelStripOffset)
+                                .frame(width: proxy.size.width, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .highPriorityGesture(
+                                    musicChannelStripDragGesture(maximumScroll: maximumScroll),
+                                    including: .all
+                                )
+                                .clipped()
+                            }
+                            #else
+                            HStack(spacing: MusicChannelStripLayoutPolicy.spacing) {
+                                musicChannelCards(channels, cardWidth: cardWidth)
+                            }
+                            .offset(x: MusicChannelStripLayoutPolicy.sideInset + musicChannelStripOffset)
+                            .frame(width: proxy.size.width, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .highPriorityGesture(
+                                musicChannelStripDragGesture(maximumScroll: maximumScroll),
+                                including: .all
+                            )
+                            .clipped()
+                            #endif
+                        }
+                        .onAppear {
+                            musicChannelStripOffset = MusicChannelStripLayoutPolicy.clampedOffset(
+                                musicChannelStripOffset,
+                                maximumScroll: maximumScroll
+                            )
+                        }
+                        .onChange(of: maximumScroll) { _, value in
+                            musicChannelStripOffset = MusicChannelStripLayoutPolicy.clampedOffset(
+                                musicChannelStripOffset,
+                                maximumScroll: value
+                            )
+                        }
+                    }
+                }
+                .background {
+                    GeometryReader { frameProxy in
+                        Color.clear.preference(
+                            key: MusicChannelStripFramePreferenceKey.self,
+                            value: frameProxy.frame(in: .named(RootCoordinateSpace.name))
+                        )
+                    }
+                }
+            }
+            .frame(height: InternetRadioPanelMetrics.height)
+            .onPreferenceChange(MusicChannelStripFramePreferenceKey.self) {
+                musicChannelStripFrame = $0
+            }
+            .accessibilityLabel("음악 채널")
+        }
+        .animation(.easeOut(duration: 0.2), value: isMusicStripReorderingCatalyst)
+    }
+
+    #if targetEnvironment(macCatalyst)
+    private func musicChannelStripEditingBar(isPortrait: Bool) -> some View {
+        HStack(spacing: 10) {
+            Label("카드 순서 편집 중", systemImage: "arrow.left.arrow.right")
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.72))
+
+            Spacer(minLength: 8)
+
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    isMusicStripReorderingCatalyst = false
+                }
+                musicStripDraggingChannelID = nil
+            } label: {
+                Text("완료")
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 5)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.orange)
+            .accessibilityLabel("카드 순서 편집 마치기")
+        }
+        .padding(.horizontal, isPortrait ? 20 : 32)
+    }
+    #endif
+
+    @ViewBuilder
+    private func musicChannelCards(
+        _ channels: [HomeMusicChannel],
+        cardWidth: CGFloat
+    ) -> some View {
+        let selectionIDs = settings.value.homeMusicChannels.map(\.id)
+        ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
+            HomeMusicStripCard(
+                channel: channel,
+                width: cardWidth,
+                radioState: radio.state,
+                activeRadioChannelID: radio.activeChannelID,
+                activeExternalMusicService: model.activeExternalMusicService,
+                externalMusicPlaybackState: model.externalMusicPlaybackState,
+                externalMusicTrackTitle: model.externalMusicTrackTitle,
+                orderIndex: index,
+                selectionID: selectionIDs.indices.contains(index) ? selectionIDs[index] : channel.id,
+                onToggleRadio: model.toggleInternetRadioPlayback(channelID:),
+                onToggleExternalMusic: model.toggleExternalMusicPlayback,
+                onSkipExternalMusic: model.skipToNextExternalMusicTrack,
+                onEditRadio: { channelID in
+                    radioEditorChannelID = channelID
+                    presentedSheet = .internetRadio
+                },
+                onRegisterRadio: {
+                    openSettings()
+                },
+                onMoveChannel: { selectionID, destinationIndex in
+                    model.moveHomeMusicChannel(id: selectionID, to: destinationIndex)
+                },
+                isReorderingCatalyst: isMusicStripReorderingCatalyst,
+                draggingChannelID: $musicStripDraggingChannelID,
+                onBeginReordering: {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        isMusicStripReorderingCatalyst = true
+                    }
+                }
+            )
+        }
+    }
+
+    private func musicChannelStripDragGesture(maximumScroll: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { value in
+                let startOffset = musicChannelStripDragStartOffset
+                    ?? musicChannelStripOffset
+                musicChannelStripDragStartOffset = startOffset
+                musicChannelStripOffset = MusicChannelStripLayoutPolicy.clampedOffset(
+                    startOffset + value.translation.width,
+                    maximumScroll: maximumScroll
+                )
+            }
+            .onEnded { value in
+                let startOffset = musicChannelStripDragStartOffset
+                    ?? musicChannelStripOffset
+                musicChannelStripDragStartOffset = nil
+                withAnimation(.snappy(duration: 0.28)) {
+                    musicChannelStripOffset = MusicChannelStripLayoutPolicy.clampedOffset(
+                        startOffset + value.predictedEndTranslation.width,
+                        maximumScroll: maximumScroll
+                    )
+                }
+            }
+    }
+
     @ViewBuilder
     private func centerContent(isPortrait: Bool, canvasSize: CGSize) -> some View {
         if model.isNightSessionActive {
@@ -778,9 +1115,12 @@ struct RootView: View {
             case .appleClassical:
                 .external(.appleClassical)
             case .internetRadio:
-                selection.radioID
-                    .flatMap(settings.value.internetRadioChannel(id:))
-                    .map(HomeMusicChannel.radio)
+                if let configuration = selection.radioID
+                    .flatMap(settings.value.internetRadioChannel(id:)) {
+                    .radio(configuration)
+                } else {
+                    .emptyRadio(slot: selection.radioSlot ?? 0)
+                }
             }
         }
     }
@@ -817,7 +1157,8 @@ struct RootView: View {
             .onChanged { value in
                 guard !firstLaunchPermissions.shouldPresentExplanation,
                       !isEditingScreen,
-                      presentedSheet == nil
+                      presentedSheet == nil,
+                      !musicChannelStripFrame.contains(value.startLocation)
                 else { return }
                 let state = screenAdjustmentDragState ?? initialAdjustmentState(for: value.translation)
                 screenAdjustmentDragState = state
@@ -837,6 +1178,8 @@ struct RootView: View {
                         viewportWidth: currentCanvasSize.width
                     )
                     systemVolume.update(adjustedValue)
+                case .ignored:
+                    break
                 }
             }
             .onEnded { _ in
@@ -855,8 +1198,12 @@ struct RootView: View {
             model.beginBrightnessAdjustment()
             return .brightness(startingValue: model.displayBrightness)
         }
+        #if targetEnvironment(macCatalyst)
+        return .ignored
+        #else
         systemVolume.refresh()
         return .volume(startingValue: systemVolume.level)
+        #endif
     }
 
     @ViewBuilder
@@ -866,6 +1213,8 @@ struct RootView: View {
             AppBrightnessHUD(level: model.displayBrightness)
         case .volume:
             SystemVolumeHUD(level: systemVolume.level)
+        case .ignored:
+            EmptyView()
         }
     }
 
@@ -952,7 +1301,10 @@ struct RootView: View {
     }
 
     private func adjustClockScaleForAccessibility(by amount: Double) {
-        settings.value.clockScale = min(1.35, max(0.7, settings.value.clockScale + amount))
+        settings.value.clockScale = min(
+            AppSettings.maximumClockScale,
+            max(AppSettings.minimumClockScale, settings.value.clockScale + amount)
+        )
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
@@ -968,7 +1320,10 @@ struct RootView: View {
                     clockScaleGestureStart = startingScale
                 }
 
-                let scale = min(1.35, max(0.7, startingScale * Double(magnification)))
+                let scale = min(
+                    AppSettings.maximumClockScale,
+                    max(AppSettings.minimumClockScale, startingScale * Double(magnification))
+                )
                 settings.value.clockScale = scale
                 clockScaleFeedbackTask?.cancel()
                 withAnimation(.easeOut(duration: 0.12)) {
@@ -1088,14 +1443,13 @@ struct RootView: View {
             EmptyView()
         case .recordings:
             ControlButton(
-                title: "잠소리 확인",
+                title: "잠소리",
                 systemImage: "waveform",
                 status: library.clips.isEmpty ? "잠소리 없음" : "잠소리 \(library.clips.count)개",
                 hint: "저장된 잠소리를 확인합니다",
                 width: width
             ) {
-                model.pauseMonitoringForPlayback()
-                presentedSheet = .recordings
+                openRecordings()
             }
         case .boyiso:
             BoyisoControlButton(
@@ -1104,20 +1458,45 @@ struct RootView: View {
                 width: width,
                 tap: {
                     if boyiso.isEnabled { _ = boyiso.sendTokTok() }
-                    else { presentedSheet = .boyiso }
+                    else { openBoyiso() }
                 },
-                longPress: { presentedSheet = .boyiso }
+                longPress: { openBoyiso() }
             )
         case .settings:
             ControlButton(
-                title: "설정 열기",
+                title: "설정",
                 systemImage: "slider.horizontal.3",
                 hint: "밝기, 감지, 녹음 설정을 엽니다",
                 width: width
             ) {
-                presentedSheet = .settings
+                openSettings()
             }
         }
+    }
+
+    private func openSettings() {
+        #if targetEnvironment(macCatalyst)
+        showsCatalystSettings = true
+        #else
+        presentedSheet = .settings
+        #endif
+    }
+
+    private func openRecordings() {
+        model.pauseMonitoringForPlayback()
+        #if targetEnvironment(macCatalyst)
+        showsCatalystRecordings = true
+        #else
+        presentedSheet = .recordings
+        #endif
+    }
+
+    private func openBoyiso() {
+        #if targetEnvironment(macCatalyst)
+        showsCatalystBoyiso = true
+        #else
+        presentedSheet = .boyiso
+        #endif
     }
 
     private var tapToControlText: some View {
@@ -1533,11 +1912,13 @@ private extension StandScreenLayout {
 private enum HomeMusicChannel: Identifiable {
     case radio(InternetRadioConfiguration)
     case external(ExternalMusicService)
+    case emptyRadio(slot: Int)
 
     var id: String {
         switch self {
         case let .radio(configuration): "radio:\(configuration.id.uuidString)"
         case let .external(service): "external:\(service.id)"
+        case let .emptyRadio(slot): "radio:empty:\(slot)"
         }
     }
 }
@@ -1621,7 +2002,6 @@ private struct DashboardCanvas: View {
                     canvasSize: canvasSize
                 )
 
-                radioPanels
             }
             .scaleEffect(clockScale, anchor: .center)
             .foregroundStyle(
@@ -1737,9 +2117,345 @@ private struct HomeMusicPanel: View {
                 onToggle: { onToggleExternalMusic(service) },
                 onEnd: onEndExternalMusic
             )
+        case .emptyRadio:
+            InternetRadioPanel(
+                configuration: nil,
+                state: .idle,
+                isDimmed: isDimmed,
+                dimmedIntensity: dimmedIntensity,
+                showsEditBadge: false,
+                renderedScale: renderedScale,
+                action: {},
+                editAction: {},
+                drawsSurface: drawsSurface,
+                allowsInteraction: false
+            )
         }
     }
 }
+
+private struct HomeMusicStripCard: View {
+    let channel: HomeMusicChannel
+    let width: CGFloat
+    let radioState: InternetRadioPlaybackState
+    let activeRadioChannelID: UUID?
+    let activeExternalMusicService: ExternalMusicService?
+    let externalMusicPlaybackState: ExternalMusicPlaybackState
+    let externalMusicTrackTitle: String?
+    let orderIndex: Int
+    let selectionID: String
+    let onToggleRadio: (UUID) -> Void
+    let onToggleExternalMusic: (ExternalMusicService) -> Void
+    let onSkipExternalMusic: (ExternalMusicService) -> Void
+    let onEditRadio: (UUID) -> Void
+    let onRegisterRadio: () -> Void
+    let onMoveChannel: (String, Int) -> Void
+    let isReorderingCatalyst: Bool
+    @Binding var draggingChannelID: String?
+    let onBeginReordering: () -> Void
+
+    var body: some View {
+        #if targetEnvironment(macCatalyst)
+        if isReorderingCatalyst {
+            reorderingCardBody
+        } else {
+            normalCardBody
+                .contextMenu {
+                    Button {
+                        onBeginReordering()
+                    } label: {
+                        Label("카드 순서 편집", systemImage: "arrow.left.arrow.right")
+                    }
+                    .onAppear {
+                        // Catalyst의 오른쪽 클릭만으로 편집 모드를 활성화한다.
+                        // 메뉴 항목을 한 번 더 누르지 않아도 다음 실행 루프에
+                        // 카드가 드래그·수정 가능한 모습으로 전환된다.
+                        DispatchQueue.main.async {
+                            onBeginReordering()
+                        }
+                    }
+                }
+        }
+        #else
+        normalCardBody
+        #endif
+    }
+
+    private var normalCardBody: some View {
+        ZStack {
+            FlipPanelSurface(isDimmed: false, cornerRadius: 13, splitGap: 2)
+
+            switch channel {
+            case let .external(service):
+                externalContent(service)
+            case let .radio(configuration):
+                radioContent(configuration)
+            case .emptyRadio:
+                emptyRadioContent
+            }
+        }
+        .frame(width: width, height: InternetRadioPanelMetrics.height)
+        .foregroundStyle(.white.opacity(0.80))
+    }
+
+    #if targetEnvironment(macCatalyst)
+    private var reorderingCardBody: some View {
+        ZStack {
+            FlipPanelSurface(isDimmed: false, cornerRadius: 13, splitGap: 2)
+            reorderingContent
+        }
+        .frame(width: width, height: InternetRadioPanelMetrics.height)
+        .foregroundStyle(.white.opacity(0.80))
+        .overlay {
+            RoundedRectangle(cornerRadius: 13)
+                .strokeBorder(
+                    Color.orange.opacity(0.85),
+                    style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])
+                )
+        }
+        .contentShape(Rectangle())
+        .onDrag {
+            draggingChannelID = selectionID
+            return NSItemProvider(object: NSString(string: selectionID))
+        }
+        .onDrop(
+            of: [.text],
+            delegate: MusicChannelReorderDropDelegate(
+                destinationIndex: orderIndex,
+                draggingChannelID: $draggingChannelID,
+                onMove: onMoveChannel
+            )
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(reorderingTitle), 카드 순서 편집")
+        .accessibilityHint("드래그해 순서를 바꿉니다")
+    }
+
+    private var reorderingContent: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.55))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(reorderingTitle)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .lineLimit(1)
+                Text("드래그해 이동")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+
+            Spacer(minLength: 0)
+
+            reorderingActionButton
+        }
+        .padding(.horizontal, 11)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var reorderingTitle: String {
+        return switch channel {
+        case let .external(service):
+            service.displayName
+        case let .radio(configuration):
+            configuration.displayName
+        case .emptyRadio:
+            "인터넷 라디오"
+        }
+    }
+
+    @ViewBuilder
+    private var reorderingActionButton: some View {
+        switch channel {
+        case let .radio(configuration):
+            Button {
+                onEditRadio(configuration.id)
+            } label: {
+                Image(systemName: "pencil.circle.fill")
+                    .font(.system(size: 19, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(configuration.displayName) 라디오 수정")
+        case .emptyRadio:
+            Button(action: onRegisterRadio) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 19, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("인터넷 라디오 등록")
+        case .external:
+            EmptyView()
+        }
+    }
+    #endif
+
+    private func externalContent(_ service: ExternalMusicService) -> some View {
+        let isActive = activeExternalMusicService == service
+        let title = isActive && !(externalMusicTrackTitle ?? "").isEmpty
+            ? externalMusicTrackTitle!
+            : service.displayName
+
+        return ZStack {
+            Button {
+                switch ExternalMusicTitleTapPolicy.action(
+                    isActive: isActive,
+                    playbackState: externalMusicPlaybackState
+                ) {
+                case .play:
+                    onToggleExternalMusic(service)
+                case .next:
+                    onSkipExternalMusic(service)
+                }
+            } label: {
+                MarqueeText(text: title)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .padding(.horizontal, 42)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                "\(title), \(isActive && externalMusicPlaybackState == .playing ? "다음 곡" : "재생")"
+            )
+
+            HStack {
+                Button {
+                    onToggleExternalMusic(service)
+                } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: externalIcon(isActive: isActive))
+                            .symbolRenderingMode(.hierarchical)
+                            .font(.system(size: 17, weight: .semibold))
+                        Text(externalStatus(isActive: isActive))
+                            .font(.system(size: 7.5, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.52))
+                    }
+                    .frame(width: 40, height: InternetRadioPanelMetrics.height)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(service.displayName) \(isActive && externalMusicPlaybackState == .playing ? "일시 정지" : "재생")")
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 3)
+        }
+    }
+
+    private func radioContent(_ configuration: InternetRadioConfiguration) -> some View {
+        let isActive = activeRadioChannelID == configuration.id
+        return Button {
+            onToggleRadio(configuration.id)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: radioIcon(isActive: isActive))
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(configuration.displayName)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .lineLimit(1)
+                    Text(isActive ? radioStatus : "대기 중")
+                        .font(.system(size: 8.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.52))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 11)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onLongPressGesture(minimumDuration: 0.8) { onEditRadio(configuration.id) }
+        .accessibilityHint("두 번 탭해 재생하고 길게 눌러 채널을 편집합니다")
+    }
+
+    private var emptyRadioContent: some View {
+        Button(action: onRegisterRadio) {
+            HStack(spacing: 8) {
+                Image(systemName: "radio.fill")
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("인터넷 라디오")
+                        .font(.system(size: 10.5, weight: .semibold))
+                    Text("등록을 기다림")
+                        .font(.system(size: 8.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.52))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 11)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("두 번 탭해 설정에서 라디오 주소를 등록합니다")
+    }
+
+    private func externalIcon(isActive: Bool) -> String {
+        guard isActive else {
+            if case let .external(service) = channel { return service.systemImage }
+            return "music.note"
+        }
+        return externalMusicPlaybackState == .playing ? "pause.fill" : "play.fill"
+    }
+
+    private func externalStatus(isActive: Bool) -> String {
+        guard isActive else { return "대기 중" }
+        return switch externalMusicPlaybackState {
+        case .loading: "준비 중"
+        case .playing: "재생 중"
+        case .paused: "일시 정지"
+        case .idle, .unavailable: "대기 중"
+        }
+    }
+
+    private func radioIcon(isActive: Bool) -> String {
+        guard isActive else { return "radio.fill" }
+        return switch radioState {
+        case .loading: "antenna.radiowaves.left.and.right"
+        case .reconnecting: "arrow.clockwise.circle.fill"
+        case .playing: "stop.circle.fill"
+        case .idle, .failed: "radio.fill"
+        }
+    }
+
+    private var radioStatus: String {
+        switch radioState {
+        case .loading: "연결 중"
+        case .reconnecting: "다시 연결 중"
+        case .playing: "재생 중"
+        case .idle: "대기 중"
+        case .failed: "연결 실패"
+        }
+    }
+}
+
+#if targetEnvironment(macCatalyst)
+private struct MusicChannelReorderDropDelegate: DropDelegate {
+    let destinationIndex: Int
+    @Binding var draggingChannelID: String?
+    let onMove: (String, Int) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let draggingChannelID, !draggingChannelID.isEmpty else { return }
+        onMove(draggingChannelID, destinationIndex)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingChannelID = nil
+        return true
+    }
+}
+#endif
 
 private struct ExternalMusicPanel: View {
     let service: ExternalMusicService
@@ -1862,6 +2578,9 @@ private struct MarqueeText: View {
                         }
                     }
                     .offset(x: overflow > 0 ? -overflow * progress : 0)
+                    // GeometryReader always places its single child at .topLeading,
+                    // so the text must be re-centered explicitly within its bounds.
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
         }
         .clipped()
@@ -2665,14 +3384,10 @@ private struct ScreenEditorView: View {
     @Binding var layout: StandScreenLayout
     let isPortrait: Bool
     @ObservedObject var weather: WeatherService
-    let radioConfigurations: [InternetRadioConfiguration]
-    let availableRadioCount: Int
     @Binding var clockFont: ClockFontChoice
     let hourMode: ClockHourMode
     let batteryText: String
     let batterySystemImage: String
-    let onConfigureRadio: (UUID?) -> Void
-    let onManageRadios: () -> Void
     let onReset: () -> Void
     let onSave: () -> Void
     @State private var showFontPalette = false
@@ -2768,8 +3483,6 @@ private struct ScreenEditorView: View {
                         .background(.white.opacity(0.08), in: Capsule())
                 }
 
-                editableRadioPanels(canvasSize: proxy.size, editingInsets: editingInsets)
-
                 if showFontPalette {
                     VStack {
                         Spacer()
@@ -2783,7 +3496,7 @@ private struct ScreenEditorView: View {
                     VStack {
                         Spacer()
                         Label(
-                            "패널 이동·크기 조절 · 라디오 연필을 눌러 주소 편집",
+                            "패널 이동·크기 조절 · 시계를 눌러 글꼴 선택",
                             systemImage: "hand.draw.fill"
                         )
                         .font(.caption.weight(.medium))
@@ -2817,121 +3530,6 @@ private struct ScreenEditorView: View {
             }
             .foregroundStyle(.white.opacity(0.86))
         }
-    }
-
-    @ViewBuilder
-    private func editableRadioPanels(
-        canvasSize: CGSize,
-        editingInsets: EdgeInsets
-    ) -> some View {
-        if radioConfigurations.count == 2, layout.radiosGrouped {
-            EditablePanel(
-                transform: $layout.radio,
-                canvasSize: canvasSize,
-                editingInsets: editingInsets,
-                accessibilityName: "인터넷 라디오 묶음 패널"
-            ) {
-                InternetRadioGroupedPanel(
-                    configurations: radioConfigurations,
-                    state: .idle,
-                    activeChannelID: nil,
-                    isDimmed: false,
-                    dimmedIntensity: 1,
-                    showsEditBadge: true,
-                    actions: onConfigureRadio,
-                    allowsChildInteraction: true
-                )
-                .onTapGesture(count: 2, perform: splitRadioPanels)
-            }
-        } else {
-            ForEach(Array(radioConfigurations.enumerated()), id: \.element.id) { index, configuration in
-                EditablePanel(
-                    transform: index == 0 ? $layout.radio : $layout.secondaryRadio,
-                    canvasSize: canvasSize,
-                    editingInsets: editingInsets,
-                    accessibilityName: "\(configuration.displayName) 라디오 패널",
-                    onEnded: { mergeRadioPanelsIfNeeded(canvasSize: canvasSize) },
-                    onTap: { onConfigureRadio(configuration.id) }
-                ) {
-                    InternetRadioPanel(
-                        configuration: configuration,
-                        state: .idle,
-                        isDimmed: false,
-                        dimmedIntensity: 1,
-                        showsEditBadge: true,
-                        renderedScale: index == 0 ? layout.radio.scale : layout.secondaryRadio.scale,
-                        action: {},
-                        editAction: { onConfigureRadio(configuration.id) }
-                    )
-                }
-            }
-
-            if radioConfigurations.count == 1, availableRadioCount >= 2 {
-                EditablePanel(
-                    transform: $layout.secondaryRadio,
-                    canvasSize: canvasSize,
-                    editingInsets: editingInsets,
-                    accessibilityName: "두 번째 라디오 패널",
-                    onTap: onManageRadios
-                ) {
-                    Label("두 번째 라디오 추가", systemImage: "plus.circle.fill")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .frame(
-                            width: InternetRadioPanelMetrics.width,
-                            height: InternetRadioPanelMetrics.height
-                        )
-                        .background(
-                            FlipPanelSurface(
-                                isDimmed: false,
-                                cornerRadius: InternetRadioPanelMetrics.cornerRadius,
-                                splitGap: 2
-                            )
-                        )
-                }
-            }
-        }
-    }
-
-    private func mergeRadioPanelsIfNeeded(canvasSize: CGSize) {
-        guard radioConfigurations.count == 2, !layout.radiosGrouped else { return }
-        let first = radioBounds(transform: layout.radio, canvasSize: canvasSize)
-        let second = radioBounds(transform: layout.secondaryRadio, canvasSize: canvasSize)
-        guard PanelEditingPolicy.overlapFraction(first, second)
-            >= PanelEditingPolicy.radioMergeOverlapThreshold else { return }
-        var merged = layout.radio
-        merged.x = (layout.radio.x + layout.secondaryRadio.x) / 2
-        merged.y = (layout.radio.y + layout.secondaryRadio.y) / 2
-        merged.scale = min(layout.radio.scale, layout.secondaryRadio.scale)
-        layout.radio = merged
-        layout.secondaryRadio = merged
-        layout.radiosGrouped = true
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-    }
-
-    private func splitRadioPanels() {
-        guard layout.radiosGrouped else { return }
-        let center = layout.radio
-        layout.radio = PanelTransform(x: center.x - 0.11, y: center.y, scale: center.scale)
-        layout.secondaryRadio = PanelTransform(x: center.x + 0.11, y: center.y, scale: center.scale)
-        layout.radiosGrouped = false
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    }
-
-    private func radioBounds(transform: PanelTransform, canvasSize: CGSize) -> CGRect {
-        let size = CGSize(
-            width: InternetRadioPanelMetrics.width * transform.scale,
-            height: InternetRadioPanelMetrics.height * transform.scale
-        )
-        let center = CGPoint(
-            x: canvasSize.width / 2 + transform.x * canvasSize.width,
-            y: canvasSize.height / 2 + transform.y * canvasSize.height
-        )
-        return CGRect(
-            x: center.x - size.width / 2,
-            y: center.y - size.height / 2,
-            width: size.width,
-            height: size.height
-        )
     }
 
     @ViewBuilder

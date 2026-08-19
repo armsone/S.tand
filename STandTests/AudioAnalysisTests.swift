@@ -122,6 +122,71 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertTrue(offsets.allSatisfy { abs($0.width) <= 5 && abs($0.height) <= 3 })
     }
 
+    func testExternalMusicTitleTapPlaysUnlessTheSelectedServiceIsPlaying() {
+        for state in [
+            ExternalMusicPlaybackState.idle,
+            .loading,
+            .paused,
+            .unavailable
+        ] {
+            XCTAssertEqual(
+                ExternalMusicTitleTapPolicy.action(isActive: true, playbackState: state),
+                .play
+            )
+        }
+        XCTAssertEqual(
+            ExternalMusicTitleTapPolicy.action(isActive: false, playbackState: .playing),
+            .play
+        )
+        XCTAssertEqual(
+            ExternalMusicTitleTapPolicy.action(isActive: true, playbackState: .playing),
+            .next
+        )
+    }
+
+    func testMacPresentationScaleProducesAOneAndAHalfTimesLogicalCanvas() {
+        XCTAssertEqual(StandPresentationMetrics.macHomeScale, 1.5)
+        XCTAssertEqual(
+            StandPresentationMetrics.contentSize(
+                for: CGSize(width: 1_500, height: 900),
+                scale: StandPresentationMetrics.macHomeScale
+            ),
+            CGSize(width: 1_000, height: 600)
+        )
+    }
+
+    func testClockCanBeMagnifiedUpToThreeHundredPercent() {
+        XCTAssertEqual(AppSettings.minimumClockScale, 0.7)
+        XCTAssertEqual(AppSettings.maximumClockScale, 3.0)
+    }
+
+    func testRecordingSwipeDeletesOnAFullDragOrQuickLeftFlickOnly() {
+        XCTAssertTrue(
+            RecordingSwipeDeletePolicy.isDeleteGesture(
+                translation: CGSize(width: -60, height: 4),
+                predictedEndTranslation: CGSize(width: -72, height: 5)
+            )
+        )
+        XCTAssertTrue(
+            RecordingSwipeDeletePolicy.isDeleteGesture(
+                translation: CGSize(width: -34, height: 3),
+                predictedEndTranslation: CGSize(width: -90, height: 4)
+            )
+        )
+        XCTAssertFalse(
+            RecordingSwipeDeletePolicy.isDeleteGesture(
+                translation: CGSize(width: -48, height: 3),
+                predictedEndTranslation: CGSize(width: -52, height: 4)
+            )
+        )
+        XCTAssertFalse(
+            RecordingSwipeDeletePolicy.isDeleteGesture(
+                translation: CGSize(width: -80, height: 95),
+                predictedEndTranslation: CGSize(width: -110, height: 120)
+            )
+        )
+    }
+
     func testFlipClockSecondsAreTwiceAsVisible() {
         XCTAssertEqual(FlipClockSecondStyle.opacity(isDimmed: false), 0.40)
         XCTAssertEqual(FlipClockSecondStyle.opacity(isDimmed: true), 0.16)
@@ -438,7 +503,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertFalse(settings.selectInternetRadioChannel(id: UUID()))
     }
 
-    func testInternetRadioChannelsAreLimitedToTwo() throws {
+    func testInternetRadioChannelsAreLimitedToFour() throws {
         let first = try InternetRadioConfiguration(
             displayName: "첫 채널",
             urlString: "https://radio.example.com/first"
@@ -447,19 +512,30 @@ final class AudioAnalysisTests: XCTestCase {
             displayName: "둘째 채널",
             urlString: "https://radio.example.com/second"
         )
-        let previewOnly = try InternetRadioConfiguration(
-            displayName: "설정 미리듣기 채널",
-            urlString: "https://radio.example.com/preview"
+        let third = try InternetRadioConfiguration(
+            displayName: "셋째 채널",
+            urlString: "https://radio.example.com/third"
+        )
+        let fourth = try InternetRadioConfiguration(
+            displayName: "넷째 채널",
+            urlString: "https://radio.example.com/fourth"
+        )
+        let overflow = try InternetRadioConfiguration(
+            displayName: "초과 채널",
+            urlString: "https://radio.example.com/overflow"
         )
         var settings = AppSettings(
-            internetRadioChannels: [first, second, previewOnly],
-            selectedInternetRadioID: previewOnly.id,
+            internetRadioChannels: [first, second, third, fourth, overflow],
+            selectedInternetRadioID: fourth.id,
             secondaryInternetRadioID: first.id
         )
 
-        XCTAssertEqual(settings.internetRadioChannels.map(\.id), [first.id, second.id])
+        XCTAssertEqual(
+            settings.internetRadioChannels.map(\.id),
+            [first.id, second.id, third.id, fourth.id]
+        )
         XCTAssertEqual(settings.homeInternetRadios.map(\.id), [first.id, second.id])
-        XCTAssertNil(settings.internetRadioChannel(id: previewOnly.id))
+        XCTAssertNil(settings.internetRadioChannel(id: overflow.id))
 
         let decoded = try JSONDecoder().decode(
             AppSettings.self,
@@ -467,12 +543,18 @@ final class AudioAnalysisTests: XCTestCase {
         )
         XCTAssertEqual(decoded.homeInternetRadios.map(\.id), [first.id, second.id])
 
-        settings.addInternetRadioChannel(previewOnly)
-        XCTAssertEqual(settings.internetRadioChannels.map(\.id), [first.id, second.id])
+        settings.addInternetRadioChannel(overflow)
+        XCTAssertEqual(
+            settings.internetRadioChannels.map(\.id),
+            [first.id, second.id, third.id, fourth.id]
+        )
 
         XCTAssertEqual(settings.removeInternetRadioChannel(id: first.id), first)
-        settings.addInternetRadioChannel(previewOnly, select: false)
-        XCTAssertEqual(settings.homeInternetRadios.map(\.id), [second.id, previewOnly.id])
+        settings.addInternetRadioChannel(overflow, select: false)
+        XCTAssertEqual(
+            settings.internetRadioChannels.map(\.id),
+            [second.id, third.id, fourth.id, overflow.id]
+        )
     }
 
     func testHomeMusicChannelsCanAssignAndSwapRadioAndAppleSources() throws {
@@ -488,20 +570,51 @@ final class AudioAnalysisTests: XCTestCase {
 
         XCTAssertEqual(
             settings.homeMusicChannels,
-            [.internetRadio(first.id), .internetRadio(second.id)]
+            [
+                .appleMusic,
+                .appleClassical,
+                .internetRadio(first.id, slot: 0),
+                .internetRadio(second.id, slot: 1),
+                .emptyInternetRadio(slot: 2),
+                .emptyInternetRadio(slot: 3)
+            ]
         )
-        XCTAssertTrue(settings.assignHomeMusicChannel(.appleMusic, to: 0))
-        XCTAssertTrue(settings.assignHomeMusicChannel(.appleClassical, to: 1))
-        XCTAssertEqual(settings.homeMusicChannels, [.appleMusic, .appleClassical])
-
-        XCTAssertTrue(settings.assignHomeMusicChannel(.appleClassical, to: 0))
-        XCTAssertEqual(settings.homeMusicChannels, [.appleClassical, .appleMusic])
+        XCTAssertTrue(settings.moveHomeMusicChannel(id: "appleClassical", to: 0))
+        XCTAssertEqual(settings.homeMusicChannels.first, .appleClassical)
+        XCTAssertEqual(settings.homeMusicChannels.dropFirst().first, .appleMusic)
 
         let decoded = try JSONDecoder().decode(
             AppSettings.self,
             from: JSONEncoder().encode(settings)
         )
-        XCTAssertEqual(decoded.homeMusicChannels, [.appleClassical, .appleMusic])
+        XCTAssertEqual(decoded.homeMusicChannels, settings.homeMusicChannels)
+        XCTAssertEqual(decoded.homeMusicChannels.count, 6)
+    }
+
+    func testAddingAndRemovingRadioFillsStableHomePlaceholder() throws {
+        let channel = try InternetRadioConfiguration(
+            displayName: "새 채널",
+            urlString: "https://radio.example.com/new"
+        )
+        var settings = AppSettings()
+
+        XCTAssertEqual(
+            settings.homeMusicChannels,
+            [
+                .appleMusic,
+                .appleClassical,
+                .emptyInternetRadio(slot: 0),
+                .emptyInternetRadio(slot: 1),
+                .emptyInternetRadio(slot: 2),
+                .emptyInternetRadio(slot: 3)
+            ]
+        )
+
+        settings.addInternetRadioChannel(channel)
+        XCTAssertEqual(settings.homeMusicChannels[2], .internetRadio(channel.id, slot: 0))
+
+        XCTAssertEqual(settings.removeInternetRadioChannel(id: channel.id), channel)
+        XCTAssertEqual(settings.homeMusicChannels[2], .emptyInternetRadio(slot: 0))
     }
 
     func testInternetRadioReconnectUsesCappedBackoff() {
@@ -547,6 +660,38 @@ final class AudioAnalysisTests: XCTestCase {
                 horizontalTranslation: -1_000,
                 viewportWidth: 400
             ),
+            0
+        )
+    }
+
+    func testMusicChannelStripCentersWhenItFitsAndClampsDragWhenItOverflows() {
+        let cardWidth = MusicChannelStripLayoutPolicy.cardWidth(viewportWidth: 1_200)
+        XCTAssertEqual(cardWidth, 168)
+        XCTAssertEqual(
+            MusicChannelStripLayoutPolicy.maximumScroll(
+                viewportWidth: 1_200,
+                cardCount: 6,
+                cardWidth: cardWidth
+            ),
+            0
+        )
+
+        let maximumScroll = MusicChannelStripLayoutPolicy.maximumScroll(
+            viewportWidth: 800,
+            cardCount: 6,
+            cardWidth: 168
+        )
+        XCTAssertEqual(maximumScroll, 272)
+        XCTAssertEqual(
+            MusicChannelStripLayoutPolicy.clampedOffset(-120, maximumScroll: maximumScroll),
+            -120
+        )
+        XCTAssertEqual(
+            MusicChannelStripLayoutPolicy.clampedOffset(-1_000, maximumScroll: maximumScroll),
+            -272
+        )
+        XCTAssertEqual(
+            MusicChannelStripLayoutPolicy.clampedOffset(80, maximumScroll: maximumScroll),
             0
         )
     }

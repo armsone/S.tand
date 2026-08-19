@@ -3,6 +3,12 @@ import AVFoundation
 import CoreLocation
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
+
+private enum CatalystSettingsWindowMetrics {
+    static let targetSize = CGSize(width: 1_500, height: 1_000)
+    static let minimumSize = CGSize(width: 640, height: 520)
+}
 
 struct SettingsView: View {
     private enum RadioEditorField: Hashable {
@@ -29,6 +35,9 @@ struct SettingsView: View {
     @State private var radioDraftAddress = ""
     @State private var radioValidationMessage: String?
     @State private var pendingRadioDeletion: InternetRadioConfiguration?
+    @State private var draggedHomeMusicChannelID: String?
+    @State private var editingRadioSlot: Int?
+    @State private var radioScrollRequest = 0
     @State private var confirmsRestore = false
     @FocusState private var focusedRadioField: RadioEditorField?
 
@@ -48,7 +57,7 @@ struct SettingsView: View {
 
     private var settingsContentMaxWidth: CGFloat? {
         #if targetEnvironment(macCatalyst)
-        980
+        1_360
         #else
         nil
         #endif
@@ -73,21 +82,35 @@ struct SettingsView: View {
                                 accent: accent
                             )
 
-                            LazyVGrid(
-                                columns: Array(
-                                    repeating: GridItem(.flexible(), spacing: 14, alignment: .top),
-                                    count: proxy.size.width >= 720 ? 2 : 1
-                                ),
-                                spacing: 14
-                            ) {
-                                screenAndClockCard
-                                permissionsCard
-                                boyisoCard
-                                detectionCard
-                                informationCard
+                            radioSettingsShortcut
+
+                            if proxy.size.width >= 720 {
+                                HStack(alignment: .top, spacing: 14) {
+                                    LazyVStack(spacing: 14) {
+                                        screenAndClockCard
+                                        boyisoCard
+                                        informationCard
+                                    }
+                                    .frame(maxWidth: .infinity)
+
+                                    LazyVStack(spacing: 14) {
+                                        permissionsCard
+                                        detectionCard
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                            } else {
+                                LazyVStack(spacing: 14) {
+                                    screenAndClockCard
+                                    permissionsCard
+                                    boyisoCard
+                                    detectionCard
+                                    informationCard
+                                }
                             }
 
                                 musicCard
+                                    .id("internet-radio-settings")
                             }
                             .frame(maxWidth: settingsContentMaxWidth)
                             .frame(maxWidth: .infinity)
@@ -101,6 +124,17 @@ struct SettingsView: View {
                             DispatchQueue.main.async {
                                 withAnimation(.easeInOut(duration: 0.22)) {
                                     scrollProxy.scrollTo("inline-radio-editor", anchor: .bottom)
+                                }
+                            }
+                        }
+                        .onChange(of: radioScrollRequest) { _, _ in
+                            // LazyVStack이 아직 아래쪽 행을 그리지 않은 첫 스크롤은
+                            // 애니메이션 없이 강제로 레이아웃을 계산시킨 뒤, 다음
+                            // 실행 루프에서 실제로 눈에 보이는 애니메이션 스크롤을 한다.
+                            scrollProxy.scrollTo("internet-radio-settings", anchor: .bottom)
+                            DispatchQueue.main.async {
+                                withAnimation(.easeInOut(duration: 0.28)) {
+                                    scrollProxy.scrollTo("internet-radio-settings", anchor: .bottom)
                                 }
                             }
                         }
@@ -155,6 +189,16 @@ struct SettingsView: View {
                 }
             }
         }
+        #if targetEnvironment(macCatalyst)
+        .frame(
+            minWidth: CatalystSettingsWindowMetrics.minimumSize.width,
+            idealWidth: CatalystSettingsWindowMetrics.targetSize.width,
+            maxWidth: .infinity,
+            minHeight: CatalystSettingsWindowMetrics.minimumSize.height,
+            idealHeight: CatalystSettingsWindowMetrics.targetSize.height,
+            maxHeight: .infinity
+        )
+        #endif
         .preferredColorScheme(.dark)
         .tint(accent)
         .sheet(isPresented: $showsRecordings, onDismiss: {
@@ -207,6 +251,18 @@ struct SettingsView: View {
             weather.refreshIfNeeded()
         }
         .animation(.easeInOut(duration: 0.25), value: store.value.displayTheme)
+    }
+
+    private var radioSettingsShortcut: some View {
+        SettingsInlineButton(
+            title: "인터넷 라디오",
+            systemImage: "radio.fill",
+            accent: accent
+        ) {
+            radioScrollRequest += 1
+        }
+        .accessibilityIdentifier("internet-radio-settings-shortcut")
+        .accessibilityHint("설정 맨 아래의 인터넷 라디오 입력과 순서 편집으로 이동합니다")
     }
 
     private var screenAndClockCard: some View {
@@ -407,7 +463,7 @@ struct SettingsView: View {
 
     private var musicCard: some View {
         let channels = store.value.internetRadioChannels
-        let channelCount = channels.count + ExternalMusicService.allCases.count
+        let channelCount = store.value.homeMusicChannels.count
         let activeRadioTitle = channels.first { channel in
             radio.state.isActive && radio.activeChannelID == channel.id
         }?.displayName
@@ -422,158 +478,177 @@ struct SettingsView: View {
             accent: accent
         ) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("홈 버튼 배치")
+                Text("홈 음악 채널 순서")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.52))
 
-                ForEach(Array(store.value.homeMusicChannels.enumerated()), id: \.offset) { slot, selection in
-                    homeMusicSlotRow(slot: slot, selection: selection)
-                }
-            }
+                ForEach(Array(store.value.homeMusicChannels.enumerated()), id: \.element.id) { index, selection in
+                    VStack(spacing: 8) {
+                        homeMusicOrderRow(selection)
+                            .onDrag {
+                                draggedHomeMusicChannelID = selection.id
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                return NSItemProvider(object: selection.id as NSString)
+                            }
+                            .onDrop(
+                                of: [UTType.text],
+                                delegate: HomeMusicChannelDropDelegate(
+                                    targetIndex: index,
+                                    draggedID: $draggedHomeMusicChannelID,
+                                    move: model.moveHomeMusicChannel(id:to:)
+                                )
+                            )
 
-            VStack(spacing: 8) {
-                ForEach(ExternalMusicService.allCases) { service in
-                    externalMusicServiceRow(service)
-                }
-            }
-
-            if channels.isEmpty, !radioEditorVisible {
-                Label("등록한 채널이 없습니다", systemImage: "radio")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.68))
-                    .frame(maxWidth: .infinity, minHeight: 58)
-                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 15))
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(channels) { channel in
-                        inlineRadioChannelRow(channel)
-                        if radioEditorVisible, editingRadioChannel?.id == channel.id {
+                        if showsRadioEditor(after: selection) {
                             inlineRadioEditor
                         }
                     }
                 }
-            }
 
-            if radioEditorVisible, editingRadioChannel == nil {
-                inlineRadioEditor
-            } else {
-                if !radioEditorVisible,
-                   channels.count < AppSettings.maximumInternetRadioChannelCount {
-                    SettingsInlineButton(
-                        title: channels.isEmpty ? "첫 채널 추가" : "채널 추가",
-                        systemImage: "plus.circle.fill",
-                        accent: accent,
-                        action: beginAddingRadioChannel
-                    )
-                }
+                SettingsHelpText("길게 눌러 홈 순서를 바꾸고, 라디오의 연필을 누르면 같은 자리에서 바로 수정할 수 있습니다.")
             }
 
             SettingsHelpText(
                 model.externalMusicMessage
                     ?? "Apple Music은 재생 중인 음악, 보관함의 임의 음악, Apple 추천 순서로 바로 재생합니다. 재생 중에는 잠꼬대·코골이 감지와 녹음을 잠시 멈춥니다."
             )
+
         }
     }
 
-    private func homeMusicSlotRow(
-        slot: Int,
-        selection: HomeMusicChannelSelection
-    ) -> some View {
-        HStack(spacing: 10) {
-            Text(slot == 0 ? "첫 번째 버튼" : "두 번째 버튼")
-                .font(.subheadline.weight(.semibold))
-            Spacer(minLength: 8)
-            Menu {
-                ForEach(homeMusicChannelChoices) { choice in
-                    Button {
-                        model.assignHomeMusicChannel(choice, to: slot)
-                    } label: {
-                        if choice == selection {
-                            Label(homeMusicChannelName(choice), systemImage: "checkmark")
-                        } else {
-                            Text(homeMusicChannelName(choice))
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(homeMusicChannelName(selection))
-                        .lineLimit(1)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption2.weight(.semibold))
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(accent)
-                .padding(.horizontal, 10)
-                .frame(minHeight: 36)
-                .background(accent.opacity(0.12), in: Capsule())
-            }
-        }
-        .padding(.horizontal, 10)
-        .frame(minHeight: 48)
-        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 13))
-    }
-
-    private var homeMusicChannelChoices: [HomeMusicChannelSelection] {
-        [.appleMusic, .appleClassical] + store.value.internetRadioChannels.map {
-            .internetRadio($0.id)
+    @ViewBuilder
+    private func homeMusicOrderRow(_ selection: HomeMusicChannelSelection) -> some View {
+        if selection.kind == .internetRadio {
+            internetRadioOrderRow(selection)
+        } else if let service = externalMusicService(for: selection) {
+            externalMusicOrderRow(service)
         }
     }
 
-    private func homeMusicChannelName(_ selection: HomeMusicChannelSelection) -> String {
-        switch selection.kind {
-        case .appleMusic:
-            "Apple Music"
-        case .appleClassical:
-            "Apple Music Classical"
-        case .internetRadio:
-            selection.radioID.flatMap(store.value.internetRadioChannel(id:))?.displayName
-                ?? "인터넷 라디오"
-        }
-    }
-
-    private func externalMusicServiceRow(_ service: ExternalMusicService) -> some View {
+    private func externalMusicOrderRow(_ service: ExternalMusicService) -> some View {
         let isActive = model.activeExternalMusicService == service
 
         return Button {
             model.toggleExternalMusicPlayback(service)
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: isActive ? "play.circle.fill" : service.systemImage)
+                Image(
+                    systemName: isActive && model.externalMusicPlaybackState == .playing
+                        ? "pause.circle.fill"
+                        : service.systemImage
+                )
                     .symbolRenderingMode(.hierarchical)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(isActive ? accent : .white.opacity(0.72))
-                    .frame(width: 44, height: 48)
+                    .frame(width: 30)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(service.displayName)
                         .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
                     Text(externalMusicServiceSubtitle(service, isActive: isActive))
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.54))
                         .lineLimit(1)
                 }
-                Spacer(minLength: 2)
-                Image(systemName: externalMusicServiceTrailingIcon(service, isActive: isActive))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.48))
-                    .frame(width: 34, height: 44)
+                Spacer(minLength: 8)
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.38))
+                    .frame(width: 30, height: 44)
             }
             .padding(.horizontal, 10)
             .frame(minHeight: 58)
             .background(
-                isActive ? accent.opacity(0.15) : Color.white.opacity(0.06),
-                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+                isActive ? accent.opacity(0.15) : Color.white.opacity(0.05),
+                in: RoundedRectangle(cornerRadius: 13)
             )
-            .overlay {
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .stroke(isActive ? accent.opacity(0.30) : .white.opacity(0.08), lineWidth: 1)
-            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(service.displayName), \(isActive ? "음악 듣기 모드 사용 중" : "열기")")
-        .accessibilityHint("S.tand 화면 안에서 음악 재생을 제어합니다")
+        .accessibilityHint("두 번 탭해 재생하거나 길게 눌러 홈 순서를 바꿉니다")
+    }
+
+    private func internetRadioOrderRow(_ selection: HomeMusicChannelSelection) -> some View {
+        let channel = selection.radioID.flatMap(store.value.internetRadioChannel(id:))
+        let isActive = channel.map { radio.activeChannelID == $0.id } ?? false
+
+        return HStack(spacing: 8) {
+            Button {
+                if let channel {
+                    model.toggleInternetRadioPlayback(channelID: channel.id)
+                } else {
+                    beginAddingRadioChannel(slot: selection.radioSlot)
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: channel == nil ? "plus.circle.fill" : radioButtonImage(isActive: isActive))
+                        .symbolRenderingMode(.hierarchical)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(channel == nil ? .white.opacity(0.44) : (isActive ? accent : .white.opacity(0.72)))
+                        .frame(width: 30)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(channel?.displayName ?? "인터넷 라디오")
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        Text(channel.map { _ in radioStatusText(isActive: isActive) } ?? "등록을 기다림")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.52))
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if let channel {
+                Button {
+                    beginEditingRadioChannel(channel, slot: selection.radioSlot)
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 42, height: 44)
+                        .background(.white.opacity(0.07), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(channel.displayName) 수정")
+            }
+
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.38))
+                .frame(width: 30, height: 44)
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: 58)
+        .background(
+            isActive ? accent.opacity(0.15) : Color.white.opacity(0.05),
+            in: RoundedRectangle(cornerRadius: 13)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 13)
+                .stroke(isActive ? accent.opacity(0.30) : .white.opacity(0.06), lineWidth: 1)
+        }
+    }
+
+    private func externalMusicService(
+        for selection: HomeMusicChannelSelection
+    ) -> ExternalMusicService? {
+        switch selection.kind {
+        case .appleMusic: .appleMusic
+        case .appleClassical: .appleClassical
+        case .internetRadio: nil
+        }
+    }
+
+    private func showsRadioEditor(after selection: HomeMusicChannelSelection) -> Bool {
+        guard radioEditorVisible, selection.kind == .internetRadio else { return false }
+        if let editingRadioChannel {
+            return selection.radioID == editingRadioChannel.id
+        }
+        return selection.radioID == nil && selection.radioSlot == editingRadioSlot
     }
 
     private func externalMusicServiceSubtitle(
@@ -595,77 +670,11 @@ struct SettingsView: View {
         }
     }
 
-    private func externalMusicServiceTrailingIcon(
-        _ service: ExternalMusicService,
-        isActive: Bool
-    ) -> String {
-        if model.externalMusicPlaybackState == .loading { return "hourglass" }
-        return isActive && model.externalMusicPlaybackState == .playing
-            ? "pause.circle.fill"
-            : "play.circle.fill"
-    }
-
-    private func inlineRadioChannelRow(
-        _ channel: InternetRadioConfiguration
-    ) -> some View {
-        let isActive = radio.activeChannelID == channel.id
-
-        return HStack(spacing: 8) {
-            Button {
-                model.toggleInternetRadioPlayback(channelID: channel.id)
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: radioButtonImage(isActive: isActive))
-                        .symbolRenderingMode(.hierarchical)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(isActive ? accent : .white.opacity(0.72))
-                        .frame(width: 44, height: 48)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(channel.displayName)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(2)
-                        Text(radioStatusText(isActive: isActive))
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.54))
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 2)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(channel.displayName), \(radioStatusText(isActive: isActive))")
-            .accessibilityHint(isActive ? "라디오를 정지합니다" : "라디오를 재생합니다")
-
-            Button {
-                beginEditingRadioChannel(channel)
-            } label: {
-                Image(systemName: "pencil")
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 48, height: 48)
-                    .background(.white.opacity(0.07), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(channel.displayName) 수정")
-        }
-        .padding(.horizontal, 10)
-        .frame(minHeight: 58)
-        .background(
-            isActive ? accent.opacity(0.15) : Color.white.opacity(0.06),
-            in: RoundedRectangle(cornerRadius: 15, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .stroke(isActive ? accent.opacity(0.30) : .white.opacity(0.08), lineWidth: 1)
-        }
-    }
-
     private var inlineRadioEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Label(
-                    editingRadioChannel == nil ? "채널 추가" : "채널 수정",
+                    editingRadioChannel == nil ? "인터넷 라디오 등록" : "인터넷 라디오 수정",
                     systemImage: editingRadioChannel == nil ? "plus.circle.fill" : "pencil.circle.fill"
                 )
                 .font(.subheadline.weight(.semibold))
@@ -685,6 +694,7 @@ struct SettingsView: View {
             TextField("https://…", text: $radioDraftAddress, axis: .vertical)
                 .keyboardType(.URL)
                 .textContentType(.URL)
+                .accessibilityIdentifier("internet-radio-address-field")
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($focusedRadioField, equals: .address)
@@ -769,16 +779,21 @@ struct SettingsView: View {
         }
     }
 
-    private func beginAddingRadioChannel() {
+    private func beginAddingRadioChannel(slot: Int?) {
         editingRadioChannel = nil
+        editingRadioSlot = slot
         radioDraftName = ""
         radioDraftAddress = ""
         radioValidationMessage = nil
         withAnimation(.easeInOut(duration: 0.22)) { radioEditorVisible = true }
     }
 
-    private func beginEditingRadioChannel(_ channel: InternetRadioConfiguration) {
+    private func beginEditingRadioChannel(
+        _ channel: InternetRadioConfiguration,
+        slot: Int?
+    ) {
         editingRadioChannel = channel
+        editingRadioSlot = slot
         radioDraftName = channel.displayName
         radioDraftAddress = channel.urlString
         radioValidationMessage = nil
@@ -789,6 +804,7 @@ struct SettingsView: View {
         focusedRadioField = nil
         withAnimation(.easeInOut(duration: 0.22)) { radioEditorVisible = false }
         editingRadioChannel = nil
+        editingRadioSlot = nil
         radioDraftName = ""
         radioDraftAddress = ""
         radioValidationMessage = nil
@@ -805,10 +821,24 @@ struct SettingsView: View {
             )
 
             if editingRadioChannel == nil {
+                let requestedHomeIndex = editingRadioSlot.flatMap { slot in
+                    store.value.homeMusicChannels.firstIndex {
+                        $0.kind == .internetRadio && $0.radioSlot == slot
+                    }
+                }
                 model.addInternetRadioChannel(
                     saved,
                     select: store.value.internetRadioChannels.isEmpty
                 )
+                if let requestedHomeIndex,
+                   let addedSelection = store.value.homeMusicChannels.first(where: {
+                       $0.radioID == saved.id
+                   }) {
+                    _ = model.moveHomeMusicChannel(
+                        id: addedSelection.id,
+                        to: requestedHomeIndex
+                    )
+                }
             } else if !model.updateInternetRadioChannel(saved) {
                 model.addInternetRadioChannel(saved, select: false)
             }
@@ -976,6 +1006,28 @@ struct SettingsView: View {
         openURL(url)
     }
 
+}
+
+private struct HomeMusicChannelDropDelegate: DropDelegate {
+    let targetIndex: Int
+    @Binding var draggedID: String?
+    let move: (String, Int) -> Bool
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedID else { return }
+        if move(draggedID, targetIndex) {
+            UISelectionFeedbackGenerator().selectionChanged()
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggedID = nil
+        return true
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
 }
 
 @MainActor

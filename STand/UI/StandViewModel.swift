@@ -4,6 +4,9 @@ import MediaPlayer
 import MusicKit
 import SwiftUI
 import UIKit
+#if targetEnvironment(macCatalyst)
+import IOKit.ps
+#endif
 
 enum LampPhase: Equatable {
     case off
@@ -43,6 +46,9 @@ struct DeviceBatteryStatus: Equatable {
     }
 
     static func current(device: UIDevice = .current) -> DeviceBatteryStatus {
+        #if targetEnvironment(macCatalyst)
+        return MacBatteryStatus.current()
+        #else
         let rawLevel = device.batteryLevel
         let level = rawLevel >= 0 ? Double(rawLevel) : nil
         let powerState: BatteryPowerState = switch device.batteryState {
@@ -53,8 +59,65 @@ struct DeviceBatteryStatus: Equatable {
         @unknown default: .unknown
         }
         return DeviceBatteryStatus(level: level, powerState: powerState)
+        #endif
     }
 }
+
+#if targetEnvironment(macCatalyst)
+private enum MacBatteryStatus {
+    static func current() -> DeviceBatteryStatus {
+        guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let sourceList = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue()
+        else {
+            return DeviceBatteryStatus(level: nil, powerState: .unknown)
+        }
+
+        for source in sourceList as NSArray {
+            guard let description = IOPSGetPowerSourceDescription(
+                snapshot,
+                source as CFTypeRef
+            )?.takeUnretainedValue() as? [String: Any],
+            let currentCapacity = description["Current Capacity"] as? NSNumber,
+            let maximumCapacity = description["Max Capacity"] as? NSNumber,
+            maximumCapacity.doubleValue > 0
+            else { continue }
+
+            let level = min(
+                1,
+                max(0, currentCapacity.doubleValue / maximumCapacity.doubleValue)
+            )
+            let isCharging = description["Is Charging"] as? Bool ?? false
+            let isCharged = description["Is Charged"] as? Bool ?? false
+            let usesACPower = (description["Power Source State"] as? String) == "AC Power"
+            let powerState: BatteryPowerState = if isCharged || level >= 0.995 {
+                .full
+            } else if isCharging || usesACPower {
+                .charging
+            } else {
+                .unplugged
+            }
+            return DeviceBatteryStatus(level: level, powerState: powerState)
+        }
+
+        return DeviceBatteryStatus(level: nil, powerState: .unknown)
+    }
+}
+
+private final class MacDisplayWakeLock {
+    private let activity: NSObjectProtocol
+
+    init() {
+        activity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .idleDisplaySleepDisabled],
+            reason: "S.tand가 화면 오브제로 실행 중입니다."
+        )
+    }
+
+    deinit {
+        ProcessInfo.processInfo.endActivity(activity)
+    }
+}
+#endif
 
 struct AmbientDimmingPolicy {
     static let brightScreenThreshold = 0.65
@@ -513,9 +576,15 @@ final class StandViewModel: ObservableObject {
     }
 
     private var monitoringSuspensions: Set<MonitoringSuspensionReason> = []
-    // SystemMusicPlayer takes over the Music app's current queue without opening its UI.
+    // Catalyst의 SystemMusicPlayer는 지원되지 않는 now-playing XPC 응답을 메인
+    // 스레드에서 기다릴 수 있으므로 앱 전용 플레이어로 UI 멈춤을 차단한다.
+    #if targetEnvironment(macCatalyst)
+    private let appleMusicPlayer = ApplicationMusicPlayer.shared
+    private let macDisplayWakeLock = MacDisplayWakeLock()
+    #else
     private let appleMusicPlayer = SystemMusicPlayer.shared
     private let mediaSystemMusicPlayer = MPMusicPlayerController.systemMusicPlayer
+    #endif
     private var appIsActive = true
     private var isAdjustingBrightness = false
     private var activeRecordingSessionID: UUID?
@@ -1039,6 +1108,14 @@ final class StandViewModel: ObservableObject {
         settings.value = value
     }
 
+    @discardableResult
+    func moveHomeMusicChannel(id: String, to destinationIndex: Int) -> Bool {
+        var value = settings.value
+        guard value.moveHomeMusicChannel(id: id, to: destinationIndex) else { return false }
+        settings.value = value
+        return true
+    }
+
     private func beginExternalMusicSession(_ service: ExternalMusicService) {
         stopInternetRadioPlayback()
         activeExternalMusicService = service
@@ -1046,9 +1123,30 @@ final class StandViewModel: ObservableObject {
         audio.stop()
     }
 
+    func skipToNextExternalMusicTrack(_ service: ExternalMusicService) {
+        guard activeExternalMusicService == service else { return }
+        #if targetEnvironment(macCatalyst)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await appleMusicPlayer.skipToNextEntry()
+                syncSystemMusicPlayback()
+            } catch {
+                externalMusicMessage = "다음 음악으로 넘어가지 못했습니다. 잠시 후 다시 시도해 주세요."
+            }
+        }
+        #else
+        // SystemMusicPlayer과 MPMusicPlayerController.systemMusicPlayer는 같은 재생 세션을
+        // 공유하므로, 어느 API로 큐를 채웠든 이 호출 하나로 다음 곡으로 넘어간다.
+        mediaSystemMusicPlayer.skipToNextItem()
+        #endif
+    }
+
     func endExternalMusicSession() {
         appleMusicPlayer.stop()
+        #if !targetEnvironment(macCatalyst)
         mediaSystemMusicPlayer.stop()
+        #endif
         activeExternalMusicService = nil
         externalMusicPlaybackState = .idle
         externalMusicTrackTitle = nil
@@ -1059,6 +1157,30 @@ final class StandViewModel: ObservableObject {
 
     private func toggleAppleMusicPlayback(_ service: ExternalMusicService) async {
         syncSystemMusicPlayback()
+        #if targetEnvironment(macCatalyst)
+        if activeExternalMusicService == service,
+           appleMusicPlayer.state.playbackStatus == .playing {
+            appleMusicPlayer.pause()
+            externalMusicPlaybackState = .paused
+            externalMusicMessage = "S.tand 안에서 일시 정지했습니다. 다시 누르면 이어서 재생합니다."
+            return
+        }
+
+        if let entry = appleMusicPlayer.queue.currentEntry,
+           activeExternalMusicService == service,
+           appleMusicPlayer.state.playbackStatus != .stopped {
+            beginExternalMusicSession(service)
+            externalMusicTrackTitle = musicEntryTitle(entry)
+            do {
+                try await appleMusicPlayer.play()
+                externalMusicPlaybackState = .playing
+                externalMusicMessage = "Music 앱에서 듣던 음악을 현재 위치부터 이어서 재생합니다."
+            } catch {
+                failExternalMusic("Apple Music을 재생하지 못했습니다. 구독 상태와 네트워크를 확인해 주세요.")
+            }
+            return
+        }
+        #else
         if activeExternalMusicService == service,
            mediaSystemMusicPlayer.playbackState == .playing {
             mediaSystemMusicPlayer.pause()
@@ -1068,7 +1190,7 @@ final class StandViewModel: ObservableObject {
         }
 
         if let item = mediaSystemMusicPlayer.nowPlayingItem,
-           systemMusicService(for: item) == service,
+           activeExternalMusicService == service,
            mediaSystemMusicPlayer.playbackState != .stopped {
             beginExternalMusicSession(service)
             externalMusicTrackTitle = systemMusicTitle(for: item)
@@ -1077,6 +1199,7 @@ final class StandViewModel: ObservableObject {
             externalMusicMessage = "Music 앱에서 듣던 음악을 현재 위치부터 이어서 재생합니다."
             return
         }
+        #endif
 
         beginExternalMusicSession(service)
         externalMusicPlaybackState = .loading
@@ -1104,10 +1227,17 @@ final class StandViewModel: ObservableObject {
 
             let librarySongs = await shuffledLibrarySongs(for: service)
             if let firstLibrarySong = librarySongs.first {
+                #if targetEnvironment(macCatalyst)
+                appleMusicPlayer.queue = ApplicationMusicPlayer.Queue(
+                    for: librarySongs,
+                    startingAt: firstLibrarySong
+                )
+                #else
                 appleMusicPlayer.queue = MusicKit.MusicPlayer.Queue(
                     for: librarySongs,
                     startingAt: firstLibrarySong
                 )
+                #endif
                 externalMusicTrackTitle = "\(firstLibrarySong.title) · \(firstLibrarySong.artistName)"
                 try await appleMusicPlayer.play()
                 syncSystemMusicPlayback()
@@ -1119,7 +1249,11 @@ final class StandViewModel: ObservableObject {
             }
 
             if let station = await randomRecommendedStation(for: service) {
+                #if targetEnvironment(macCatalyst)
+                appleMusicPlayer.queue = ApplicationMusicPlayer.Queue(for: [station])
+                #else
                 appleMusicPlayer.queue = MusicKit.MusicPlayer.Queue(for: [station])
+                #endif
                 externalMusicTrackTitle = station.name
                 try await appleMusicPlayer.play()
                 syncSystemMusicPlayback()
@@ -1133,10 +1267,17 @@ final class StandViewModel: ObservableObject {
                 failExternalMusic("Apple Music 추천 음악을 찾지 못했습니다. 잠시 후 다시 시도해 주세요.")
                 return
             }
+            #if targetEnvironment(macCatalyst)
+            appleMusicPlayer.queue = ApplicationMusicPlayer.Queue(
+                for: recommendedSongs.shuffled(),
+                startingAt: firstSong
+            )
+            #else
             appleMusicPlayer.queue = MusicKit.MusicPlayer.Queue(
                 for: recommendedSongs.shuffled(),
                 startingAt: firstSong
             )
+            #endif
             externalMusicTrackTitle = "\(firstSong.title) · \(firstSong.artistName)"
             try await appleMusicPlayer.play()
             syncSystemMusicPlayback()
@@ -1155,6 +1296,21 @@ final class StandViewModel: ObservableObject {
     }
 
     private func startSystemMusicMonitoring() {
+        #if targetEnvironment(macCatalyst)
+        appleMusicPlayer.state.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { self?.syncSystemMusicPlayback() }
+            }
+            .store(in: &musicSubscriptions)
+
+        appleMusicPlayer.queue.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { self?.syncSystemMusicPlayback() }
+            }
+            .store(in: &musicSubscriptions)
+        #else
         mediaSystemMusicPlayer.beginGeneratingPlaybackNotifications()
 
         NotificationCenter.default.publisher(
@@ -1172,16 +1328,34 @@ final class StandViewModel: ObservableObject {
         .receive(on: RunLoop.main)
         .sink { [weak self] _ in self?.syncSystemMusicPlayback() }
         .store(in: &musicSubscriptions)
+        #endif
     }
 
     private func syncSystemMusicPlayback() {
+        #if targetEnvironment(macCatalyst)
+        guard let entry = appleMusicPlayer.queue.currentEntry else { return }
+        let state = appleMusicPlayer.state.playbackStatus
+        guard state != .stopped else { return }
+
+        if activeExternalMusicService == nil {
+            let service: ExternalMusicService = entryMatchesService(
+                entry,
+                service: .appleClassical
+            ) ? .appleClassical : .appleMusic
+            beginExternalMusicSession(service)
+        }
+        externalMusicTrackTitle = musicEntryTitle(entry)
+        externalMusicPlaybackState = state == .playing ? .playing : .paused
+        externalMusicMessage = externalMusicPlaybackState == .playing
+            ? "Music 앱에서 재생 중인 음악과 실시간으로 연결되었습니다."
+            : "Music 앱의 현재 음악이 일시 정지되어 있습니다."
+        #else
         guard let item = mediaSystemMusicPlayer.nowPlayingItem else { return }
         let state = mediaSystemMusicPlayer.playbackState
         guard state != .stopped else { return }
 
-        let service = systemMusicService(for: item)
-        if activeExternalMusicService != service {
-            beginExternalMusicSession(service)
+        if activeExternalMusicService == nil {
+            beginExternalMusicSession(systemMusicService(for: item))
         }
         externalMusicTrackTitle = systemMusicTitle(for: item)
         externalMusicPlaybackState = switch state {
@@ -1193,6 +1367,7 @@ final class StandViewModel: ObservableObject {
         externalMusicMessage = externalMusicPlaybackState == .playing
             ? "Music 앱에서 재생 중인 음악과 실시간으로 연결되었습니다."
             : "Music 앱의 현재 음악이 일시 정지되어 있습니다."
+        #endif
     }
 
     private func systemMusicService(for item: MPMediaItem) -> ExternalMusicService {
@@ -1872,6 +2047,15 @@ final class StandViewModel: ObservableObject {
     }
 
     private func startBatteryMonitoring() {
+        #if targetEnvironment(macCatalyst)
+        batteryStatus = .current()
+        Timer.publish(every: 60, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.handleBatteryChange()
+            }
+            .store(in: &batterySubscriptions)
+        #else
         UIDevice.current.isBatteryMonitoringEnabled = true
         batteryStatus = .current()
 
@@ -1884,6 +2068,7 @@ final class StandViewModel: ObservableObject {
             self?.handleBatteryChange()
         }
         .store(in: &batterySubscriptions)
+        #endif
     }
 
     private func handleBatteryChange() {
