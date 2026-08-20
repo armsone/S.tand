@@ -1091,6 +1091,11 @@ final class StandViewModel: ObservableObject {
         }
     }
 
+    func playInternetRadio(channelID: UUID) {
+        guard let configuration = settings.value.internetRadioChannel(id: channelID) else { return }
+        startInternetRadioPlayback(configuration)
+    }
+
     func stopInternetRadioPlayback() {
         radio.stop()
     }

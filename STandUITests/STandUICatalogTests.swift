@@ -125,6 +125,20 @@ final class STandUICatalogTests: XCTestCase {
         )
     }
 
+    func testLandscapeEditorKeepsTheHomeLayoutVisibleWithoutBottomHint() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        launch()
+        XCTAssertTrue(app.buttons["설정"].waitForExistence(timeout: 8))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.76))
+            .press(forDuration: 1)
+
+        XCTAssertTrue(app.buttons["저장"].waitForExistence(timeout: 5))
+        capture("home_editor_landscape")
+        XCTAssertFalse(
+            app.staticTexts["패널 이동·크기 조절 · 시계를 눌러 글꼴 선택"].isHittable
+        )
+    }
+
     private func launch(arguments: [String] = []) {
         app?.terminate()
         app = XCUIApplication()
@@ -165,8 +179,10 @@ final class STandUICatalogTests: XCTestCase {
 
     private func scrollTo(element: XCUIElement, description: String) {
         for _ in 0..<8 where !element.isHittable {
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
-            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
+            // 카드 중앙의 슬라이더가 드래그를 가로채지 않도록 빈 왼쪽 여백에서
+            // 수직 스크롤을 시작한다.
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.8))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.2))
             start.press(forDuration: 0.1, thenDragTo: end)
         }
         XCTAssertTrue(element.isHittable, "\(description) 항목을 화면 안에서 찾지 못했습니다.")

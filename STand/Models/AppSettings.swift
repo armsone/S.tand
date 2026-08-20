@@ -294,25 +294,25 @@ struct StandScreenLayout: Codable, Equatable {
     )
 
     static let landscape = StandScreenLayout(
-        clock: .init(x: 0, y: 0.07155322862129146, scale: 1.2810187063251741),
-        seconds: .init(x: 0.2508888888888889, y: 0.21401047120418848),
-        weatherIcon: .init(x: 0, y: -0.25582024432809763, scale: 0.68640335461830571),
-        weatherTemperature: .init(x: 0, y: -0.25582024432809763, scale: 0.68640335461830571),
-        weatherCondition: .init(x: 0, y: -0.25582024432809763, scale: 0.68640335461830571),
-        date: .init(x: -0.17600000000000007, y: -0.08265270506108202),
-        status: .init(x: 0, y: 0.4646596858638743),
-        brightnessRule: .init(x: 0, y: 0.32),
-        battery: .init(x: 0, y: 0.29780104712041866),
-        radio: .init(x: 0.4084444444444445, y: -0.2762739965095986, scale: 0.75),
-        secondaryRadio: .init(
-            x: -0.40577777777777785,
-            y: -0.27627399650959866,
-            scale: 0.75
-        ),
+        clock: .init(x: 0, y: 0.21553228621291443, scale: 1.112291215059065),
+        seconds: .init(x: 0.19200000000000014, y: 0.2910122164048866, scale: 0.8205408216328642),
+        weatherIcon: .init(x: 0, y: -0.06745200698080275, scale: 0.55),
+        weatherTemperature: .init(x: 0, y: -0.06745200698080275, scale: 0.55),
+        weatherCondition: .init(x: 0, y: -0.06745200698080275, scale: 0.55),
+        date: .init(x: 0, y: 0.43815008726003507, scale: 0.85),
+        status: .init(x: 0, y: 0.5),
+        brightnessRule: .init(x: 0, y: 0.34),
+        battery: .init(x: 0, y: 0.5245898778359511),
+        radio: .init(x: 0.4, y: -0.3, scale: 0.75),
+        secondaryRadio: .init(x: -0.4, y: -0.3, scale: 0.75),
         radiosGrouped: false,
         weatherGroupIDs: [1, 1, 1],
         controlOrder: [.recordings, .boyiso, .settings]
     )
+
+    // Keep every device type on the same normalized landscape default captured
+    // from the representative iPhone layout.
+    static let phoneLandscape = landscape
 }
 
 struct HomeMusicChannelSelection: Codable, Equatable, Hashable, Identifiable {
@@ -927,6 +927,7 @@ enum SettingsMigration {
     static let fiveSecondHoldDurationKey = "settingsMigration.fiveSecondHoldDuration.v1"
     static let internetRadioChannelsKey = "settingsMigration.internetRadioChannels.v1"
     static let currentExperienceDefaultsKey = "settingsMigration.currentExperienceDefaults.v1"
+    static let landscapeLayoutDefaultKey = "settingsMigration.landscapeLayoutDefault.v4"
 
     static func applyingTorchDefault(
         to settings: AppSettings,
@@ -955,6 +956,16 @@ enum SettingsMigration {
         guard !hasMigrated else { return settings }
         var migrated = settings
         migrated.applyCurrentExperienceDefaults()
+        return migrated
+    }
+
+    static func applyingLandscapeLayoutDefault(
+        to settings: AppSettings,
+        hasMigrated: Bool
+    ) -> AppSettings {
+        guard !hasMigrated else { return settings }
+        var migrated = settings
+        migrated.landscapeLayout = .landscape
         return migrated
     }
 }
@@ -988,6 +999,9 @@ final class SettingsStore: ObservableObject {
         let hasMigratedCurrentExperienceDefaults = defaults.bool(
             forKey: SettingsMigration.currentExperienceDefaultsKey
         )
+        let hasMigratedLandscapeLayoutDefault = defaults.bool(
+            forKey: SettingsMigration.landscapeLayoutDefaultKey
+        )
         let torchMigrated = SettingsMigration.applyingTorchDefault(
             to: saved,
             hasMigrated: hasMigratedTorchDefault
@@ -996,9 +1010,13 @@ final class SettingsStore: ObservableObject {
             to: torchMigrated,
             hasMigrated: hasMigratedHoldDuration
         )
-        value = SettingsMigration.applyingCurrentExperienceDefaults(
+        let currentExperienceDefaultsMigrated = SettingsMigration.applyingCurrentExperienceDefaults(
             to: holdDurationMigrated,
             hasMigrated: hasMigratedCurrentExperienceDefaults
+        )
+        value = SettingsMigration.applyingLandscapeLayoutDefault(
+            to: currentExperienceDefaultsMigrated,
+            hasMigrated: hasMigratedLandscapeLayoutDefault
         )
 
         // Preserve an unreadable payload until the user explicitly changes a setting.
@@ -1008,6 +1026,7 @@ final class SettingsStore: ObservableObject {
                 || !hasMigratedHoldDuration
                 || !hasMigratedInternetRadioChannels
                 || !hasMigratedCurrentExperienceDefaults
+                || !hasMigratedLandscapeLayoutDefault
         else { return }
         if let data = try? JSONEncoder().encode(value) {
             defaults.set(data, forKey: storageKey)
@@ -1022,6 +1041,9 @@ final class SettingsStore: ObservableObject {
             }
             if !hasMigratedCurrentExperienceDefaults {
                 defaults.set(true, forKey: SettingsMigration.currentExperienceDefaultsKey)
+            }
+            if !hasMigratedLandscapeLayoutDefault {
+                defaults.set(true, forKey: SettingsMigration.landscapeLayoutDefaultKey)
             }
         }
     }

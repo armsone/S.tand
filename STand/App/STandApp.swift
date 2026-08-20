@@ -82,6 +82,11 @@ enum UICatalogLaunch {
 
         let defaults = UserDefaults.standard
         var settings = AppSettings.recommended
+        #if !targetEnvironment(macCatalyst)
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            settings.landscapeLayout = .phoneLandscape
+        }
+        #endif
         settings.soundSensingEnabled = false
         settings.recordingEnabled = false
         settings.cameraAmbientSensingEnabled = false
@@ -110,6 +115,7 @@ enum UICatalogLaunch {
         defaults.set(true, forKey: SettingsMigration.fiveSecondHoldDurationKey)
         defaults.set(true, forKey: SettingsMigration.internetRadioChannelsKey)
         defaults.set(true, forKey: SettingsMigration.currentExperienceDefaultsKey)
+        defaults.set(true, forKey: SettingsMigration.landscapeLayoutDefaultKey)
         prepareRecordingFixture()
     }
 

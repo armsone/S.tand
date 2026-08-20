@@ -144,6 +144,41 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
+    func testInternetRadioTitleTapPlaysTappedChannelOrAdvancesWhilePlaying() {
+        let first = UUID()
+        let second = UUID()
+        let third = UUID()
+        let ordered = [first, second, third]
+
+        XCTAssertEqual(
+            InternetRadioTitleTapPolicy.targetChannelID(
+                tappedChannelID: second,
+                activeChannelID: nil,
+                playbackState: .idle,
+                orderedChannelIDs: ordered
+            ),
+            second
+        )
+        XCTAssertEqual(
+            InternetRadioTitleTapPolicy.targetChannelID(
+                tappedChannelID: first,
+                activeChannelID: second,
+                playbackState: .playing,
+                orderedChannelIDs: ordered
+            ),
+            third
+        )
+        XCTAssertEqual(
+            InternetRadioTitleTapPolicy.targetChannelID(
+                tappedChannelID: second,
+                activeChannelID: third,
+                playbackState: .playing,
+                orderedChannelIDs: ordered
+            ),
+            first
+        )
+    }
+
     func testMacPresentationScaleProducesAOneAndAHalfTimesLogicalCanvas() {
         XCTAssertEqual(StandPresentationMetrics.macHomeScale, 1.5)
         XCTAssertEqual(
@@ -214,11 +249,11 @@ final class AudioAnalysisTests: XCTestCase {
         }
     }
 
-    func testEmbeddedSnoreSamplesAreIncluded() {
+    func testRemovedSampleRecordingsAreNotBundled() {
         for name in ["sample-snore-5s", "sample-snore-10s", "sample-snore-15s"] {
-            XCTAssertNotNil(
+            XCTAssertNil(
                 Bundle.main.url(forResource: name, withExtension: "m4a"),
-                "내장 테스트 코골이 파일이 앱 번들에 포함되지 않았습니다: \(name).m4a"
+                "제거한 테스트 코골이 파일이 앱 번들에 다시 포함되었습니다: \(name).m4a"
             )
         }
     }
@@ -668,6 +703,14 @@ final class AudioAnalysisTests: XCTestCase {
         let cardWidth = MusicChannelStripLayoutPolicy.cardWidth(viewportWidth: 1_200)
         XCTAssertEqual(cardWidth, 168)
         XCTAssertEqual(
+            MusicChannelStripLayoutPolicy.cardWidth(
+                viewportWidth: 1_200,
+                isPhoneLandscape: true
+            ),
+            134.4,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
             MusicChannelStripLayoutPolicy.maximumScroll(
                 viewportWidth: 1_200,
                 cardCount: 6,
@@ -693,6 +736,62 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(
             MusicChannelStripLayoutPolicy.clampedOffset(80, maximumScroll: maximumScroll),
             0
+        )
+        XCTAssertEqual(
+            MusicChannelStripLayoutPolicy.leadingAlignedOffset(
+                cardIndex: 0,
+                cardWidth: 168,
+                maximumScroll: 600
+            ),
+            0
+        )
+        XCTAssertEqual(
+            MusicChannelStripLayoutPolicy.leadingAlignedOffset(
+                cardIndex: 2,
+                cardWidth: 168,
+                maximumScroll: 600
+            ),
+            -352
+        )
+        XCTAssertEqual(
+            MusicChannelStripLayoutPolicy.leadingAlignedOffset(
+                cardIndex: 5,
+                cardWidth: 168,
+                maximumScroll: 600
+            ),
+            -600
+        )
+    }
+
+    func testPhoneLandscapeSideControlsOnlyEnableForPhoneLandscapeOutsideCatalyst() {
+        XCTAssertEqual(PhoneLandscapeSideControlsPolicy.controlWidth, 57.12, accuracy: 0.001)
+        XCTAssertTrue(
+            PhoneLandscapeSideControlsPolicy.isEnabled(
+                isPortrait: false,
+                isPhoneIdiom: true,
+                isMacCatalyst: false
+            )
+        )
+        XCTAssertFalse(
+            PhoneLandscapeSideControlsPolicy.isEnabled(
+                isPortrait: true,
+                isPhoneIdiom: true,
+                isMacCatalyst: false
+            )
+        )
+        XCTAssertFalse(
+            PhoneLandscapeSideControlsPolicy.isEnabled(
+                isPortrait: false,
+                isPhoneIdiom: false,
+                isMacCatalyst: false
+            )
+        )
+        XCTAssertFalse(
+            PhoneLandscapeSideControlsPolicy.isEnabled(
+                isPortrait: false,
+                isPhoneIdiom: true,
+                isMacCatalyst: true
+            )
         )
     }
 
@@ -1057,43 +1156,57 @@ final class AudioAnalysisTests: XCTestCase {
         let landscape = AppSettings.recommended.landscapeLayout
         XCTAssertEqual(
             landscape.clock,
-            PanelTransform(x: 0, y: 0.07155322862129146, scale: 1.2810187063251741)
+            PanelTransform(x: 0, y: 0.21553228621291443, scale: 1.112291215059065)
         )
         XCTAssertEqual(
             landscape.weatherIcon,
-            PanelTransform(x: 0, y: -0.25582024432809763, scale: 0.68640335461830571)
+            PanelTransform(x: 0, y: -0.06745200698080275, scale: 0.55)
         )
         XCTAssertEqual(landscape.weatherIcon, landscape.weatherTemperature)
         XCTAssertEqual(landscape.weatherIcon, landscape.weatherCondition)
         XCTAssertEqual(landscape.weatherGroupIDs, [1, 1, 1])
         XCTAssertEqual(
             landscape.date,
-            PanelTransform(x: -0.17600000000000007, y: -0.08265270506108202, scale: 1)
+            PanelTransform(x: 0, y: 0.43815008726003507, scale: 0.85)
         )
         XCTAssertEqual(
             landscape.status,
-            PanelTransform(x: 0, y: 0.4646596858638743, scale: 1)
+            PanelTransform(x: 0, y: 0.5, scale: 1)
         )
         XCTAssertEqual(
             landscape.battery,
-            PanelTransform(x: 0, y: 0.29780104712041866, scale: 1)
+            PanelTransform(x: 0, y: 0.5245898778359511, scale: 1)
         )
         XCTAssertEqual(
             landscape.seconds,
-            PanelTransform(x: 0.2508888888888889, y: 0.21401047120418848, scale: 1)
+            PanelTransform(
+                x: 0.19200000000000014,
+                y: 0.2910122164048866,
+                scale: 0.8205408216328642
+            )
         )
         XCTAssertEqual(
             landscape.radio,
-            PanelTransform(x: 0.4084444444444445, y: -0.2762739965095986, scale: 0.75)
+            PanelTransform(x: 0.4, y: -0.3, scale: 0.75)
         )
         XCTAssertEqual(
             landscape.secondaryRadio,
-            PanelTransform(x: -0.40577777777777785, y: -0.27627399650959866, scale: 0.75)
+            PanelTransform(x: -0.4, y: -0.3, scale: 0.75)
         )
         XCTAssertFalse(landscape.radiosGrouped)
         XCTAssertEqual(
             landscape.controlOrder,
             [.recordings, .boyiso, .settings]
+        )
+
+        XCTAssertEqual(StandScreenLayout.phoneLandscape, landscape)
+    }
+
+    func testLandscapeDefaultKeepsRepresentativePhoneLayoutOnEveryDeviceClass() {
+        XCTAssertEqual(StandScreenLayout.landscape, StandScreenLayout.phoneLandscape)
+        XCTAssertEqual(
+            StandScreenLayout.landscape.brightnessRule,
+            PanelTransform(x: 0, y: 0.34, scale: 1)
         )
     }
 
@@ -1353,6 +1466,7 @@ final class AudioAnalysisTests: XCTestCase {
         defaults.set(true, forKey: SettingsMigration.torchEnabledByDefaultKey)
         defaults.set(true, forKey: SettingsMigration.fiveSecondHoldDurationKey)
         defaults.set(true, forKey: SettingsMigration.internetRadioChannelsKey)
+        defaults.set(true, forKey: SettingsMigration.landscapeLayoutDefaultKey)
 
         let migrated = SettingsStore(defaults: defaults)
         XCTAssertEqual(migrated.value.clockScale, AppSettings.defaultClockScale)
@@ -1383,6 +1497,55 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(defaults.data(forKey: "appSettings"), futurePayload)
         XCTAssertFalse(defaults.bool(forKey: SettingsMigration.torchEnabledByDefaultKey))
         XCTAssertFalse(defaults.bool(forKey: SettingsMigration.currentExperienceDefaultsKey))
+        XCTAssertFalse(defaults.bool(forKey: SettingsMigration.landscapeLayoutDefaultKey))
+    }
+
+    @MainActor
+    func testLandscapeLayoutDefaultMigrationResetsOnlyLandscapeOnceAndPreservesLaterEdits() throws {
+        let suiteName = "STandTests.landscape-layout-default.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        var previouslySaved = AppSettings.recommended
+        previouslySaved.portraitLayout.clock = PanelTransform(x: 0.12, y: -0.08, scale: 0.9)
+        previouslySaved.landscapeLayout.clock = PanelTransform(x: -0.3, y: 0.25, scale: 0.6)
+        previouslySaved.holdDuration = 45
+        previouslySaved.clockFont = .kakaoBigSans
+        defaults.set(try JSONEncoder().encode(previouslySaved), forKey: "appSettings")
+        defaults.set(true, forKey: SettingsMigration.torchEnabledByDefaultKey)
+        defaults.set(true, forKey: SettingsMigration.fiveSecondHoldDurationKey)
+        defaults.set(true, forKey: SettingsMigration.internetRadioChannelsKey)
+        defaults.set(true, forKey: SettingsMigration.currentExperienceDefaultsKey)
+        defaults.set(true, forKey: "settingsMigration.phoneLandscapeLayoutDefault.v3")
+
+        let migrated = SettingsStore(defaults: defaults)
+
+        XCTAssertEqual(migrated.value.landscapeLayout, .landscape)
+        XCTAssertEqual(migrated.value.portraitLayout, previouslySaved.portraitLayout)
+        XCTAssertEqual(migrated.value.holdDuration, previouslySaved.holdDuration)
+        XCTAssertEqual(migrated.value.clockFont, previouslySaved.clockFont)
+        XCTAssertTrue(defaults.bool(forKey: SettingsMigration.landscapeLayoutDefaultKey))
+
+        migrated.value.landscapeLayout.clock = PanelTransform(x: 0.05, y: 0.05, scale: 1.1)
+        let reopened = SettingsStore(defaults: defaults)
+        XCTAssertEqual(
+            reopened.value.landscapeLayout.clock,
+            PanelTransform(x: 0.05, y: 0.05, scale: 1.1)
+        )
+        XCTAssertEqual(reopened.value.portraitLayout, previouslySaved.portraitLayout)
+    }
+
+    func testLandscapeLayoutMigrationAppliesRegardlessOfDeviceClass() {
+        var previouslySaved = AppSettings.recommended
+        previouslySaved.landscapeLayout.clock = PanelTransform(x: -0.3, y: 0.25, scale: 0.6)
+
+        let migrated = SettingsMigration.applyingLandscapeLayoutDefault(
+            to: previouslySaved,
+            hasMigrated: false
+        )
+
+        XCTAssertEqual(migrated.landscapeLayout, .landscape)
+        XCTAssertEqual(migrated.portraitLayout, previouslySaved.portraitLayout)
     }
 
     func testScreenEditingSettingsRoundTrip() throws {
@@ -1606,6 +1769,54 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(region.insets.bottom, 101)
         XCTAssertEqual(region.frame.minX, 83)
         XCTAssertEqual(region.frame.maxX, 769)
+    }
+
+    func testLandscapePhoneEditorFreesTheFormerBottomControlRegion() {
+        let canvas = CGSize(width: 852, height: 393)
+        let safeAreaInsets = EdgeInsets(top: 0, leading: 59, bottom: 21, trailing: 59)
+
+        let reservedRegion = PanelEditingPolicy.editingRegion(
+            canvasSize: canvas,
+            safeAreaInsets: safeAreaInsets,
+            isPortrait: false
+        )
+        XCTAssertEqual(reservedRegion.insets.bottom, 101)
+
+        let freedRegion = PanelEditingPolicy.editingRegion(
+            canvasSize: canvas,
+            safeAreaInsets: safeAreaInsets,
+            isPortrait: false,
+            controlOrder: nil,
+            reservesBottomControlRow: false
+        )
+        // Bottom: 21 safe + 6 outer + 12 version + 2 clearance, no control row height.
+        XCTAssertEqual(freedRegion.insets.bottom, 41)
+        XCTAssertLessThan(freedRegion.insets.bottom, reservedRegion.insets.bottom)
+        XCTAssertGreaterThan(freedRegion.frame.maxY, reservedRegion.frame.maxY)
+    }
+
+    func testLandscapePhoneEditorReservesTheFixedTopMusicRow() {
+        let baseRegion = PanelEditingPolicy.editingRegion(
+            canvasSize: CGSize(width: 852, height: 393),
+            safeAreaInsets: EdgeInsets(top: 0, leading: 59, bottom: 21, trailing: 59),
+            isPortrait: false,
+            controlOrder: nil,
+            reservesBottomControlRow: false
+        )
+        let phoneLandscapeRegion = PanelEditingPolicy.editingRegion(
+            canvasSize: CGSize(width: 852, height: 393),
+            safeAreaInsets: EdgeInsets(top: 0, leading: 59, bottom: 21, trailing: 59),
+            isPortrait: false,
+            controlOrder: nil,
+            reservesBottomControlRow: false,
+            reservesPhoneLandscapeTopRow: true
+        )
+
+        XCTAssertEqual(
+            phoneLandscapeRegion.insets.top - baseRegion.insets.top,
+            InternetRadioPanelMetrics.height + 8
+        )
+        XCTAssertEqual(phoneLandscapeRegion.insets.bottom, baseRegion.insets.bottom)
     }
 
     func testEditorMovementUsesFullCanvasVerticallyWithoutChromeBoundary() {
@@ -1923,7 +2134,7 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
-    func testStartleActivationWaitsForFullMinuteAfterEnteringMateMode() {
+    func testStartleActivationWaitsForConfiguredDelayAfterEnteringMateMode() {
         let enteredAt: TimeInterval = 1_000
 
         XCTAssertFalse(
@@ -1935,13 +2146,13 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertFalse(
             StartleActivationPolicy.canActivate(
                 mateModeEnteredAt: enteredAt,
-                now: enteredAt + 59.999
+                now: enteredAt + StartleActivationPolicy.delay - 0.001
             )
         )
         XCTAssertTrue(
             StartleActivationPolicy.canActivate(
                 mateModeEnteredAt: enteredAt,
-                now: enteredAt + 60
+                now: enteredAt + StartleActivationPolicy.delay
             )
         )
     }

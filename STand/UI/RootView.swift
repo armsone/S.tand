@@ -30,9 +30,11 @@ enum DatePanelMetrics {
 enum MusicChannelStripLayoutPolicy {
     static let spacing: CGFloat = 8
     static let sideInset: CGFloat = 12
+    static let phoneLandscapeCardWidthScale: CGFloat = 0.8
 
-    static func cardWidth(viewportWidth: CGFloat) -> CGFloat {
-        viewportWidth < 700 ? max(148, (viewportWidth - 46) / 2) : 168
+    static func cardWidth(viewportWidth: CGFloat, isPhoneLandscape: Bool = false) -> CGFloat {
+        let baseWidth = viewportWidth < 700 ? max(148, (viewportWidth - 46) / 2) : 168
+        return isPhoneLandscape ? baseWidth * phoneLandscapeCardWidthScale : baseWidth
     }
 
     static func contentWidth(cardCount: Int, cardWidth: CGFloat) -> CGFloat {
@@ -54,6 +56,17 @@ enum MusicChannelStripLayoutPolicy {
 
     static func clampedOffset(_ offset: CGFloat, maximumScroll: CGFloat) -> CGFloat {
         min(0, max(-maximumScroll, offset))
+    }
+
+    static func leadingAlignedOffset(
+        cardIndex: Int,
+        cardWidth: CGFloat,
+        maximumScroll: CGFloat
+    ) -> CGFloat {
+        clampedOffset(
+            -CGFloat(max(0, cardIndex)) * (cardWidth + spacing),
+            maximumScroll: maximumScroll
+        )
     }
 }
 
@@ -202,7 +215,12 @@ private struct MusicChannelStripFramePreferenceKey: PreferenceKey {
 
 enum HomeEditorResetPolicy {
     static func panels(in layout: StandScreenLayout, isPortrait: Bool) -> StandScreenLayout {
-        var reset = isPortrait ? StandScreenLayout.portrait : .landscape
+        let usesPhoneLandscapeLayout = PhoneLandscapeSideControlsPolicy.isEnabled(
+            isPortrait: isPortrait
+        )
+        var reset = isPortrait
+            ? StandScreenLayout.portrait
+            : (usesPhoneLandscapeLayout ? .phoneLandscape : .landscape)
         reset.controlOrder = layout.controlOrder
         return reset
     }
@@ -298,6 +316,33 @@ enum BottomControlLayoutPolicy {
     }
 }
 
+enum PhoneLandscapeSideControlsPolicy {
+    static let baseControlWidth: CGFloat = 84
+    static let controlWidthScale: CGFloat = 0.68
+    static let controlWidth = baseControlWidth * controlWidthScale
+
+    static func isEnabled(
+        isPortrait: Bool,
+        isPhoneIdiom: Bool,
+        isMacCatalyst: Bool
+    ) -> Bool {
+        !isPortrait && isPhoneIdiom && !isMacCatalyst
+    }
+
+    static func isEnabled(isPortrait: Bool) -> Bool {
+        #if targetEnvironment(macCatalyst)
+        let isMacCatalyst = true
+        #else
+        let isMacCatalyst = false
+        #endif
+        return isEnabled(
+            isPortrait: isPortrait,
+            isPhoneIdiom: UIDevice.current.userInterfaceIdiom == .phone,
+            isMacCatalyst: isMacCatalyst
+        )
+    }
+}
+
 enum StatusPanelMetrics {
     static let height: CGFloat = 36
 
@@ -334,6 +379,26 @@ enum ExternalMusicTitleTapPolicy {
         playbackState: ExternalMusicPlaybackState
     ) -> ExternalMusicTitleTapAction {
         isActive && playbackState == .playing ? .next : .play
+    }
+}
+
+enum InternetRadioTitleTapPolicy {
+    static func targetChannelID(
+        tappedChannelID: UUID,
+        activeChannelID: UUID?,
+        playbackState: InternetRadioPlaybackState,
+        orderedChannelIDs: [UUID]
+    ) -> UUID? {
+        guard !orderedChannelIDs.isEmpty else { return nil }
+        guard playbackState == .playing else {
+            return orderedChannelIDs.contains(tappedChannelID) ? tappedChannelID : nil
+        }
+
+        let currentChannelID = activeChannelID ?? tappedChannelID
+        guard let currentIndex = orderedChannelIDs.firstIndex(of: currentChannelID) else {
+            return orderedChannelIDs.first
+        }
+        return orderedChannelIDs[(currentIndex + 1) % orderedChannelIDs.count]
     }
 }
 
@@ -494,22 +559,38 @@ struct RootView: View {
                             .transition(.opacity)
                     }
 
+                    let usesPhoneLandscapeSideControls = PhoneLandscapeSideControlsPolicy.isEnabled(
+                        isPortrait: isPortrait
+                    )
+
                     VStack(spacing: 0) {
                         topBar(isPortrait: isPortrait)
                             .padding(.horizontal, isPortrait ? 20 : 32)
-                        musicChannelStrip(isPortrait: isPortrait)
+                        if usesPhoneLandscapeSideControls {
+                            HStack(spacing: StandControlLayoutMetrics.rowSpacing) {
+                                musicChannelStrip(isPortrait: isPortrait)
+                                    .frame(maxWidth: .infinity)
+                                phoneLandscapeSideControls()
+                            }
+                            .padding(.trailing, 32)
                             .padding(.top, 8)
+                        } else {
+                            musicChannelStrip(isPortrait: isPortrait)
+                                .padding(.top, 8)
+                        }
                         statusBanners
                             .padding(.horizontal, isPortrait ? 20 : 32)
                         Spacer(minLength: 0)
-                        bottomControls(
-                            isPortrait: isPortrait,
-                            availableWidth: max(
-                                0,
-                                contentSize.width - StandControlLayoutMetrics.rowSpacing * 2
+                        if !usesPhoneLandscapeSideControls {
+                            bottomControls(
+                                isPortrait: isPortrait,
+                                availableWidth: max(
+                                    0,
+                                    contentSize.width - StandControlLayoutMetrics.rowSpacing * 2
+                                )
                             )
-                        )
-                        .padding(.horizontal, StandControlLayoutMetrics.rowSpacing)
+                            .padding(.horizontal, StandControlLayoutMetrics.rowSpacing)
+                        }
                     }
                     .padding(.top, isPortrait ? 18 : 20)
                     .padding(.bottom, StandControlLayoutMetrics.bottomPadding(isPortrait: isPortrait))
@@ -837,7 +918,10 @@ struct RootView: View {
     }
 
     private func musicChannelStrip(isPortrait: Bool) -> some View {
-        VStack(spacing: 6) {
+        let usesPhoneLandscapeLayout = PhoneLandscapeSideControlsPolicy.isEnabled(
+            isPortrait: isPortrait
+        )
+        return VStack(spacing: 6) {
             #if targetEnvironment(macCatalyst)
             if isMusicStripReorderingCatalyst {
                 musicChannelStripEditingBar(isPortrait: isPortrait)
@@ -848,7 +932,8 @@ struct RootView: View {
             GeometryReader { proxy in
                 let channels = homeMusicChannels
                 let cardWidth = MusicChannelStripLayoutPolicy.cardWidth(
-                    viewportWidth: proxy.size.width
+                    viewportWidth: proxy.size.width,
+                    isPhoneLandscape: usesPhoneLandscapeLayout
                 )
                 let maximumScroll = MusicChannelStripLayoutPolicy.maximumScroll(
                     viewportWidth: proxy.size.width,
@@ -859,7 +944,11 @@ struct RootView: View {
                 Group {
                     if maximumScroll == 0 {
                         HStack(spacing: MusicChannelStripLayoutPolicy.spacing) {
-                            musicChannelCards(channels, cardWidth: cardWidth)
+                            musicChannelCards(
+                                channels,
+                                cardWidth: cardWidth,
+                                maximumScroll: maximumScroll
+                            )
                         }
                         .frame(maxWidth: .infinity, alignment: .center)
                     } else {
@@ -867,7 +956,11 @@ struct RootView: View {
                             #if targetEnvironment(macCatalyst)
                             if isMusicStripReorderingCatalyst {
                                 HStack(spacing: MusicChannelStripLayoutPolicy.spacing) {
-                                    musicChannelCards(channels, cardWidth: cardWidth)
+                                    musicChannelCards(
+                                        channels,
+                                        cardWidth: cardWidth,
+                                        maximumScroll: maximumScroll
+                                    )
                                 }
                                 .offset(x: MusicChannelStripLayoutPolicy.sideInset + musicChannelStripOffset)
                                 .frame(width: proxy.size.width, alignment: .leading)
@@ -875,7 +968,11 @@ struct RootView: View {
                                 .clipped()
                             } else {
                                 HStack(spacing: MusicChannelStripLayoutPolicy.spacing) {
-                                    musicChannelCards(channels, cardWidth: cardWidth)
+                                    musicChannelCards(
+                                        channels,
+                                        cardWidth: cardWidth,
+                                        maximumScroll: maximumScroll
+                                    )
                                 }
                                 .offset(x: MusicChannelStripLayoutPolicy.sideInset + musicChannelStripOffset)
                                 .frame(width: proxy.size.width, alignment: .leading)
@@ -888,7 +985,11 @@ struct RootView: View {
                             }
                             #else
                             HStack(spacing: MusicChannelStripLayoutPolicy.spacing) {
-                                musicChannelCards(channels, cardWidth: cardWidth)
+                                musicChannelCards(
+                                    channels,
+                                    cardWidth: cardWidth,
+                                    maximumScroll: maximumScroll
+                                )
                             }
                             .offset(x: MusicChannelStripLayoutPolicy.sideInset + musicChannelStripOffset)
                             .frame(width: proxy.size.width, alignment: .leading)
@@ -899,6 +1000,16 @@ struct RootView: View {
                             )
                             .clipped()
                             #endif
+                        }
+                        .mask {
+                            if usesPhoneLandscapeLayout {
+                                MusicChannelStripEdgeMask(
+                                    showsLeadingFade: musicChannelStripOffset < -0.5,
+                                    showsTrailingFade: musicChannelStripOffset > -maximumScroll + 0.5
+                                )
+                            } else {
+                                Rectangle()
+                            }
                         }
                         .onAppear {
                             musicChannelStripOffset = MusicChannelStripLayoutPolicy.clampedOffset(
@@ -963,7 +1074,8 @@ struct RootView: View {
     @ViewBuilder
     private func musicChannelCards(
         _ channels: [HomeMusicChannel],
-        cardWidth: CGFloat
+        cardWidth: CGFloat,
+        maximumScroll: CGFloat
     ) -> some View {
         let selectionIDs = settings.value.homeMusicChannels.map(\.id)
         ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
@@ -978,6 +1090,20 @@ struct RootView: View {
                 orderIndex: index,
                 selectionID: selectionIDs.indices.contains(index) ? selectionIDs[index] : channel.id,
                 onToggleRadio: model.toggleInternetRadioPlayback(channelID:),
+                onSelectRadioTitle: { channelID in
+                    guard let targetChannelID = handleInternetRadioTitleTap(channelID),
+                          let targetIndex = channels.firstIndex(where: { channel in
+                              guard case .radio(let configuration) = channel else { return false }
+                              return configuration.id == targetChannelID
+                          }) else { return }
+                    withAnimation(.snappy(duration: 0.28)) {
+                        musicChannelStripOffset = MusicChannelStripLayoutPolicy.leadingAlignedOffset(
+                            cardIndex: targetIndex,
+                            cardWidth: cardWidth,
+                            maximumScroll: maximumScroll
+                        )
+                    }
+                },
                 onToggleExternalMusic: model.toggleExternalMusicPlayback,
                 onSkipExternalMusic: model.skipToNextExternalMusicTrack,
                 onEditRadio: { channelID in
@@ -999,6 +1125,19 @@ struct RootView: View {
                 }
             )
         }
+    }
+
+    @discardableResult
+    private func handleInternetRadioTitleTap(_ tappedChannelID: UUID) -> UUID? {
+        let orderedChannelIDs = settings.value.internetRadioChannels.map(\.id)
+        guard let targetChannelID = InternetRadioTitleTapPolicy.targetChannelID(
+            tappedChannelID: tappedChannelID,
+            activeChannelID: radio.activeChannelID,
+            playbackState: radio.state,
+            orderedChannelIDs: orderedChannelIDs
+        ) else { return nil }
+        model.playInternetRadio(channelID: targetChannelID)
+        return targetChannelID
     }
 
     private func musicChannelStripDragGesture(maximumScroll: CGFloat) -> some Gesture {
@@ -1342,15 +1481,20 @@ struct RootView: View {
         let layout = isPortrait
             ? settings.value.portraitLayout
             : settings.value.landscapeLayout
+        let usesPhoneLandscapeSideControls = PhoneLandscapeSideControlsPolicy.isEnabled(
+            isPortrait: isPortrait
+        )
         currentProtectedInsets = PanelEditingPolicy.editingRegion(
             canvasSize: proxy.size,
             safeAreaInsets: proxy.safeAreaInsets,
             isPortrait: isPortrait,
-            controlOrder: layout.controlOrder,
+            controlOrder: usesPhoneLandscapeSideControls ? nil : layout.controlOrder,
             bottomAvailableWidth: max(
                 0,
                 proxy.size.width - StandControlLayoutMetrics.rowSpacing * 2
-            )
+            ),
+            reservesBottomControlRow: !usesPhoneLandscapeSideControls,
+            reservesPhoneLandscapeTopRow: usesPhoneLandscapeSideControls
         ).insets
     }
 
@@ -1401,6 +1545,17 @@ struct RootView: View {
             .contentShape(Rectangle())
             .animation(.easeOut(duration: 0.3), value: model.controlsVisible)
         }
+    }
+
+    private func phoneLandscapeSideControls() -> some View {
+        HStack(spacing: StandControlLayoutMetrics.rowSpacing) {
+            ForEach(visibleControlOrder(isPortrait: false)) { kind in
+                bottomControl(for: kind, width: PhoneLandscapeSideControlsPolicy.controlWidth)
+            }
+        }
+        .opacity(model.controlsVisible || !model.isNightSessionActive ? 1 : 0.62)
+        .animation(.easeOut(duration: 0.3), value: model.controlsVisible)
+        .accessibilityElement(children: .contain)
     }
 
     private func visibleControlOrder(isPortrait: Bool) -> [StandControlKind] {
@@ -2132,6 +2287,32 @@ private struct HomeMusicPanel: View {
             )
         }
     }
+
+}
+
+private struct MusicChannelStripEdgeMask: View {
+    let showsLeadingFade: Bool
+    let showsTrailingFade: Bool
+
+    var body: some View {
+        HStack(spacing: 0) {
+            LinearGradient(
+                colors: showsLeadingFade ? [.clear, .black] : [.black, .black],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: 24)
+
+            Rectangle().fill(.black)
+
+            LinearGradient(
+                colors: showsTrailingFade ? [.black, .clear] : [.black, .black],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: 28)
+        }
+    }
 }
 
 private struct HomeMusicStripCard: View {
@@ -2145,6 +2326,7 @@ private struct HomeMusicStripCard: View {
     let orderIndex: Int
     let selectionID: String
     let onToggleRadio: (UUID) -> Void
+    let onSelectRadioTitle: (UUID) -> Void
     let onToggleExternalMusic: (ExternalMusicService) -> Void
     let onSkipExternalMusic: (ExternalMusicService) -> Void
     let onEditRadio: (UUID) -> Void
@@ -2345,31 +2527,46 @@ private struct HomeMusicStripCard: View {
 
     private func radioContent(_ configuration: InternetRadioConfiguration) -> some View {
         let isActive = activeRadioChannelID == configuration.id
-        return Button {
-            onToggleRadio(configuration.id)
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: radioIcon(isActive: isActive))
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(configuration.displayName)
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .lineLimit(1)
+        return HStack(spacing: 4) {
+            Button {
+                onToggleRadio(configuration.id)
+            } label: {
+                VStack(spacing: 2) {
+                    Image(systemName: radioIcon(isActive: isActive))
+                        .symbolRenderingMode(.hierarchical)
+                        .font(.system(size: 17, weight: .semibold))
                     Text(isActive ? radioStatus : "대기 중")
-                        .font(.system(size: 8.5, weight: .medium))
+                        .font(.system(size: 7.5, weight: .medium))
                         .foregroundStyle(.white.opacity(0.52))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.65)
                 }
-                Spacer(minLength: 0)
+                .frame(width: 44, height: InternetRadioPanelMetrics.height)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 11)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                "\(configuration.displayName) \(isActive && radioState == .playing ? "정지" : "재생")"
+            )
+
+            Button {
+                onSelectRadioTitle(configuration.id)
+            } label: {
+                Text(configuration.displayName)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                "\(configuration.displayName), \(radioState == .playing ? "다음 라디오" : "재생")"
+            )
         }
-        .buttonStyle(.plain)
+        .padding(.leading, 3)
+        .padding(.trailing, 11)
         .onLongPressGesture(minimumDuration: 0.8) { onEditRadio(configuration.id) }
-        .accessibilityHint("두 번 탭해 재생하고 길게 눌러 채널을 편집합니다")
+        .accessibilityHint("제목을 두 번 탭해 재생하거나 다음 라디오로 이동하고 길게 눌러 채널을 편집합니다")
     }
 
     private var emptyRadioContent: some View {
@@ -3394,16 +3591,21 @@ private struct ScreenEditorView: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let usesPhoneLandscapeSideControls = PhoneLandscapeSideControlsPolicy.isEnabled(
+                isPortrait: isPortrait
+            )
             let editingInsets = PanelEditingPolicy.editingRegion(
                 canvasSize: proxy.size,
                 safeAreaInsets: proxy.safeAreaInsets,
                 isPortrait: isPortrait,
                 fontPaletteVisible: showFontPalette,
-                controlOrder: layout.controlOrder,
+                controlOrder: usesPhoneLandscapeSideControls ? nil : layout.controlOrder,
                 bottomAvailableWidth: max(
                     0,
                     proxy.size.width - StandControlLayoutMetrics.rowSpacing * 2
-                )
+                ),
+                reservesBottomControlRow: !usesPhoneLandscapeSideControls,
+                reservesPhoneLandscapeTopRow: usesPhoneLandscapeSideControls
             ).insets
 
             ZStack {
@@ -3416,6 +3618,7 @@ private struct ScreenEditorView: View {
                     transform: $layout.clock,
                     canvasSize: proxy.size,
                     editingInsets: editingInsets,
+                    clampsOnAppearance: isPortrait,
                     accessibilityName: "시계 패널",
                     onTap: { showFontPalette.toggle() }
                 ) {
@@ -3437,6 +3640,7 @@ private struct ScreenEditorView: View {
                     transform: $layout.seconds,
                     canvasSize: proxy.size,
                     editingInsets: editingInsets,
+                    clampsOnAppearance: isPortrait,
                     accessibilityName: "초 패널"
                 ) {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -3463,6 +3667,7 @@ private struct ScreenEditorView: View {
                     transform: $layout.date,
                     canvasSize: proxy.size,
                     editingInsets: editingInsets,
+                    clampsOnAppearance: isPortrait,
                     accessibilityName: "날짜 패널"
                 ) {
                     StandDatePanel(date: .now, isPortrait: isPortrait)
@@ -3474,6 +3679,7 @@ private struct ScreenEditorView: View {
                     transform: $layout.battery,
                     canvasSize: proxy.size,
                     editingInsets: editingInsets,
+                    clampsOnAppearance: isPortrait,
                     accessibilityName: "배터리 패널"
                 ) {
                     Label(batteryText, systemImage: batterySystemImage)
@@ -3492,7 +3698,7 @@ private struct ScreenEditorView: View {
                     .padding(.bottom, isPortrait ? 22 : 14)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .zIndex(5)
-                } else {
+                } else if isPortrait {
                     VStack {
                         Spacer()
                         Label(
@@ -3546,6 +3752,7 @@ private struct ScreenEditorView: View {
                 transform: weatherBinding(for: groupID),
                 canvasSize: canvasSize,
                 editingInsets: editingInsets,
+                clampsOnAppearance: isPortrait,
                 accessibilityName: "날씨 패널",
                 onEnded: { mergeWeatherGroup(groupID, canvasSize: canvasSize) }
             ) {
@@ -3843,7 +4050,9 @@ enum PanelEditingPolicy {
         safeAreaInsets: EdgeInsets,
         isPortrait: Bool,
         fontPaletteVisible: Bool = false,
-        bottomControlAreaHeight: CGFloat? = nil
+        bottomControlAreaHeight: CGFloat? = nil,
+        reservesBottomControlRow: Bool = true,
+        reservesPhoneLandscapeTopRow: Bool = false
     ) -> EdgeInsets {
         let topOuterPadding: CGFloat = isPortrait ? 18 : 14
         let topGuideClearance: CGFloat = isPortrait ? 12 : 2
@@ -3852,9 +4061,12 @@ enum PanelEditingPolicy {
         let bottomRowCount: CGFloat = isPortrait ? 2 : 1
         let defaultBottomRowsHeight = StandControlLayoutMetrics.itemHeight * bottomRowCount
             + StandControlLayoutMetrics.rowSpacing * max(0, bottomRowCount - 1)
+        let controlAreaHeight = reservesBottomControlRow
+            ? (bottomControlAreaHeight ?? defaultBottomRowsHeight)
+            : 0
         let controlBoundary = safeAreaInsets.bottom
             + bottomOuterPadding
-            + (bottomControlAreaHeight ?? defaultBottomRowsHeight)
+            + controlAreaHeight
             + bottomGuideClearance
 
         let paletteHeight: CGFloat = isPortrait ? 190 : 126
@@ -3865,11 +4077,16 @@ enum PanelEditingPolicy {
             + paletteHeight
             + paletteGuideClearance
 
+        let phoneLandscapeTopRowHeight = reservesPhoneLandscapeTopRow
+            ? InternetRadioPanelMetrics.height + 8
+            : 0
+
         return EdgeInsets(
             top: safeAreaInsets.top
                 + topOuterPadding
                 + StandControlLayoutMetrics.editorToolbarHeight
-                + topGuideClearance,
+                + topGuideClearance
+                + phoneLandscapeTopRowHeight,
             leading: safeAreaInsets.leading + (isPortrait ? 14 : 24),
             bottom: fontPaletteVisible
                 ? max(controlBoundary, fontPaletteBoundary)
@@ -3885,7 +4102,9 @@ enum PanelEditingPolicy {
         fontPaletteVisible: Bool = false,
         controlOrder: [StandControlKind]? = nil,
         bottomAvailableWidth: CGFloat? = nil,
-        reservesEditorChrome: Bool = true
+        reservesEditorChrome: Bool = true,
+        reservesBottomControlRow: Bool = true,
+        reservesPhoneLandscapeTopRow: Bool = false
     ) -> PanelEditingRegion {
         let controlAreaHeight: CGFloat? = controlOrder.map {
             BottomControlLayoutPolicy.height(
@@ -3899,7 +4118,9 @@ enum PanelEditingPolicy {
             safeAreaInsets: safeAreaInsets,
             isPortrait: isPortrait,
             fontPaletteVisible: fontPaletteVisible,
-            bottomControlAreaHeight: controlAreaHeight
+            bottomControlAreaHeight: controlAreaHeight,
+            reservesBottomControlRow: reservesBottomControlRow,
+            reservesPhoneLandscapeTopRow: reservesPhoneLandscapeTopRow
         )
         if !reservesEditorChrome {
             insets.top = 0
@@ -3997,6 +4218,7 @@ private struct EditablePanel<Content: View>: View {
     @Binding var transform: PanelTransform
     let canvasSize: CGSize
     let editingInsets: EdgeInsets
+    var clampsOnAppearance = true
     var accessibilityName = "편집 패널"
     var onEnded: () -> Void = {}
     var onTap: (() -> Void)? = nil
@@ -4083,9 +4305,11 @@ private struct EditablePanel<Content: View>: View {
         }
             .onPreferenceChange(EditablePanelSizeKey.self) { measuredSize in
                 panelSize = measuredSize
-                clampTransformToEditingArea()
+                if clampsOnAppearance { clampTransformToEditingArea() }
             }
-            .onChange(of: editingInsets) { _, _ in clampTransformToEditingArea() }
+            .onChange(of: editingInsets) { _, _ in
+                if clampsOnAppearance { clampTransformToEditingArea() }
+            }
             .offset(
                 x: transform.x * canvasSize.width,
                 y: transform.y * canvasSize.height
