@@ -2345,10 +2345,14 @@ final class AudioAnalysisTests: XCTestCase {
         let continuousSound = BoyisoEvent(sourceID: sourceID, sourceName: "아이 방", role: .guest,
             kind: .sound, detail: "continuous_sound", monitoring: true, batteryPercent: nil)
 
+        let walkiePress = BoyisoEvent(sourceID: sourceID, sourceName: "무전기", role: .walkie,
+            kind: .walkie, detail: "press", monitoring: false, batteryPercent: nil)
+
         XCTAssertEqual(StartleLightingProfile.forEvent(movement), .gentle)
         XCTAssertEqual(StartleLightingProfile.forEvent(fingerSnap), .gentle)
         XCTAssertEqual(StartleLightingProfile.forEvent(bigSound), .urgent)
         XCTAssertEqual(StartleLightingProfile.forEvent(continuousSound), .urgent)
+        XCTAssertEqual(StartleLightingProfile.forEvent(walkiePress), .urgent)
     }
 
     func testStartleTorchRequiresARecentDarkRoomReading() {
@@ -4235,10 +4239,19 @@ final class BoyisoProtocolTests: XCTestCase {
     }
 
     func testRolesUseProductNamesWhileKeepingWireValues() {
+        XCTAssertEqual(BoyisoRole.allCases, [.host, .guest, .walkie])
         XCTAssertEqual(BoyisoRole.host.rawValue, "host")
         XCTAssertEqual(BoyisoRole.guest.rawValue, "guest")
+        XCTAssertEqual(BoyisoRole.walkie.rawValue, "walkie")
         XCTAssertEqual(BoyisoRole.host.title, "볼 사람")
         XCTAssertEqual(BoyisoRole.guest.title, "말할 사람")
+        XCTAssertEqual(BoyisoRole.walkie.title, "무전기")
+        XCTAssertEqual(
+            BoyisoRole.walkie.description,
+            "주변 소리는 보내지 않고, 버튼을 눌러야만 연결된 화면을 부릅니다."
+        )
+        XCTAssertEqual(BoyisoEventKind.walkie.rawValue, "walkie")
+        XCTAssertEqual(BoyisoEventKind.walkie.title, "무전기 호출")
     }
 
     func testSoundDetailsDriveCryingChildOnlyForSpecifiedKinds() {
@@ -4248,5 +4261,124 @@ final class BoyisoProtocolTests: XCTestCase {
         }
         XCTAssertFalse(BoyisoEvent(sourceID: UUID(), sourceName: "말할 사람", role: .guest,
             kind: .movement, detail: "turning", monitoring: true, batteryPercent: nil).isCryingSound)
+        XCTAssertFalse(BoyisoEvent(sourceID: UUID(), sourceName: "무전기", role: .walkie,
+            kind: .walkie, detail: "press", monitoring: false, batteryPercent: nil).isCryingSound)
+    }
+
+    func testWalkiePressPolicyOnlySendsForConnectedWalkieRoleAfterCooldown() {
+        let start = Date()
+
+        XCTAssertEqual(BoyisoWalkiePressPolicy.cooldownSeconds, 3)
+        XCTAssertEqual(BoyisoWalkiePressPolicy.detail, "press")
+        XCTAssertTrue(BoyisoWalkiePressPolicy.canSend(
+            isEnabled: true, role: .walkie, lastSentAt: .distantPast, now: start
+        ))
+        XCTAssertFalse(BoyisoWalkiePressPolicy.canSend(
+            isEnabled: false, role: .walkie, lastSentAt: .distantPast, now: start
+        ))
+        XCTAssertFalse(BoyisoWalkiePressPolicy.canSend(
+            isEnabled: true, role: .host, lastSentAt: .distantPast, now: start
+        ))
+        XCTAssertFalse(BoyisoWalkiePressPolicy.canSend(
+            isEnabled: true, role: .guest, lastSentAt: .distantPast, now: start
+        ))
+        XCTAssertFalse(BoyisoWalkiePressPolicy.canSend(
+            isEnabled: true, role: .walkie, lastSentAt: start, now: start.addingTimeInterval(2.9)
+        ))
+        XCTAssertTrue(BoyisoWalkiePressPolicy.canSend(
+            isEnabled: true, role: .walkie, lastSentAt: start, now: start.addingTimeInterval(3)
+        ))
+    }
+
+    func testWalkiePressEventRoundTripsOverEncryptedLANFrame() throws {
+        let invitation = BoyisoInvitation.make()
+        let event = BoyisoEvent(
+            sourceID: UUID(),
+            sourceName: "무전기",
+            role: .walkie,
+            kind: .walkie,
+            intensity: 1,
+            detail: "press",
+            monitoring: false,
+            batteryPercent: 64
+        )
+
+        let frame = try BoyisoCodec.lanFrame(for: event, invitation: invitation)
+        let decoded = try BoyisoCodec.openLANFrame(frame, invitation: invitation)
+
+        XCTAssertEqual(decoded, event)
+        XCTAssertEqual(decoded.role, .walkie)
+        XCTAssertEqual(decoded.kind, .walkie)
+        XCTAssertEqual(decoded.version, BoyisoEvent.protocolVersion)
+    }
+
+    func testWalkieCallOverlayUsesDedicatedCopyAndHighSalienceStyle() {
+        XCTAssertEqual(BoyisoOverlayKind.walkieCall.primaryMessage, "무전기 호출이 왔어요")
+        XCTAssertEqual(
+            BoyisoOverlayKind.walkieCall.accessibilityLabel(sender: "거실"),
+            "거실님의 무전기 호출"
+        )
+        XCTAssertEqual(BoyisoOverlayKind.walkieCall.imageName, "BoyisoGreeting")
+        XCTAssertTrue(BoyisoOverlayKind.walkieCall.isHighSalience)
+        XCTAssertTrue(BoyisoOverlayKind.soundDetected.isHighSalience)
+        XCTAssertFalse(BoyisoOverlayKind.greeting.isHighSalience)
+    }
+
+    func testWalkieCallEventRepeatsChimesLikeADetectedSound() {
+        let walkiePress = BoyisoEvent(sourceID: UUID(), sourceName: "무전기", role: .walkie,
+            kind: .walkie, detail: "press", monitoring: false, batteryPercent: nil)
+        let heartbeat = BoyisoEvent(sourceID: UUID(), sourceName: "무전기", role: .walkie,
+            kind: .heartbeat, monitoring: false, batteryPercent: nil)
+
+        XCTAssertEqual(BoyisoReactionPolicy.chimeCount(for: walkiePress), 2)
+        XCTAssertEqual(BoyisoReactionPolicy.chimeCount(for: heartbeat), 0)
+    }
+
+    func testRemoteWakePolicyAcceptsWalkieOnlyDuringActiveMateCare() {
+        let walkiePress = BoyisoEvent(sourceID: UUID(), sourceName: "무전기", role: .walkie,
+            kind: .walkie, detail: "press", monitoring: false, batteryPercent: nil)
+        let invalidRole = BoyisoEvent(sourceID: UUID(), sourceName: "볼 사람", role: .host,
+            kind: .walkie, detail: "press", monitoring: false, batteryPercent: nil)
+
+        XCTAssertTrue(BoyisoRemoteWakePolicy.shouldWake(
+            for: walkiePress, environmentDisplayMode: .sleeping,
+            isNightSessionActive: true, multiStimulusWakeEnabled: true
+        ))
+        XCTAssertFalse(BoyisoRemoteWakePolicy.shouldWake(
+            for: walkiePress, environmentDisplayMode: .stand,
+            isNightSessionActive: true, multiStimulusWakeEnabled: true
+        ))
+        XCTAssertFalse(BoyisoRemoteWakePolicy.shouldWake(
+            for: walkiePress, environmentDisplayMode: .sleeping,
+            isNightSessionActive: false, multiStimulusWakeEnabled: true
+        ))
+        XCTAssertFalse(BoyisoRemoteWakePolicy.shouldWake(
+            for: walkiePress, environmentDisplayMode: .sleeping,
+            isNightSessionActive: true, multiStimulusWakeEnabled: false
+        ))
+        XCTAssertFalse(BoyisoRemoteWakePolicy.shouldWake(
+            for: invalidRole, environmentDisplayMode: .sleeping,
+            isNightSessionActive: true, multiStimulusWakeEnabled: true
+        ))
+    }
+
+    func testParticipantSectionsKeepDedicatedWalkieGroupWithConnectedState() {
+        let current = BoyisoPeerStatus(
+            id: UUID(), name: "거실", role: .walkie, lastSeen: Date(), monitoring: false,
+            batteryPercent: 58, displayMode: .object, sessionActive: false, transports: []
+        )
+        let host = BoyisoPeerStatus(
+            id: UUID(), name: "안방", role: .host, lastSeen: Date(), monitoring: false,
+            batteryPercent: nil, displayMode: .mate, sessionActive: true, transports: [.localNetwork]
+        )
+
+        let sections = BoyisoParticipantSections(current: current, peers: [host])
+
+        XCTAssertEqual(sections.totalCount, 2)
+        XCTAssertEqual(sections.hosts.map(\.name), ["안방"])
+        XCTAssertTrue(sections.guests.isEmpty)
+        XCTAssertEqual(sections.walkies.map(\.name), ["거실"])
+        XCTAssertTrue(sections.walkies[0].isCurrentDevice)
+        XCTAssertEqual(sections.walkies[0].state, "연결됨")
     }
 }

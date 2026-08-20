@@ -507,6 +507,7 @@ struct RootView: View {
     @State private var hasStartedApp = false
     @State private var boyisoGreetingSender: String?
     @State private var boyisoCryingSender: String?
+    @State private var boyisoWalkieSender: String?
     @State private var boyisoOverlayTask: Task<Void, Never>?
     @State private var boyisoBannerEvent: BoyisoEvent?
     @State private var boyisoBannerTask: Task<Void, Never>?
@@ -673,6 +674,10 @@ struct RootView: View {
 
                 if didInitialize, let sender = boyisoGreetingSender {
                     BoyisoGreetingOverlay(sender: sender, kind: .greeting)
+                        .transition(.opacity.combined(with: .scale(scale: 0.94)))
+                        .zIndex(160)
+                } else if didInitialize, let sender = boyisoWalkieSender {
+                    BoyisoGreetingOverlay(sender: sender, kind: .walkieCall)
                         .transition(.opacity.combined(with: .scale(scale: 0.94)))
                         .zIndex(160)
                 } else if didInitialize, let sender = boyisoCryingSender {
@@ -861,6 +866,7 @@ struct RootView: View {
         clockScaleFeedback = nil
         boyisoGreetingSender = nil
         boyisoCryingSender = nil
+        boyisoWalkieSender = nil
         boyisoBannerEvent = nil
     }
 
@@ -1612,8 +1618,9 @@ struct RootView: View {
                 status: boyiso.isEnabled ? boyiso.role.title : "연결 안 됨",
                 width: width,
                 tap: {
-                    if boyiso.isEnabled { _ = boyiso.sendTokTok() }
-                    else { openBoyiso() }
+                    if !boyiso.isEnabled { openBoyiso() }
+                    else if boyiso.role == .walkie { _ = boyiso.sendWalkiePress() }
+                    else { _ = boyiso.sendTokTok() }
                 },
                 longPress: { openBoyiso() }
             )
@@ -1681,7 +1688,9 @@ struct RootView: View {
             if let event = boyisoBannerEvent {
                 Label(
                     "\(event.sourceName) · \(event.kind.title)",
-                    systemImage: event.kind == .movement ? "figure.roll" : "waveform"
+                    systemImage: event.kind == .movement
+                        ? "figure.roll"
+                        : event.kind == .walkie ? "dot.radiowaves.left.and.right" : "waveform"
                 )
                 .font(.headline.weight(.bold))
                 .padding(.horizontal, 20)
@@ -1728,10 +1737,17 @@ struct RootView: View {
         if event.kind == .toktok {
             boyisoGreetingSender = event.sourceName
             boyisoCryingSender = nil
+            boyisoWalkieSender = nil
             playBoyisoChime()
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } else {
-            boyisoCryingSender = event.sourceName
+            if event.kind == .walkie {
+                boyisoWalkieSender = event.sourceName
+                boyisoCryingSender = nil
+            } else {
+                boyisoCryingSender = event.sourceName
+                boyisoWalkieSender = nil
+            }
             boyisoGreetingSender = nil
             Task { @MainActor in
                 for index in 0..<chimeCount {
@@ -1740,13 +1756,19 @@ struct RootView: View {
                 }
             }
         }
-        UIAccessibility.post(notification: .announcement,
-            argument: event.kind == .toktok ? "\(event.sourceName)님의 톡톡" : "\(event.sourceName)에서 소리를 감지했습니다")
+        UIAccessibility.post(notification: .announcement, argument: {
+            switch event.kind {
+            case .toktok: "\(event.sourceName)님의 톡톡"
+            case .walkie: "\(event.sourceName)님의 무전기 호출"
+            default: "\(event.sourceName)에서 소리를 감지했습니다"
+            }
+        }())
         boyisoOverlayTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled else { return }
             boyisoGreetingSender = nil
             boyisoCryingSender = nil
+            boyisoWalkieSender = nil
         }
     }
 
@@ -4811,21 +4833,31 @@ private struct BoyisoControlButton: View {
 }
 
 enum BoyisoOverlayKind: Equatable {
-    case greeting, soundDetected
+    case greeting, soundDetected, walkieCall
 
-    var imageName: String { self == .greeting ? "BoyisoGreeting" : "BoyisoCryingChild" }
+    var imageName: String { self == .soundDetected ? "BoyisoCryingChild" : "BoyisoGreeting" }
+    var isHighSalience: Bool { self != .greeting }
     var primaryMessage: String {
-        self == .greeting ? "같은 공간에서 인사가 왔어요" : "말할 사람의 소리가 감지되었습니다."
+        switch self {
+        case .greeting: "같은 공간에서 인사가 왔어요"
+        case .soundDetected: "말할 사람의 소리가 감지되었습니다."
+        case .walkieCall: "무전기 호출이 왔어요"
+        }
     }
     func accessibilityLabel(sender: String) -> String {
         guard !sender.isEmpty else { return primaryMessage }
-        return self == .greeting ? "\(sender)님의 인사" : "\(primaryMessage) 보낸 기기, \(sender)"
+        switch self {
+        case .greeting: return "\(sender)님의 인사"
+        case .soundDetected: return "\(primaryMessage) 보낸 기기, \(sender)"
+        case .walkieCall: return "\(sender)님의 무전기 호출"
+        }
     }
 }
 
 enum BoyisoReactionPolicy {
     static func chimeCount(for event: BoyisoEvent) -> Int {
         if event.kind == .toktok { return 1 }
+        if event.kind == .walkie { return 2 }
         return event.isCryingSound ? 2 : 0
     }
 }
@@ -4845,7 +4877,7 @@ private struct BoyisoGreetingOverlay: View {
 
     var body: some View {
         ZStack {
-            (kind == .soundDetected ? Color(red: 1, green: 0.93, blue: 0.72) : Color.black.opacity(0.78))
+            (kind.isHighSalience ? Color(red: 1, green: 0.93, blue: 0.72) : Color.black.opacity(0.78))
                 .ignoresSafeArea()
             VStack(spacing: 18) {
                 Image(kind.imageName)
@@ -4861,11 +4893,11 @@ private struct BoyisoGreetingOverlay: View {
                             .opacity(0.72)
                     }
                 }
-                .foregroundStyle(kind == .soundDetected ? Color.black.opacity(0.86) : .white)
+                .foregroundStyle(kind.isHighSalience ? Color.black.opacity(0.86) : .white)
                 .padding(.horizontal, 22)
                 .padding(.vertical, 16)
                 .background(
-                    kind == .soundDetected ? Color.white.opacity(0.9) : Color.white.opacity(0.1),
+                    kind.isHighSalience ? Color.white.opacity(0.9) : Color.white.opacity(0.1),
                     in: RoundedRectangle(cornerRadius: 20, style: .continuous)
                 )
             }

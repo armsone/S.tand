@@ -10,8 +10,10 @@ final class BoyisoEvent {
     static final String HEARTBEAT = "heartbeat";
     static final String SOUND = "sound";
     static final String MOVEMENT = "movement";
+    static final String WALKIE = "walkie";
     static final String DETAIL_BIG_SOUND = "big_sound";
     static final String DETAIL_CONTINUOUS_SOUND = "continuous_sound";
+    static final String DETAIL_WALKIE_PRESS = "press";
 
     final String id;
     final String sourceId;
@@ -45,6 +47,10 @@ final class BoyisoEvent {
     static BoyisoEvent sound(String sourceId, String sourceName, String detail,
                              double intensity, Integer batteryPercent) {
         return create(sourceId, sourceName, SOUND, intensity, detail, true, batteryPercent);
+    }
+
+    static BoyisoEvent walkiePress(String sourceId, String sourceName, Integer batteryPercent) {
+        return create(sourceId, sourceName, WALKIE, 1.0, DETAIL_WALKIE_PRESS, false, batteryPercent);
     }
 
     private static BoyisoEvent create(String sourceId, String sourceName, String kind,

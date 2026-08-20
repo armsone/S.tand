@@ -103,6 +103,7 @@ final class BoyisoConnectivityService: NSObject, ObservableObject {
     private var deduplicator = BoyisoEventDeduplicator()
     private var heartbeatTimer: Timer?
     private var lastTokTokSentAt = Date.distantPast
+    private var lastWalkiePressSentAt = Date.distantPast
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -192,6 +193,16 @@ final class BoyisoConnectivityService: NSObject, ObservableObject {
         guard isEnabled, role == .guest, localMonitoring, localSessionActive,
               localDisplayMode == .mate, activePeersAreInActiveMate else { return }
         emit(kind: .movement, intensity: intensity, detail: "turning")
+    }
+
+    @discardableResult
+    func sendWalkiePress(now: Date = Date()) -> Bool {
+        guard BoyisoWalkiePressPolicy.canSend(
+            isEnabled: isEnabled, role: role, lastSentAt: lastWalkiePressSentAt, now: now
+        ) else { return false }
+        lastWalkiePressSentAt = now
+        emit(kind: .walkie, intensity: 1, detail: BoyisoWalkiePressPolicy.detail)
+        return true
     }
 
     @discardableResult
@@ -473,9 +484,11 @@ final class BoyisoConnectivityService: NSObject, ObservableObject {
     private func scheduleDetectionNotification(for event: BoyisoEvent) {
         let content = UNMutableNotificationContent()
         content.title = BoyisoBranding.primaryName
-        content.body = event.kind == .movement
-            ? "말할 사람의 큰 움직임이 감지되었습니다."
-            : "말할 사람의 소리가 감지되었습니다."
+        switch event.kind {
+        case .movement: content.body = "말할 사람의 큰 움직임이 감지되었습니다."
+        case .walkie: content.body = "무전기 호출이 왔어요."
+        default: content.body = "말할 사람의 소리가 감지되었습니다."
+        }
         if !event.sourceName.isEmpty { content.subtitle = event.sourceName }
         content.sound = .default
         UNUserNotificationCenter.current().add(

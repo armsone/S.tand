@@ -45,12 +45,14 @@ public final class MainActivity extends Activity {
     private LinearLayout root;
     private RadioButton hostButton;
     private RadioButton guestButton;
+    private RadioButton walkieButton;
     private EditText roomCode;
     private TextView connectionStatus;
     private TextView monitoringStatus;
     private TextView eventStatus;
     private TextView permissionStatus;
     private Button startStopButton;
+    private Button walkiePressButton;
     private boolean receiverRegistered;
     private boolean pendingStart;
 
@@ -114,10 +116,16 @@ public final class MainActivity extends Activity {
         roles.setOrientation(LinearLayout.HORIZONTAL);
         hostButton = radio("호스트 · 돌보는 사람");
         guestButton = radio("게스트 · 아이 곁");
+        walkieButton = radio("무전기 · 버튼 호출");
         roles.addView(hostButton, new RadioGroup.LayoutParams(0, dp(52), 1));
         roles.addView(guestButton, new RadioGroup.LayoutParams(0, dp(52), 1));
+        roles.addView(walkieButton, new RadioGroup.LayoutParams(0, dp(52), 1));
         hostButton.setChecked(true);
-        root.addView(roles, margins(0, 8, 0, 22));
+        root.addView(roles, margins(0, 8, 0, 6));
+        TextView walkieHelp = text("무전기는 주변 소리를 보내지 않습니다. 버튼을 눌러야만 연결된 화면을 부릅니다.",
+                13, Typeface.NORMAL);
+        walkieHelp.setTextColor(Color.rgb(91, 99, 96));
+        root.addView(walkieHelp, margins(0, 0, 0, 22));
 
         root.addView(sectionLabel("함께 사용할 방 코드"));
         LinearLayout codeRow = new LinearLayout(this);
@@ -165,6 +173,18 @@ public final class MainActivity extends Activity {
         startStopButton.setOnClickListener(view -> toggleMonitoring());
         root.addView(startStopButton, new LinearLayout.LayoutParams(-1, dp(58)));
 
+        walkiePressButton = new Button(this);
+        walkiePressButton.setText("무전기 호출 · 상대 화면 부르기");
+        walkiePressButton.setTextSize(17);
+        walkiePressButton.setTextColor(Color.WHITE);
+        walkiePressButton.setBackgroundColor(ACCENT);
+        walkiePressButton.setContentDescription("무전기 호출. 연결된 화면을 크게 부릅니다");
+        walkiePressButton.setOnClickListener(view -> sendWalkiePress());
+        walkiePressButton.setVisibility(View.GONE);
+        LinearLayout.LayoutParams walkieParams = new LinearLayout.LayoutParams(-1, dp(58));
+        walkieParams.setMargins(0, dp(12), 0, 0);
+        root.addView(walkiePressButton, walkieParams);
+
         TextView safety = text("보이소는 의료기기나 보호자의 직접 확인을 대신하지 않습니다. 연결이 끊기면 화면에 분명히 표시됩니다.",
                 12, Typeface.NORMAL);
         safety.setTextColor(Color.rgb(105, 105, 105));
@@ -179,7 +199,8 @@ public final class MainActivity extends Activity {
         roomCode.setText(saved);
         String role = getSharedPreferences("boyiso", MODE_PRIVATE).getString("role", MonitoringService.ROLE_HOST);
         guestButton.setChecked(MonitoringService.ROLE_GUEST.equals(role));
-        hostButton.setChecked(!guestButton.isChecked());
+        walkieButton.setChecked(MonitoringService.ROLE_WALKIE.equals(role));
+        hostButton.setChecked(!guestButton.isChecked() && !walkieButton.isChecked());
     }
 
     private void toggleMonitoring() {
@@ -206,7 +227,9 @@ public final class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 31) {
             addIfMissing(missing, Manifest.permission.BLUETOOTH_SCAN);
             addIfMissing(missing, Manifest.permission.BLUETOOTH_CONNECT);
-            if (guestButton.isChecked()) addIfMissing(missing, Manifest.permission.BLUETOOTH_ADVERTISE);
+            if (guestButton.isChecked() || walkieButton.isChecked()) {
+                addIfMissing(missing, Manifest.permission.BLUETOOTH_ADVERTISE);
+            }
         } else {
             addIfMissing(missing, Manifest.permission.ACCESS_FINE_LOCATION);
         }
@@ -235,7 +258,8 @@ public final class MainActivity extends Activity {
 
     private void startMonitoring() {
         pendingStart = false;
-        String role = guestButton.isChecked() ? MonitoringService.ROLE_GUEST : MonitoringService.ROLE_HOST;
+        String role = guestButton.isChecked() ? MonitoringService.ROLE_GUEST
+                : walkieButton.isChecked() ? MonitoringService.ROLE_WALKIE : MonitoringService.ROLE_HOST;
         String code = roomCode.getText().toString();
         getSharedPreferences("boyiso", MODE_PRIVATE).edit()
                 .putString("role", role).putString("room_code", code).apply();
@@ -257,7 +281,9 @@ public final class MainActivity extends Activity {
         String error = intent.getStringExtra("error");
         connectionStatus.setText("Wi-Fi " + lan + " · Bluetooth " + ble);
         if (!running) monitoringStatus.setText("감시를 시작하지 않았습니다");
-        else if (MonitoringService.ROLE_GUEST.equals(stateRole)) {
+        else if (MonitoringService.ROLE_WALKIE.equals(stateRole)) {
+            monitoringStatus.setText("무전기 연결됨 · 버튼으로 상대 화면을 부릅니다");
+        } else if (MonitoringService.ROLE_GUEST.equals(stateRole)) {
             monitoringStatus.setText(monitoring ? "아이 곁 소리를 살피는 중" : "마이크 감시가 중단됨");
         } else if (guests == 0) {
             monitoringStatus.setText("연결된 아이 곁 기기가 없습니다");
@@ -269,11 +295,15 @@ public final class MainActivity extends Activity {
     }
 
     private void renderEvent(Intent intent) {
+        String kind = intent.getStringExtra("kind");
         String detail = intent.getStringExtra("detail");
         String source = intent.getStringExtra("sourceName");
         String path = intent.getStringExtra("path");
         long timestamp = intent.getLongExtra("timestamp", System.currentTimeMillis());
-        String label = BoyisoEvent.DETAIL_CONTINUOUS_SOUND.equals(detail) ? "지속되는 소리" : "큰 소리";
+        String label;
+        if (BoyisoEvent.WALKIE.equals(kind)) label = "무전기 호출";
+        else if (BoyisoEvent.DETAIL_CONTINUOUS_SOUND.equals(detail)) label = "지속되는 소리";
+        else label = "큰 소리";
         String time = DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date(timestamp));
         eventStatus.setText(label + " · " + source + " · " + time + "\n" + path + "로 확인");
         flashScreen();
@@ -283,7 +313,9 @@ public final class MainActivity extends Activity {
         startStopButton.setText(running ? "돌봄 연결 중지" : "돌봄 연결 시작");
         hostButton.setEnabled(!running);
         guestButton.setEnabled(!running);
+        walkieButton.setEnabled(!running);
         roomCode.setEnabled(!running);
+        walkiePressButton.setVisibility(running && walkieButton.isChecked() ? View.VISIBLE : View.GONE);
         if (running) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
@@ -302,6 +334,12 @@ public final class MainActivity extends Activity {
         root.setBackgroundColor(Color.rgb(255, 248, 216));
         handler.removeCallbacksAndMessages(null);
         handler.postDelayed(() -> root.setBackgroundColor(BACKGROUND), 1_500);
+    }
+
+    private void sendWalkiePress() {
+        Intent press = new Intent(this, MonitoringService.class)
+                .setAction(MonitoringService.ACTION_WALKIE_PRESS);
+        startService(press);
     }
 
     private void copyRoomCode() {

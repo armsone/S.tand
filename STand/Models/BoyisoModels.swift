@@ -11,18 +11,27 @@ enum BoyisoBranding {
 enum BoyisoRole: String, Codable, CaseIterable, Identifiable {
     case host
     case guest
+    case walkie
 
     var id: String { rawValue }
-    var title: String { self == .host ? "볼 사람" : "말할 사람" }
+    var title: String {
+        switch self {
+        case .host: "볼 사람"
+        case .guest: "말할 사람"
+        case .walkie: "무전기"
+        }
+    }
     var description: String {
-        self == .host
-            ? "같은 공간의 소리와 연결 상태를 봅니다."
-            : "이 기기에서 소리와 큰 뒤척임을 살펴 알립니다."
+        switch self {
+        case .host: "같은 공간의 소리와 연결 상태를 봅니다."
+        case .guest: "이 기기에서 소리와 큰 뒤척임을 살펴 알립니다."
+        case .walkie: "주변 소리는 보내지 않고, 버튼을 눌러야만 연결된 화면을 부릅니다."
+        }
     }
 }
 
 enum BoyisoEventKind: String, Codable, Equatable {
-    case heartbeat, sound, movement, toktok
+    case heartbeat, sound, movement, toktok, walkie
 
     var title: String {
         switch self {
@@ -30,7 +39,17 @@ enum BoyisoEventKind: String, Codable, Equatable {
         case .sound: "특별한 소리"
         case .movement: "큰 뒤척임"
         case .toktok: "톡톡"
+        case .walkie: "무전기 호출"
         }
+    }
+}
+
+enum BoyisoWalkiePressPolicy {
+    static let cooldownSeconds: TimeInterval = 3
+    static let detail = "press"
+
+    static func canSend(isEnabled: Bool, role: BoyisoRole, lastSentAt: Date, now: Date) -> Bool {
+        isEnabled && role == .walkie && now.timeIntervalSince(lastSentAt) >= cooldownSeconds
     }
 }
 

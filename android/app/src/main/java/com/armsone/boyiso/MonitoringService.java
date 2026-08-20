@@ -32,15 +32,18 @@ public final class MonitoringService extends Service implements LanTransport.Lis
     static final String ACTION_STOP = "com.armsone.boyiso.STOP";
     static final String ACTION_STATE = "com.armsone.boyiso.STATE";
     static final String ACTION_EVENT = "com.armsone.boyiso.EVENT";
+    static final String ACTION_WALKIE_PRESS = "com.armsone.boyiso.WALKIE_PRESS";
     static final String EXTRA_ROLE = "role";
     static final String EXTRA_ROOM_CODE = "roomCode";
     static final String ROLE_HOST = "host";
     static final String ROLE_GUEST = "guest";
+    static final String ROLE_WALKIE = "walkie";
     private static final String CHANNEL_ID = "boyiso_monitoring";
     private static final int NOTIFICATION_ID = 4101;
     private static final long STALE_MILLIS = 15_000;
 
     private final EventDeduplicator deduplicator = new EventDeduplicator();
+    private final WalkiePressPolicy walkiePressPolicy = new WalkiePressPolicy();
     private final Map<String, Long> sourceLastSeen = new ConcurrentHashMap<>();
     private ScheduledExecutorService scheduler;
     private LanTransport lan;
@@ -75,10 +78,15 @@ public final class MonitoringService extends Service implements LanTransport.Lis
             stopSelf();
             return START_NOT_STICKY;
         }
+        if (ACTION_WALKIE_PRESS.equals(intent.getAction())) {
+            sendWalkiePress();
+            return START_NOT_STICKY;
+        }
         if (!ACTION_START.equals(intent.getAction()) || running) return START_NOT_STICKY;
         role = intent.getStringExtra(EXTRA_ROLE);
         String roomCode = intent.getStringExtra(EXTRA_ROOM_CODE);
-        if ((!ROLE_HOST.equals(role) && !ROLE_GUEST.equals(role)) || roomCode == null) {
+        if ((!ROLE_HOST.equals(role) && !ROLE_GUEST.equals(role) && !ROLE_WALKIE.equals(role))
+                || roomCode == null) {
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -110,11 +118,11 @@ public final class MonitoringService extends Service implements LanTransport.Lis
         lan = new LanTransport(this, codec, sourceId, this);
         ble = new BleTransport(this, codec, this);
         scheduler = Executors.newSingleThreadScheduledExecutor();
-        if (ROLE_GUEST.equals(role)) {
+        if (ROLE_GUEST.equals(role) || ROLE_WALKIE.equals(role)) {
             lan.startGuest();
             if (hasBluetoothPermissions()) ble.startGuest();
             else latestError = "블루투스 권한 없이 Wi-Fi만 사용 중입니다";
-            startAudioCapture();
+            if (ROLE_GUEST.equals(role)) startAudioCapture();
             scheduler.scheduleAtFixedRate(this::sendHeartbeat, 0, 5, TimeUnit.SECONDS);
         } else {
             lan.startHost();
@@ -152,6 +160,15 @@ public final class MonitoringService extends Service implements LanTransport.Lis
                 batteryPercent());
         lan.sendFromGuest(heartbeat);
         ble.sendFromGuest(heartbeat);
+    }
+
+    private void sendWalkiePress() {
+        if (!running || !ROLE_WALKIE.equals(role)) return;
+        if (!walkiePressPolicy.tryAccept(System.currentTimeMillis())) return;
+        BoyisoEvent press = BoyisoEvent.walkiePress(sourceId, sourceName, batteryPercent());
+        lan.sendFromGuest(press);
+        ble.sendFromGuest(press);
+        broadcastLocalDetection(press);
     }
 
     private Integer batteryPercent() {
@@ -244,7 +261,8 @@ public final class MonitoringService extends Service implements LanTransport.Lis
         update.putExtra("path", path);
         update.putExtra("timestamp", event.sentAtMilliseconds);
         sendBroadcast(update);
-        updateNotification("소리 이벤트를 확인했습니다");
+        updateNotification(BoyisoEvent.WALKIE.equals(event.kind)
+                ? "무전기 호출을 확인했습니다" : "소리 이벤트를 확인했습니다");
     }
 
     private void broadcastLocalDetection(BoyisoEvent event) {
@@ -292,6 +310,7 @@ public final class MonitoringService extends Service implements LanTransport.Lis
         String text = override;
         if (text == null) {
             if (ROLE_GUEST.equals(role)) text = "아이 곁에서 소리를 살피는 중";
+            else if (ROLE_WALKIE.equals(role)) text = "무전기 연결을 유지하는 중";
             else text = sourceLastSeen.isEmpty() ? "아이 곁 기기 연결을 기다리는 중"
                     : sourceLastSeen.size() + "대의 아이 곁 기기를 살피는 중";
         }

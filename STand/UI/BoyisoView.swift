@@ -196,18 +196,31 @@ struct BoyisoView: View {
 
     private var connectedFlow: some View {
         VStack(spacing: 14) {
-            Button {
-                _ = service.sendTokTok()
-            } label: {
-                HStack(spacing: 8) {
-                    BoyisoBabyFaceIcon(lineWidth: 1.8)
-                        .frame(width: 22, height: 22)
-                    Text("톡톡 보내기")
+            if service.role == .walkie {
+                VStack(spacing: 6) {
+                    Button {
+                        _ = service.sendWalkiePress()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "dot.radiowaves.left.and.right")
+                            Text("무전기 호출")
+                        }
+                        .font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 54)
+                    }
+                    .buttonStyle(.borderedProminent).tint(accent)
+                    .accessibilityLabel("무전기 호출")
+                    .accessibilityHint("연결된 화면을 크게 부릅니다")
+                    Text("누르면 연결된 화면이 크게 반응합니다.")
+                        .font(.caption).foregroundStyle(.white.opacity(0.6))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 54)
             }
-            .buttonStyle(.borderedProminent).tint(accent)
-            .accessibilityLabel("톡톡 보내기")
+
+            if service.role == .walkie {
+                tokTokButton.buttonStyle(.bordered).tint(accent)
+            } else {
+                tokTokButton.buttonStyle(.borderedProminent).tint(accent)
+            }
 
             BoyisoCard {
                 VStack(alignment: .leading, spacing: 10) {
@@ -264,6 +277,7 @@ struct BoyisoView: View {
             }
             participantGroupCard(role: .host, participants: participantSections.hosts)
             participantGroupCard(role: .guest, participants: participantSections.guests)
+            participantGroupCard(role: .walkie, participants: participantSections.walkies)
 
             if let invitation = service.invitation,
                let image = BoyisoQRCode.image(for: invitation.url.absoluteString) {
@@ -298,6 +312,20 @@ struct BoyisoView: View {
         }
         .frame(maxWidth: 720)
         .onAppear { prepareShareImage() }
+    }
+
+    private var tokTokButton: some View {
+        Button {
+            _ = service.sendTokTok()
+        } label: {
+            HStack(spacing: 8) {
+                BoyisoBabyFaceIcon(lineWidth: 1.8)
+                    .frame(width: 22, height: 22)
+                Text("톡톡 보내기")
+            }
+            .font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 54)
+        }
+        .accessibilityLabel("톡톡 보내기")
     }
 
     private var participantSections: BoyisoParticipantSections {
@@ -438,9 +466,10 @@ struct BoyisoParticipantPresentation: Identifiable, Equatable {
 struct BoyisoParticipantSections: Equatable {
     let hosts: [BoyisoParticipantPresentation]
     let guests: [BoyisoParticipantPresentation]
-    var totalCount: Int { hosts.count + guests.count }
+    let walkies: [BoyisoParticipantPresentation]
+    var totalCount: Int { hosts.count + guests.count + walkies.count }
     var hasDuplicateNames: Bool {
-        let names = (hosts + guests).map(\.name)
+        let names = (hosts + guests + walkies).map(\.name)
         return Set(names).count != names.count
     }
 
@@ -464,7 +493,7 @@ struct BoyisoParticipantSections: Equatable {
                     name: peer.name,
                     role: peer.role,
                     isCurrentDevice: isCurrent,
-                    state: peer.role == .host ? "연결됨" : Self.guestState(peer),
+                    state: peer.role == .guest ? Self.guestState(peer) : "연결됨",
                     batteryPercent: peer.batteryPercent,
                     transports: peer.transports
                 )
@@ -476,6 +505,7 @@ struct BoyisoParticipantSections: Equatable {
         }
         hosts = presentations(for: .host)
         guests = presentations(for: .guest)
+        walkies = presentations(for: .walkie)
     }
 
     private static func guestState(_ peer: BoyisoPeerStatus) -> String {
@@ -484,8 +514,20 @@ struct BoyisoParticipantSections: Equatable {
 }
 
 private extension BoyisoRole {
-    var iconName: String { self == .host ? "eye.fill" : "waveform" }
-    var tint: Color { self == .host ? Color(red: 0.25, green: 0.78, blue: 0.84) : Color.orange }
+    var iconName: String {
+        switch self {
+        case .host: "eye.fill"
+        case .guest: "waveform"
+        case .walkie: "dot.radiowaves.left.and.right"
+        }
+    }
+    var tint: Color {
+        switch self {
+        case .host: Color(red: 0.25, green: 0.78, blue: 0.84)
+        case .guest: Color.orange
+        case .walkie: Color(red: 0.55, green: 0.83, blue: 0.45)
+        }
+    }
 }
 
 private struct BoyisoParticipantSummaryHeader: View {

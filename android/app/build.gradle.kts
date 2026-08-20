@@ -10,7 +10,7 @@ android {
         applicationId = "com.armsone.boyiso"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
+        versionCode = 33
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -35,4 +35,5 @@ android {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

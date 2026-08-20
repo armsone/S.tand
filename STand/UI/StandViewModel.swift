@@ -379,6 +379,23 @@ enum SleepCareMonitoringPolicy {
     }
 }
 
+enum BoyisoRemoteWakePolicy {
+    static func shouldWake(
+        for event: BoyisoEvent,
+        environmentDisplayMode: EnvironmentDisplayMode,
+        isNightSessionActive: Bool,
+        multiStimulusWakeEnabled: Bool
+    ) -> Bool {
+        let isWalkieCall = event.role == .walkie && event.kind == .walkie
+        let isGuestDetection = event.role == .guest
+            && (event.kind == .sound || event.kind == .movement)
+        return (isWalkieCall || isGuestDetection)
+            && environmentDisplayMode == .sleeping
+            && isNightSessionActive
+            && multiStimulusWakeEnabled
+    }
+}
+
 enum StartleLightingProfile: Equatable {
     case gentle
     case urgent
@@ -392,7 +409,8 @@ enum StartleLightingProfile: Equatable {
     var fadeStart: TimeInterval { Self.totalDuration - fadeDuration }
 
     static func forEvent(_ event: BoyisoEvent) -> StartleLightingProfile {
-        event.kind == .sound && ["big_sound", "continuous_sound"].contains(event.detail)
+        if event.kind == .walkie { return .urgent }
+        return event.kind == .sound && ["big_sound", "continuous_sound"].contains(event.detail)
             ? .urgent
             : .gentle
     }
@@ -659,17 +677,13 @@ final class StandViewModel: ObservableObject {
             self.wakeForSleepMovement(profile: .gentle)
         }
         boyiso.onRemoteEvent = { [weak self] event in
-            guard let self,
-                  event.role == .guest,
-                  event.kind == .sound || event.kind == .movement,
-                  self.environmentDisplayMode == .sleeping,
-                  self.isNightSessionActive,
-                  self.settings.value.multiStimulusWakeEnabled
-            else { return }
-            if event.kind == .sound {
-                guard self.isNightSessionActive,
-                      self.environmentDisplayMode == .sleeping else { return }
-            }
+            guard let self else { return }
+            guard BoyisoRemoteWakePolicy.shouldWake(
+                for: event,
+                environmentDisplayMode: self.environmentDisplayMode,
+                isNightSessionActive: self.isNightSessionActive,
+                multiStimulusWakeEnabled: self.settings.value.multiStimulusWakeEnabled
+            ) else { return }
             self.wakeForSleepMovement(
                 profile: StartleLightingProfile.forEvent(event),
                 respectsMateWarmup: false
