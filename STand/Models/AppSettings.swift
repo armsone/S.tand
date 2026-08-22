@@ -1060,11 +1060,13 @@ final class SettingsStore: ObservableObject {
 
 enum AppVersion {
     static var marketing: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "2.0.0"
     }
 
     static var build: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0.24.2"
+        Bundle.main.object(forInfoDictionaryKey: "BuildStamp") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+            ?? "202608230737"
     }
 
     static var display: String { "\(marketing) (\(build))" }

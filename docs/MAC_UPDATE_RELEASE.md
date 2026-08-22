@@ -5,9 +5,10 @@ Sparkle 2.9.2로 자체 업데이트한다. 흐름: 확인 → 서명 검증된 
 원자적 교체 설치 → 재실행. iPhone/iPad 빌드에는 Sparkle 관련 코드·설정이 전혀 포함되지 않는다.
 
 - 피드: `https://nasfinder.com/appcasts/stand.xml`
-- 배포물: 노터라이즈된 `S.tand-macOS-<version>.dmg` (사용자용 ZIP 배포 금지)
-- 버전 비교 기준: `CURRENT_PROJECT_VERSION`(예: 0.33.0). 공개 배포된 0.30.0에는 업데이터가
-  없으므로 0.33.0이 자동 업데이트의 시작 기준선이다. 0.30.0 사용자는 한 번 수동 설치가 필요하다.
+- 배포물: 노터라이즈된 `S.tand-macOS-<MARKETING_VERSION>.dmg` (사용자용 ZIP 배포 금지)
+- 버전 비교 기준: `CURRENT_PROJECT_VERSION`(현재 337417). 사용자에게는 버전 `2.0.0`과
+  표시 빌드 `202608230737`을 보여준다. 공개 배포된 0.30.0에는 업데이터가 없었고 0.33.0이
+  자동 업데이트의 시작 기준선이므로 0.30.0 사용자는 한 번 수동 설치가 필요하다.
 
 ## 1. EdDSA 키 준비 (최초 1회)
 
@@ -31,7 +32,7 @@ scripts/package-macos.sh
 
 스크립트가 Mac Catalyst 아카이브, Developer ID 내보내기, Sparkle 브리지·공개키 확인,
 설치용 DMG 생성, Apple 공증과 앱·DMG 스테이플을 순서대로 수행한다. 결과는
-`artifacts/macos/S.tand-macOS-<CURRENT_PROJECT_VERSION>.dmg`이다.
+`artifacts/macos/S.tand-macOS-<MARKETING_VERSION>.dmg`이다.
 
 ## 3. appcast 생성·서명
 

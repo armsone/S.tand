@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-# 노터라이즈된 S.tand-macOS-<version>.dmg가 담긴 디렉터리에서 서명된 appcast(stand.xml)를 생성한다.
+# 노터라이즈된 S.tand-macOS-<MARKETING_VERSION>.dmg가 담긴 디렉터리에서 서명된 appcast(stand.xml)를 생성한다.
 # 비밀 EdDSA 키는 generate_keys가 저장해 둔 로그인 키체인에서 generate_appcast가 직접 읽는다.
 # 이 스크립트는 키를 생성하거나 출력하지 않는다.
 #

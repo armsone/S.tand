@@ -21,7 +21,7 @@ if [[ -z "${marketing_version}" || -z "${build_number}" ]]; then
   exit 65
 fi
 
-dmg_path="${release_dir}/S.tand-macOS-${build_number}.dmg"
+dmg_path="${release_dir}/S.tand-macOS-${marketing_version}.dmg"
 mkdir -p "${build_dir}" "${release_dir}"
 rm -rf -- "${archive_path}" "${export_dir}"
 
