@@ -55,6 +55,11 @@
 		D90000000000000000000002 /* STandRadioShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* STandRadioShare.appex */; platformFilter = ios; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		D90000000000000000000003 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000005 /* PrivacyInfo.xcprivacy */; };
 		D90000000000000000000004 /* InternetRadioConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002B /* InternetRadioConfiguration.swift */; };
+		B00000000000000000000034 /* MacUpdaterController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000034 /* MacUpdaterController.swift */; };
+		B00000000000000000000102 /* MacUpdaterControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000102 /* MacUpdaterControllerTests.swift */; };
+		C90000000000000000000001 /* STandUpdaterBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000011 /* STandUpdaterBridge.swift */; };
+		C90000000000000000000002 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = C00000000000000000000002 /* Sparkle */; };
+		C90000000000000000000004 /* STandUpdaterBridge.bundle in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C00000000000000000000012 /* STandUpdaterBridge.bundle */; platformFilter = maccatalyst; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -86,6 +91,13 @@
 			remoteGlobalIDString = D10000000000000000000001;
 			remoteInfo = STandRadioShare;
 		};
+		C60000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C10000000000000000000001;
+			remoteInfo = STandUpdaterBridge;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -97,6 +109,7 @@
 			files = (
 				B0000000000000000000001F /* STandWidget.appex in Embed Foundation Extensions */,
 				D90000000000000000000002 /* STandRadioShare.appex in Embed Foundation Extensions */,
+				C90000000000000000000004 /* STandUpdaterBridge.bundle in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -161,6 +174,11 @@
 		E10000000000000000000005 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		E10000000000000000000006 /* STand.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = STand.entitlements; sourceTree = "<group>"; };
 		E10000000000000000000007 /* STandMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = STandMac.entitlements; sourceTree = "<group>"; };
+		F00000000000000000000034 /* MacUpdaterController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacUpdaterController.swift; sourceTree = "<group>"; };
+		F00000000000000000000035 /* InfoMac.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = InfoMac.plist; sourceTree = "<group>"; };
+		F00000000000000000000102 /* MacUpdaterControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacUpdaterControllerTests.swift; sourceTree = "<group>"; };
+		C00000000000000000000011 /* STandUpdaterBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = STandUpdaterBridge.swift; sourceTree = "<group>"; };
+		C00000000000000000000012 /* STandUpdaterBridge.bundle */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = STandUpdaterBridge.bundle; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -199,6 +217,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C90000000000000000000002 /* Sparkle in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -208,6 +234,7 @@
 				A20000000000000000000002 /* STand */,
 				A2000000000000000000000E /* STandWidget */,
 				D20000000000000000000001 /* STandRadioShare */,
+				C20000000000000000000001 /* STandUpdaterBridge */,
 				A20000000000000000000009 /* STandTests */,
 				U20000000000000000000001 /* STandUITests */,
 				A2000000000000000000000A /* Configuration */,
@@ -263,6 +290,7 @@
 				F0000000000000000000001C /* WeatherService.swift */,
 				F0000000000000000000001D /* WakeMotionMonitor.swift */,
 				F00000000000000000000031 /* BoyisoConnectivityService.swift */,
+				F00000000000000000000034 /* MacUpdaterController.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -289,6 +317,7 @@
 				A2000000000000000000000D /* FontLicenses */,
 				A20000000000000000000010 /* Boyiso */,
 				F0000000000000000000000C /* Info.plist */,
+				F00000000000000000000035 /* InfoMac.plist */,
 				F0000000000000000000000D /* PrivacyInfo.xcprivacy */,
 				E10000000000000000000006 /* STand.entitlements */,
 				E10000000000000000000007 /* STandMac.entitlements */,
@@ -300,6 +329,7 @@
 			isa = PBXGroup;
 			children = (
 				F00000000000000000000101 /* AudioAnalysisTests.swift */,
+				F00000000000000000000102 /* MacUpdaterControllerTests.swift */,
 			);
 			path = STandTests;
 			sourceTree = "<group>";
@@ -327,6 +357,7 @@
 				F00000000000000000000202 /* STandTests.xctest */,
 				F00000000000000000000203 /* STandWidget.appex */,
 				E10000000000000000000004 /* STandRadioShare.appex */,
+				C00000000000000000000012 /* STandUpdaterBridge.bundle */,
 				U00000000000000000000201 /* STandUITests.xctest */,
 			);
 			name = Products;
@@ -393,6 +424,14 @@
 			path = STandRadioShare;
 			sourceTree = "<group>";
 		};
+		C20000000000000000000001 /* STandUpdaterBridge */ = {
+			isa = PBXGroup;
+			children = (
+				C00000000000000000000011 /* STandUpdaterBridge.swift */,
+			);
+			path = STandUpdaterBridge;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -410,6 +449,7 @@
 			dependencies = (
 				A60000000000000000000004 /* PBXTargetDependency */,
 				D60000000000000000000002 /* PBXTargetDependency */,
+				C60000000000000000000002 /* PBXTargetDependency */,
 			);
 			name = STand;
 			packageProductDependencies = (
@@ -496,6 +536,26 @@
 			productReference = E10000000000000000000004 /* STandRadioShare.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		C10000000000000000000001 /* STandUpdaterBridge */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C80000000000000000000001 /* Build configuration list for PBXNativeTarget "STandUpdaterBridge" */;
+			buildPhases = (
+				C40000000000000000000001 /* Sources */,
+				C30000000000000000000001 /* Frameworks */,
+				C50000000000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = STandUpdaterBridge;
+			packageProductDependencies = (
+				C00000000000000000000002 /* Sparkle */,
+			);
+			productName = STandUpdaterBridge;
+			productReference = C00000000000000000000012 /* STandUpdaterBridge.bundle */;
+			productType = "com.apple.product-type.bundle";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -533,6 +593,9 @@
 							};
 						};
 					};
+					C10000000000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
+					};
 				};
 			};
 			buildConfigurationList = A80000000000000000000003 /* Build configuration list for PBXProject "STand" */;
@@ -545,6 +608,9 @@
 			);
 			mainGroup = A20000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C00000000000000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A2000000000000000000000B /* Products */;
 			projectDirPath = "";
@@ -554,6 +620,7 @@
 				A10000000000000000000002 /* STandTests */,
 				A10000000000000000000003 /* STandWidget */,
 				D10000000000000000000001 /* STandRadioShare */,
+				C10000000000000000000001 /* STandUpdaterBridge */,
 				U10000000000000000000001 /* STandUITests */,
 			);
 		};
@@ -618,6 +685,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C50000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -643,6 +717,7 @@
 				B00000000000000000000030 /* BoyisoModels.swift in Sources */,
 				B00000000000000000000031 /* BoyisoConnectivityService.swift in Sources */,
 				B00000000000000000000032 /* BoyisoView.swift in Sources */,
+				B00000000000000000000034 /* MacUpdaterController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -651,6 +726,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B00000000000000000000101 /* AudioAnalysisTests.swift in Sources */,
+				B00000000000000000000102 /* MacUpdaterControllerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -679,6 +755,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C40000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C90000000000000000000001 /* STandUpdaterBridge.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -704,6 +788,12 @@
 			target = A10000000000000000000001 /* STand */;
 			targetProxy = U60000000000000000000001 /* PBXContainerItemProxy */;
 		};
+		C60000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilter = maccatalyst;
+			target = C10000000000000000000001 /* STandUpdaterBridge */;
+			targetProxy = C60000000000000000000001 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -720,6 +810,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = STand/Resources/Info.plist;
+				"INFOPLIST_FILE[sdk=macosx*]" = STand/Resources/InfoMac.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -749,6 +840,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = STand/Resources/Info.plist;
+				"INFOPLIST_FILE[sdk=macosx*]" = STand/Resources/InfoMac.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1046,6 +1138,54 @@
 			};
 			name = Release;
 		};
+		C70000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = T7B4EPLHPK;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSPrincipalClass = STandUpdaterBridge;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@loader_path/../Frameworks",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.armsone.stand.updater-bridge";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Debug;
+		};
+		C70000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = T7B4EPLHPK;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSPrincipalClass = STandUpdaterBridge;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@loader_path/../Frameworks",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.armsone.stand.updater-bridge";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1103,7 +1243,35 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		C80000000000000000000001 /* Build configuration list for PBXNativeTarget "STandUpdaterBridge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C70000000000000000000001 /* Debug */,
+				C70000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C00000000000000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C00000000000000000000002 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C00000000000000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A00000000000000000000001 /* Project object */;
 }

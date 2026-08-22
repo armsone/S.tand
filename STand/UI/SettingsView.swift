@@ -23,6 +23,7 @@ struct SettingsView: View {
     @ObservedObject private var weather: WeatherService
     @ObservedObject private var radio: InternetRadioPlayer
     @ObservedObject private var boyiso: BoyisoConnectivityService
+    @ObservedObject private var macUpdater = MacUpdaterController.shared
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -869,6 +870,27 @@ struct SettingsView: View {
                 systemImage: "app.badge",
                 accent: accent
             )
+
+            #if targetEnvironment(macCatalyst)
+            Button {
+                macUpdater.checkForUpdatesManually()
+            } label: {
+                SettingsNavigationRow(
+                    title: "업데이트 확인",
+                    value: macUpdater.statusText,
+                    systemImage: "arrow.triangle.2.circlepath",
+                    accent: accent
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(!macUpdater.canCheckManually)
+
+            if let updaterDetail = macUpdater.detailText {
+                Text(updaterDetail)
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            #endif
 
             Link(destination: URL(string: "https://github.com/armsone")!) {
                 SettingsNavigationRow(

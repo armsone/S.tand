@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             WidgetCenter.shared.reloadTimelines(ofKind: "com.armsone.stand.launch.v2")
             defaults.set(true, forKey: Self.circularGlyphReloadKey)
         }
+        MacUpdaterController.shared.startIfNeeded()
         return true
     }
 

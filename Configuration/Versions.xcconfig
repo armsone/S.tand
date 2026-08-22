@@ -1,3 +1,7 @@
 // S.tand version policy: keep 1.0.0 until explicitly requested.
 MARKETING_VERSION = 1.0.0
 CURRENT_PROJECT_VERSION = 0.33.0
+
+// Sparkle EdDSA 공개 키 (base64). 공개 키는 앱에 포함되며 비밀 키만 로그인
+// Keychain의 STand 계정에 보관한다.
+STAND_SPARKLE_ED_PUBLIC_KEY = 0SQt750qI6OIojPMfQKO/k1OxWj0b7B74+pySy5QqQ0=

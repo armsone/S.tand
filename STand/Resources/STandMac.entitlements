@@ -20,5 +20,10 @@
 	<true/>
 	<key>com.apple.security.personal-information.location</key>
 	<true/>
+	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
+	<array>
+		<string>com.armsone.stand-spks</string>
+		<string>com.armsone.stand-spki</string>
+	</array>
 </dict>
 </plist>
