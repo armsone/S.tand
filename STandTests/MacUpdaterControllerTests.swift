@@ -116,4 +116,228 @@ final class MacUpdaterControllerTests: XCTestCase {
             .failed(message: "네트워크 오류")
         )
     }
+
+    // MARK: - TestFlightUpdateCheck numericBuild
+
+    func testNumericBuildFromTextValid() {
+        XCTAssertEqual(TestFlightUpdateCheck.numericBuild(fromText: "340467"), 340467)
+        XCTAssertEqual(TestFlightUpdateCheck.numericBuild(fromText: "  123 \n"), 123)
+        XCTAssertEqual(TestFlightUpdateCheck.numericBuild(fromText: "0"), 0)
+    }
+
+    func testNumericBuildFromTextInvalid() {
+        XCTAssertNil(TestFlightUpdateCheck.numericBuild(fromText: ""))
+        XCTAssertNil(TestFlightUpdateCheck.numericBuild(fromText: "   "))
+        XCTAssertNil(TestFlightUpdateCheck.numericBuild(fromText: "340467a"))
+        XCTAssertNil(TestFlightUpdateCheck.numericBuild(fromText: "-10"))
+        XCTAssertNil(TestFlightUpdateCheck.numericBuild(fromText: "12.34"))
+        XCTAssertNil(TestFlightUpdateCheck.numericBuild(fromText: "340 467"))
+    }
+
+    func testNumericBuildFromJSONValue() {
+        XCTAssertEqual(TestFlightUpdateCheck.numericBuild(fromJSONValue: "340468"), 340468)
+        XCTAssertEqual(TestFlightUpdateCheck.numericBuild(fromJSONValue: 340468), 340468)
+        XCTAssertEqual(TestFlightUpdateCheck.numericBuild(fromJSONValue: NSNumber(value: 340468)), 340468)
+        XCTAssertNil(TestFlightUpdateCheck.numericBuild(fromJSONValue: nil))
+        XCTAssertNil(TestFlightUpdateCheck.numericBuild(fromJSONValue: true))
+        XCTAssertNil(TestFlightUpdateCheck.numericBuild(fromJSONValue: false))
+        XCTAssertNil(TestFlightUpdateCheck.numericBuild(fromJSONValue: 12.34))
+        XCTAssertNil(TestFlightUpdateCheck.numericBuild(fromJSONValue: -5))
+        XCTAssertNil(TestFlightUpdateCheck.numericBuild(fromJSONValue: ["invalid": "type"]))
+    }
+
+    // MARK: - TestFlightUpdateCheck evaluate
+
+    func testEvaluateNewerBuildAvailable() {
+        let json = """
+        {
+            "builds": [
+                {
+                    "slug": "stand",
+                    "build": "340468",
+                    "version": "2.1.0"
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let outcome = TestFlightUpdateCheck.evaluate(
+            responseData: json,
+            currentBuildText: "340467"
+        )
+        XCTAssertEqual(
+            outcome,
+            .newerAvailable(latestBuild: 340468, version: "2.1.0")
+        )
+    }
+
+    func testEvaluateUpToDateEqualBuild() {
+        let json = """
+        {
+            "builds": [
+                {
+                    "slug": "stand",
+                    "build": "340467",
+                    "version": "2.1.0"
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let outcome = TestFlightUpdateCheck.evaluate(
+            responseData: json,
+            currentBuildText: "340467"
+        )
+        XCTAssertEqual(outcome, .upToDate(latestBuild: 340467))
+    }
+
+    func testEvaluateUpToDateOlderBuild() {
+        let json = """
+        {
+            "builds": [
+                {
+                    "slug": "stand",
+                    "build": "340460",
+                    "version": "2.0.9"
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let outcome = TestFlightUpdateCheck.evaluate(
+            responseData: json,
+            currentBuildText: "340467"
+        )
+        XCTAssertEqual(outcome, .upToDate(latestBuild: 340460))
+    }
+
+    func testEvaluateAcceptsNumericIntegerBuildInJSON() {
+        let json = """
+        {
+            "builds": [
+                {
+                    "slug": "stand",
+                    "build": 340468
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let outcome = TestFlightUpdateCheck.evaluate(
+            responseData: json,
+            currentBuildText: "340467"
+        )
+        XCTAssertEqual(outcome, .newerAvailable(latestBuild: 340468, version: nil))
+    }
+
+    func testEvaluateSelectsStandSlugAmongMultipleBuilds() {
+        let json = """
+        {
+            "builds": [
+                {
+                    "slug": "otherapp",
+                    "build": "999999",
+                    "version": "9.9.9"
+                },
+                {
+                    "slug": "stand",
+                    "build": "340468",
+                    "version": "2.1.0"
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let outcome = TestFlightUpdateCheck.evaluate(
+            responseData: json,
+            currentBuildText: "340467"
+        )
+        XCTAssertEqual(
+            outcome,
+            .newerAvailable(latestBuild: 340468, version: "2.1.0")
+        )
+    }
+
+    func testEvaluateMalformedWhenSlugMissing() {
+        let json = """
+        {
+            "builds": [
+                {
+                    "slug": "otherapp",
+                    "build": "100"
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let outcome = TestFlightUpdateCheck.evaluate(
+            responseData: json,
+            currentBuildText: "340467"
+        )
+        XCTAssertEqual(outcome, .malformed(reason: "S.tand 빌드 정보를 찾지 못했어요."))
+    }
+
+    func testEvaluateMalformedWhenBuildFieldMissingOrInvalid() {
+        let missingBuild = """
+        {
+            "builds": [
+                {
+                    "slug": "stand",
+                    "version": "2.1.0"
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let outcome1 = TestFlightUpdateCheck.evaluate(
+            responseData: missingBuild,
+            currentBuildText: "340467"
+        )
+        XCTAssertEqual(outcome1, .malformed(reason: "서버의 빌드 번호 형식이 올바르지 않아요."))
+
+        let invalidBuild = """
+        {
+            "builds": [
+                {
+                    "slug": "stand",
+                    "build": "not-a-number"
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let outcome2 = TestFlightUpdateCheck.evaluate(
+            responseData: invalidBuild,
+            currentBuildText: "340467"
+        )
+        XCTAssertEqual(outcome2, .malformed(reason: "서버의 빌드 번호 형식이 올바르지 않아요."))
+    }
+
+    func testEvaluateMalformedWhenResponseIsNotValidJSON() {
+        let invalidData = "<html>502 Bad Gateway</html>".data(using: .utf8)!
+        let outcome = TestFlightUpdateCheck.evaluate(
+            responseData: invalidData,
+            currentBuildText: "340467"
+        )
+        XCTAssertEqual(outcome, .malformed(reason: "서버 응답 형식을 읽지 못했어요."))
+    }
+
+    func testEvaluateMalformedWhenCurrentBuildTextIsInvalid() {
+        let json = """
+        {
+            "builds": [
+                {
+                    "slug": "stand",
+                    "build": "340468"
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let outcome = TestFlightUpdateCheck.evaluate(
+            responseData: json,
+            currentBuildText: "invalid_current_build"
+        )
+        XCTAssertEqual(outcome, .malformed(reason: "현재 앱의 빌드 번호를 읽지 못했어요."))
+    }
 }

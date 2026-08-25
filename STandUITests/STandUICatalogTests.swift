@@ -178,12 +178,12 @@ final class STandUICatalogTests: XCTestCase {
     }
 
     private func scrollTo(element: XCUIElement, description: String) {
+        let scrollView = app.scrollViews.firstMatch
+        XCTAssertTrue(scrollView.waitForExistence(timeout: 5), "설정 스크롤 영역을 찾지 못했습니다.")
         for _ in 0..<8 where !element.isHittable {
-            // 카드 중앙의 슬라이더가 드래그를 가로채지 않도록 빈 왼쪽 여백에서
-            // 수직 스크롤을 시작한다.
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.8))
-            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.2))
-            start.press(forDuration: 0.1, thenDragTo: end)
+            // 앱 전체의 가장자리는 홈 화면의 전역 밝기 제스처가 받을 수 있다.
+            // 설정 스크롤 뷰에 직접 표준 스크롤 동작을 보낸다.
+            scrollView.swipeUp(velocity: .fast)
         }
         XCTAssertTrue(element.isHittable, "\(description) 항목을 화면 안에서 찾지 못했습니다.")
     }

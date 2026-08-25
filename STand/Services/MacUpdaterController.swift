@@ -78,6 +78,83 @@ enum MacUpdaterLogic {
     }
 }
 
+/// iPhone/iPad 전용 TestFlight 새 빌드 확인 로직.
+/// 네트워크 호출 없이 응답 데이터 해석과 빌드 번호 비교만 담당해 단위 테스트가 가능하다.
+enum TestFlightUpdateCheck {
+    static let endpoint = URL(string: "https://nasfinder.com/api/testflight-builds")!
+    static let appSlug = "stand"
+
+    enum Outcome: Equatable {
+        case upToDate(latestBuild: Int)
+        case newerAvailable(latestBuild: Int, version: String?)
+        case malformed(reason: String)
+    }
+
+    static func evaluate(
+        responseData: Data,
+        currentBuildText: String,
+        slug: String = appSlug
+    ) -> Outcome {
+        guard let currentBuild = numericBuild(fromText: currentBuildText) else {
+            return .malformed(reason: "현재 앱의 빌드 번호를 읽지 못했어요.")
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: responseData) else {
+            return .malformed(reason: "서버 응답 형식을 읽지 못했어요.")
+        }
+        guard let entry = items(from: object).first(where: { ($0["slug"] as? String) == slug }) else {
+            return .malformed(reason: "S.tand 빌드 정보를 찾지 못했어요.")
+        }
+        guard let latestBuild = numericBuild(fromJSONValue: entry["build"]) else {
+            return .malformed(reason: "서버의 빌드 번호 형식이 올바르지 않아요.")
+        }
+        if latestBuild > currentBuild {
+            return .newerAvailable(latestBuild: latestBuild, version: entry["version"] as? String)
+        }
+        return .upToDate(latestBuild: latestBuild)
+    }
+
+    /// 최상위가 {"builds": [...]}이거나, 최상위가 배열인 형태, 또는 items/data 키 아래 배열을 허용한다.
+    private static func items(from object: Any) -> [[String: Any]] {
+        if let dictionary = object as? [String: Any] {
+            for key in ["builds", "items", "data"] {
+                if let array = dictionary[key] as? [[String: Any]] { return array }
+            }
+        } else if let array = object as? [[String: Any]] {
+            return array
+        }
+        return []
+    }
+
+    static func numericBuild(fromJSONValue value: Any?) -> Int? {
+        guard let value else { return nil }
+        if value is Bool { return nil }
+        if let number = value as? NSNumber {
+            if CFGetTypeID(number as CFTypeRef) == CFBooleanGetTypeID() {
+                return nil
+            }
+            let int64 = number.int64Value
+            guard Double(int64) == number.doubleValue, int64 >= 0, int64 <= Int.max else {
+                return nil
+            }
+            return Int(int64)
+        }
+        if let text = value as? String {
+            return numericBuild(fromText: text)
+        }
+        return nil
+    }
+
+    static func numericBuild(fromText text: String) -> Int? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed.allSatisfy({ $0 >= "0" && $0 <= "9" }),
+              let build = Int(trimmed),
+              build >= 0
+        else { return nil }
+        return build
+    }
+}
+
 final class MacUpdaterController: NSObject, ObservableObject {
     static let shared = MacUpdaterController()
 

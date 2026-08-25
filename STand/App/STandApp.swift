@@ -68,6 +68,10 @@ enum UICatalogLaunch {
         ProcessInfo.processInfo.arguments.contains("--ui-catalog")
     }
 
+    static var disablesAnimations: Bool {
+        ProcessInfo.processInfo.environment["UITEST_DISABLE_ANIMATIONS"] == "1"
+    }
+
     static var showsPermissionExplanation: Bool {
         isEnabled
             && ProcessInfo.processInfo.arguments.contains("--ui-catalog-permissions")
@@ -162,6 +166,7 @@ enum UICatalogLaunch {
     static let fixtureID = "disabled"
     static let fixedDate: Date? = nil
     static let isEnabled = false
+    static let disablesAnimations = false
     static let showsPermissionExplanation = false
     static let startsInEditor = false
     static let recordingsDirectory: URL? = nil

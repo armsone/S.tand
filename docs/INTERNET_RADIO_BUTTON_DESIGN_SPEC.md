@@ -169,8 +169,9 @@ Android 아이콘은 Material Symbols Rounded를 우선 사용한다.
 
 1. `Google` — `https://www.google.com/`
 2. `한국 라디오` — `https://radio.bsod.kr/`
-3. `FMSTREAM` — `https://fmstream.org/`
-4. `Radio Browser` — `https://www.radio-browser.info/`
+3. `내가 사랑하는 인터넷 라디오` — `https://blog.naver.com/armsone/224388181252`
+4. `FMSTREAM` — `https://fmstream.org/`
+5. `Radio Browser` — `https://www.radio-browser.info/`
 
 상단 바 아래에는 1pt 구분선과 2pt 페이지 로딩 진행선을 둔다. 즐겨찾기는 웹사이트로 이동하기 위한 링크일 뿐 방송·스트림 주소를 앱이 제공하거나 권장한다는 뜻이 아니다. 브라우저는 URL 확장자, 오디오·HLS MIME, ICY 헤더, `<audio>`·`<source>` 요소 또는 페이지 네트워크 요청을 분석하지 않는다.
 
@@ -239,7 +240,7 @@ sealed interface InternetRadioState {
 - 빠른 반복 탭, 네트워크 끊김, 잘못된 스트림, 화면 회전에서 중복 재생·오디오 포커스 누수·감시 중단 사유 누수가 없다.
 - TalkBack에서 30% 크기에도 최소 48×48dp 대상으로 패널 이름, 상태, 동작 힌트가 한 요소로 읽힌다.
 - Safari·Chrome 공유 시트에 `S.tand 라디오`가 나타나며, 가져온 URL은 편집 화면에만 미리 입력되고 저장 전 기존 설정은 유지된다.
-- 앱 내 브라우저의 기본 홈페이지가 Google이며 기본 즐겨찾기 네 항목이 지정된 이름·주소·순서로 표시된다.
+- 앱 내 브라우저의 기본 홈페이지가 Google이며 기본 즐겨찾기 다섯 항목이 지정된 이름·주소·순서로 표시된다.
 - 고정 상단 바에서 뒤로/닫기·주소 입력·이동/중지·새로고침·즐겨찾기가 작동한다.
 - 브라우저는 직접 스트림 확장자, 오디오·HLS·ICY 응답, 문서의 `<audio>` 소스 또는 전체 네트워크 요청을 분석하지 않으며 어떤 웹 주소도 채널 편집기에 자동 입력하지 않는다.
 - 사용자가 직접 복사하고 편집 화면에서 붙여넣은 주소만 구문 검증과 명시적 저장 절차를 거친다.

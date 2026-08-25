@@ -984,6 +984,11 @@ struct InternetRadioBrowserFavorite: Identifiable, Equatable {
             isHomepage: false
         ),
         InternetRadioBrowserFavorite(
+            title: "내가 사랑하는 인터넷 라디오",
+            url: URL(string: "https://blog.naver.com/armsone/224388181252")!,
+            isHomepage: false
+        ),
+        InternetRadioBrowserFavorite(
             title: "FMSTREAM",
             url: URL(string: "https://fmstream.org/")!,
             isHomepage: false

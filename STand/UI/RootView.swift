@@ -130,6 +130,17 @@ private enum PresentedSheet: String, Identifiable {
     var id: String { rawValue }
 }
 
+private struct UpdateAlertItem: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let message: String
+    var isTestFlightOpenAction: Bool = false
+
+    static func == (lhs: UpdateAlertItem, rhs: UpdateAlertItem) -> Bool {
+        lhs.id == rhs.id && lhs.title == rhs.title && lhs.message == rhs.message && lhs.isTestFlightOpenAction == rhs.isTestFlightOpenAction
+    }
+}
+
 private enum ScreenAdjustmentDragState {
     case brightness(startingValue: Double)
     case volume(startingValue: Double)
@@ -517,6 +528,13 @@ struct RootView: View {
     // Mac Catalyst 전용 카드 순서 편집 모드. 다른 플랫폼에서는 항상 false로 유지되어 동작에 영향을 주지 않습니다.
     @State private var isMusicStripReorderingCatalyst = false
     @State private var musicStripDraggingChannelID: String?
+    #if targetEnvironment(macCatalyst)
+    @ObservedObject private var macUpdater = MacUpdaterController.shared
+    @State private var isAwaitingMacUpdaterResult = false
+    #endif
+    @State private var updateAlert: UpdateAlertItem?
+    @State private var mobileUpdateTask: Task<Void, Never>?
+    @State private var isCheckingMobileUpdate = false
 
     init(
         model: StandViewModel,
@@ -850,16 +868,50 @@ struct RootView: View {
             guard draft != nil else { return }
             presentedSheet = .internetRadio
         }
+        #if targetEnvironment(macCatalyst)
+        .onChange(of: macUpdater.activity) { _, newActivity in
+            handleMacUpdaterActivityChange(newActivity)
+        }
+        #endif
+        .alert(
+            updateAlert?.title ?? "",
+            isPresented: Binding(
+                get: { updateAlert != nil },
+                set: { if !$0 { updateAlert = nil } }
+            ),
+            presenting: updateAlert
+        ) { item in
+            if item.isTestFlightOpenAction {
+                Button("TestFlight 열기") {
+                    openTestFlightApp()
+                }
+                Button("취소", role: .cancel) {
+                    updateAlert = nil
+                }
+            } else {
+                Button("확인", role: .cancel) {
+                    updateAlert = nil
+                }
+            }
+        } message: { item in
+            Text(item.message)
+        }
     }
 
     private func resetTransientInterface() {
         clockScaleFeedbackTask?.cancel()
         boyisoOverlayTask?.cancel()
         boyisoBannerTask?.cancel()
+        mobileUpdateTask?.cancel()
 
         clockScaleFeedbackTask = nil
         boyisoOverlayTask = nil
         boyisoBannerTask = nil
+        mobileUpdateTask = nil
+        isCheckingMobileUpdate = false
+        #if targetEnvironment(macCatalyst)
+        isAwaitingMacUpdaterResult = false
+        #endif
 
         screenAdjustmentDragState = nil
         clockScaleGestureStart = nil
@@ -881,6 +933,167 @@ struct RootView: View {
         model.appDidBecomeActive()
         model.startNightSession()
         didInitialize = true
+    }
+
+    private func checkForUpdatesFromHome() {
+        #if targetEnvironment(macCatalyst)
+        checkMacCatalystUpdates()
+        #else
+        checkMobileTestFlightUpdates()
+        #endif
+    }
+
+    #if targetEnvironment(macCatalyst)
+    private func checkMacCatalystUpdates() {
+        macUpdater.startIfNeeded()
+        switch macUpdater.availability {
+        case .unsupported:
+            updateAlert = UpdateAlertItem(
+                title: "업데이트 불가",
+                message: "이 기기 환경에서는 업데이트를 지원하지 않습니다."
+            )
+        case .notStarted:
+            updateAlert = UpdateAlertItem(
+                title: "업데이트 준비 중",
+                message: "업데이트 구성 요소를 준비하고 있습니다. 잠시 후 다시 시도해 주세요."
+            )
+        case .unavailable(let reason):
+            updateAlert = UpdateAlertItem(
+                title: "업데이트 사용 불가",
+                message: reason
+            )
+        case .ready:
+            if macUpdater.activity == .checking {
+                updateAlert = UpdateAlertItem(
+                    title: "업데이트 확인 중",
+                    message: "현재 최신 버전을 확인하고 있습니다."
+                )
+            } else if macUpdater.canCheckManually {
+                isAwaitingMacUpdaterResult = true
+                macUpdater.checkForUpdatesManually()
+            }
+        }
+    }
+
+    private func handleMacUpdaterActivityChange(_ activity: MacUpdaterActivity) {
+        guard isAwaitingMacUpdaterResult else { return }
+        switch activity {
+        case .checking:
+            break
+        case .upToDate:
+            isAwaitingMacUpdaterResult = false
+            updateAlert = UpdateAlertItem(
+                title: "최신 버전",
+                message: "현재 최신 버전을 사용하고 있습니다."
+            )
+        case .updateFound(let version):
+            isAwaitingMacUpdaterResult = false
+            let versionInfo = version.map { " (\($0))" } ?? ""
+            updateAlert = UpdateAlertItem(
+                title: "새 버전 발견",
+                message: "새로운 버전\(versionInfo)이(가) 있습니다."
+            )
+        case .failed(let message):
+            isAwaitingMacUpdaterResult = false
+            updateAlert = UpdateAlertItem(
+                title: "업데이트 확인 실패",
+                message: message
+            )
+        case .idle:
+            isAwaitingMacUpdaterResult = false
+        }
+    }
+    #else
+    private func checkMobileTestFlightUpdates() {
+        if isCheckingMobileUpdate {
+            updateAlert = UpdateAlertItem(
+                title: "업데이트 확인 중",
+                message: "현재 최신 버전을 확인하고 있습니다."
+            )
+            return
+        }
+
+        isCheckingMobileUpdate = true
+        mobileUpdateTask = Task { @MainActor in
+            defer {
+                isCheckingMobileUpdate = false
+                mobileUpdateTask = nil
+            }
+            do {
+                var request = URLRequest(url: TestFlightUpdateCheck.endpoint)
+                request.timeoutInterval = 10
+                request.cachePolicy = .reloadIgnoringLocalCacheData
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard !Task.isCancelled else { return }
+
+                guard let httpResponse = response as? HTTPURLResponse,
+                      (200...299).contains(httpResponse.statusCode) else {
+                    updateAlert = UpdateAlertItem(
+                        title: "업데이트 확인 실패",
+                        message: "서버 연결에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해 주세요."
+                    )
+                    return
+                }
+
+                let currentBuildText = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+                let outcome = TestFlightUpdateCheck.evaluate(
+                    responseData: data,
+                    currentBuildText: currentBuildText
+                )
+
+                guard !Task.isCancelled else { return }
+
+                switch outcome {
+                case .upToDate:
+                    updateAlert = UpdateAlertItem(
+                        title: "최신 버전",
+                        message: "현재 최신 버전을 사용하고 있습니다."
+                    )
+                case .newerAvailable(let latestBuild, let version):
+                    let versionInfo = version.map { " (\($0))" } ?? ""
+                    updateAlert = UpdateAlertItem(
+                        title: "새 버전 사용 가능",
+                        message: "새로운 TestFlight 빌드 \(latestBuild)\(versionInfo)이(가) 있습니다.\n외부 TestFlight 앱으로 이동하여 업데이트하시겠습니까?",
+                        isTestFlightOpenAction: true
+                    )
+                case .malformed(let reason):
+                    updateAlert = UpdateAlertItem(
+                        title: "업데이트 확인 실패",
+                        message: reason
+                    )
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                updateAlert = UpdateAlertItem(
+                    title: "업데이트 확인 실패",
+                    message: "네트워크 연결 상태를 확인하고 다시 시도해 주세요."
+                )
+            }
+        }
+    }
+    #endif
+
+    private func openTestFlightApp() {
+        guard let url = URL(string: "itms-beta://") else {
+            showTestFlightUnavailableAlert()
+            return
+        }
+        UIApplication.shared.open(url, options: [:]) { success in
+            if !success {
+                showTestFlightUnavailableAlert()
+            }
+        }
+    }
+
+    private func showTestFlightUnavailableAlert() {
+        DispatchQueue.main.async {
+            updateAlert = UpdateAlertItem(
+                title: "TestFlight 열기 실패",
+                message: "기기에 TestFlight 앱이 설치되어 있지 않거나 열 수 없습니다. App Store에서 TestFlight 앱을 설치한 후 다시 시도해 주세요."
+            )
+        }
     }
 
     private func topBar(isPortrait _: Bool) -> some View {
@@ -908,14 +1121,21 @@ struct RootView: View {
                 BatteryStatusPill(status: model.batteryStatus)
             }
 
-            HStack(spacing: 8) {
-                STandBrandIcon(size: 28)
+            Button {
+                checkForUpdatesFromHome()
+            } label: {
+                HStack(spacing: 8) {
+                    STandBrandIcon(size: 28)
 
-                Text("S.tand")
-                    .font(.system(.headline, design: .rounded, weight: .semibold))
-                    .tracking(0.8)
+                    Text("S.tand")
+                        .font(.system(.headline, design: .rounded, weight: .semibold))
+                        .tracking(0.8)
+                }
             }
+            .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
+            .accessibilityLabel("최신 버전 확인")
+            .accessibilityHint("현재 버전이 최신인지 확인합니다.")
         }
         .frame(maxWidth: .infinity)
         .foregroundStyle(.white.opacity(0.82))
@@ -2777,7 +2997,12 @@ private struct MarqueeText: View {
 
     var body: some View {
         GeometryReader { proxy in
-            TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
+            TimelineView(
+                .animation(
+                    minimumInterval: 1 / 30,
+                    paused: UICatalogLaunch.disablesAnimations
+                )
+            ) { timeline in
                 let overflow = max(0, contentWidth - proxy.size.width)
                 let travelDuration = max(2.5, Double(overflow / 22))
                 let cycleDuration = travelDuration + 2
@@ -3296,7 +3521,12 @@ private struct WeatherLocationMarqueeText: View {
                     .font(.system(size: iconSize, weight: .semibold))
                     .frame(width: iconWidth)
 
-                TimelineView(.animation(minimumInterval: 1 / 30, paused: overflow <= 0)) { context in
+                TimelineView(
+                    .animation(
+                        minimumInterval: 1 / 30,
+                        paused: overflow <= 0 || UICatalogLaunch.disablesAnimations
+                    )
+                ) { context in
                     Text(text)
                         .font(font)
                         .lineLimit(1)

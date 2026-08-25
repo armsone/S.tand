@@ -383,13 +383,14 @@ final class AudioAnalysisTests: XCTestCase {
         )
         XCTAssertEqual(
             InternetRadioBrowserFavorite.defaults.map(\.title),
-            ["Google", "한국 라디오", "FMSTREAM", "Radio Browser"]
+            ["Google", "한국 라디오", "내가 사랑하는 인터넷 라디오", "FMSTREAM", "Radio Browser"]
         )
         XCTAssertEqual(
             InternetRadioBrowserFavorite.defaults.map { $0.url.absoluteString },
             [
                 "https://www.google.com/",
                 "https://radio.bsod.kr/",
+                "https://blog.naver.com/armsone/224388181252",
                 "https://fmstream.org/",
                 "https://www.radio-browser.info/"
             ]

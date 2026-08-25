@@ -380,7 +380,7 @@ Android 기존 확정 기준: iOS `0f664b2` / `1.0.0 (0.24.1)`
 ### 3.3 라디오·브라우저·녹음·공유
 
 - 라디오의 모든 가시 field/button/help/error/status 문구는 `SettingsView.swift:294-544,1547-1957`, `RootView.swift:2530-2696`, validation errors `InternetRadioConfiguration.swift:3-67`가 단일 근거다. 반드시 `대기 중/연결 중/재생 중/자동 재연결 중/연결 실패`, `이름 (선택)`, `https://…`, `웹에서 찾기/주소 찾기`, `채널 추가/수정/삭제`, 삭제 confirm 문구를 그대로 포함한다.
-- 브라우저의 모든 고정 문구는 `InternetRadioBrowserView.swift:68-401,723-865,936-1051`: `웹 주소 입력`, accessibility `이전 페이지/팝업 닫기/브라우저 닫기/새로고침/로딩 중지/주소로 이동/복사한 주소로 이동`, `즐겨찾기`, 4개 favorite 이름·URL, 안내 및 오류 전 분기다.
+- 브라우저의 모든 고정 문구는 `InternetRadioBrowserView.swift:68-401,723-865,936-1051`: `웹 주소 입력`, accessibility `이전 페이지/팝업 닫기/브라우저 닫기/새로고침/로딩 중지/주소로 이동/복사한 주소로 이동`, `즐겨찾기`, 5개 favorite 이름·URL, 안내 및 오류 전 분기다.
 - 수면 소리의 모든 가시 문구는 `RecordingsView.swift:33-378,422-590,649-824,891-1131`: empty, summary, today, selection, session, timeline, row/menu, dock, 4개 confirmation, failure alert, playback labels를 포함한다.
 - 공유 확장 모든 문구는 `STandRadioShare/ShareViewController.swift:16-177`; 위젯 문구는 `STandWidget/STandWidget.swift:22-62`다. Android string resource를 만들 때 이 범위를 자동 추출해 대조해야 한다.
 
@@ -727,10 +727,11 @@ STand/UI/InternetRadioBrowserView.swift:359:            Text("웹사이트만 �
 STand/UI/InternetRadioBrowserView.swift:379:            Text(message)
 STand/UI/InternetRadioBrowserView.swift:389:            .accessibilityLabel("안내 닫기")
 STand/UI/InternetRadioBrowserView.swift:937:    let title: String
-STand/UI/InternetRadioBrowserView.swift:945:            title: "Google",
-STand/UI/InternetRadioBrowserView.swift:950:            title: "한국 라디오",
-STand/UI/InternetRadioBrowserView.swift:955:            title: "FMSTREAM",
-STand/UI/InternetRadioBrowserView.swift:960:            title: "Radio Browser",
+STand/UI/InternetRadioBrowserView.swift:977:            title: "Google",
+STand/UI/InternetRadioBrowserView.swift:982:            title: "한국 라디오",
+STand/UI/InternetRadioBrowserView.swift:987:            title: "내가 사랑하는 인터넷 라디오",
+STand/UI/InternetRadioBrowserView.swift:992:            title: "FMSTREAM",
+STand/UI/InternetRadioBrowserView.swift:997:            title: "Radio Browser",
 STandRadioShare/ShareViewController.swift:5:    private let addressLabel = UILabel()
 STandRadioShare/ShareViewController.swift:6:    private let statusLabel = UILabel()
 STandRadioShare/ShareViewController.swift:7:    private let saveButton = UIButton(type: .system)
