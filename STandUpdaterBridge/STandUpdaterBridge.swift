@@ -56,6 +56,14 @@ public final class STandUpdaterBridge: NSObject {
     @objc public func checkForUpdates() {
         updater?.checkForUpdates()
     }
+
+    @objc public func automaticDownloadEnabledValue() -> NSNumber {
+        NSNumber(value: updater?.automaticallyDownloadsUpdates ?? true)
+    }
+
+    @objc public func setAutomaticDownloadEnabledValue(_ enabled: NSNumber) {
+        updater?.automaticallyDownloadsUpdates = enabled.boolValue
+    }
 }
 
 extension STandUpdaterBridge: SPUUpdaterDelegate {

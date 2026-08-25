@@ -2,6 +2,11 @@ import XCTest
 @testable import STand
 
 final class MacUpdaterControllerTests: XCTestCase {
+    func testAutomaticDownloadStatusIsExplicit() {
+        XCTAssertEqual(MacUpdaterLogic.automaticDownloadStatusText(enabled: true), "새 버전을 자동으로 다운로드합니다.")
+        XCTAssertEqual(MacUpdaterLogic.automaticDownloadStatusText(enabled: false), "새 버전을 확인한 뒤 직접 다운로드합니다.")
+    }
+
     // MARK: - resolveAvailability
 
     func testResolveAvailabilityFailsWhenBridgeBundleMissing() {

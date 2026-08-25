@@ -70,8 +70,8 @@
 
 ## 버전 정책
 
-- 현재 공통 기준 `MARKETING_VERSION`은 `2.1.0`입니다. 중요 수정은 minor, 작은 수정은 patch를 올리고 major는 사용자의 직접 지시가 있을 때만 변경합니다.
-- 현재 플랫폼 내부 `CURRENT_PROJECT_VERSION`은 `340467`, 사용자 표시 `BuildStamp`는 `202608251027`입니다.
+- 현재 공통 기준 `MARKETING_VERSION`은 `2.1.1`입니다. 중요 수정은 minor, 작은 수정은 patch를 올리고 major는 사용자의 직접 지시가 있을 때만 변경합니다.
+- 현재 플랫폼 내부 `CURRENT_PROJECT_VERSION`은 `340977`, 사용자 표시 `BuildStamp`는 `202608251857`입니다.
 - 설치·TestFlight·정식 배포에 사용할 새 후보를 만들 때만 플랫폼 내부 빌드와 `YYYYMMDDHHMM` 표시 빌드를 한 번 고정합니다. 단순 편집·컴파일·로컬 테스트마다 올리지 않습니다.
 - 앱·Mac Catalyst·Widget·Share Extension의 제품 버전, 내부 빌드와 표시 빌드를 같은 후보 값으로 맞춥니다.
 - 문서·규칙만 바뀌고 앱 바이너리가 변하지 않으면 빌드 번호를 올리지 않습니다.

@@ -872,6 +872,19 @@ struct SettingsView: View {
             )
 
             #if targetEnvironment(macCatalyst)
+            Toggle(isOn: Binding(
+                get: { macUpdater.automaticDownloadEnabled },
+                set: macUpdater.setAutomaticDownloadEnabled
+            )) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("업데이트 자동 다운로드")
+                    Text(macUpdater.automaticDownloadStatusText)
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+            }
+            .disabled(macUpdater.availability != .ready)
+
             Button {
                 macUpdater.checkForUpdatesManually()
             } label: {

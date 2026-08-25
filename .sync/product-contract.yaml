@@ -9,23 +9,26 @@ reference_inventory:
   uncovered_source_refs: []
 capabilities:
   - id: home.brand_update_check
-    purpose: 사용자가 홈의 S.tand 로고를 눌러 설치된 앱이 최신인지 바로 확인한다.
+    purpose: 사용자가 설치된 앱의 최신 여부를 확인하고 직접 배포 대상에서는 자동 또는 수동으로 안전하게 다운로드한다.
     source_refs:
       - STand/UI/RootView.swift
       - STand/Services/MacUpdaterController.swift
-    entry_points: [홈 > S.tand 로고]
+    entry_points: [홈 > S.tand 로고, 설정 > 업데이트 자동 다운로드, 설정 > 업데이트 확인]
     preconditions: [인터넷에 연결되어 있음]
     inputs: [로고 선택]
     normal_result: 확인 중 상태 뒤 최신, 새 버전, 또는 다시 시도할 수 있는 오류 안내를 표시한다.
-    states: [checking, latest, update_available, failed]
+    states: [idle, checking, latest, update_available, downloading, cancelled, ready, failed]
     algorithms_and_thresholds:
       - 숫자 빌드 번호만 비교하며 원격 빌드가 현재 빌드보다 클 때만 새 버전으로 판정한다.
+      - Android는 공식 최신 정식 release와 정확한 repo/tag/host/path/size/sha256/package/signing certificate를 모두 검증한다.
+      - Android 자동 다운로드는 무과금 네트워크에서만 시작한다.
     data_contracts:
       - Apple 모바일은 NasFinder TestFlight 빌드 API의 stand 항목을 사용한다.
-      - Mac은 기존 Sparkle 앱캐스트를 사용한다.
-      - Android는 GitHub Releases의 최신 릴리스와 APK 자산을 사용한다.
+      - Mac은 기존 Sparkle 앱캐스트와 자동 다운로드 환경설정을 사용한다.
+      - Android는 GitHub Releases의 최신 릴리스와 sha256 digest가 있는 허용 APK 자산을 사용한다.
+      - 직접 배포 제품 버전은 2.1.1, Apple 내부 빌드는 340977, 공통 BuildStamp는 202608251857이다.
     producer_consumer_routes: [공개 릴리스 정보 > 버전 비교 > 홈 안내]
-    persistence_relaunch: 확인 결과를 저장하지 않고 누를 때마다 최신 공개 정보를 다시 확인한다.
+    persistence_relaunch: 확인 결과는 저장하지 않으며 업데이트 자동 다운로드 선택은 기본 켬으로 저장한다.
     permissions_privacy_security: [버전 확인 외 개인정보를 전송하지 않는다.]
     background_lifecycle: 화면을 떠나면 진행 중인 모바일 요청을 취소한다.
     gestures_accessibility:
@@ -34,8 +37,8 @@ capabilities:
     supported_devices_layouts: [iPhone, iPad, Mac, Android phone, Android tablet, Google TV]
     visual_reference: .parity/evidence/2026-08-25/google-tv-logo-update-latest.png
     platform_adaptations:
-      apple: [iPhone과 iPad는 TestFlight를 열고 Mac은 Sparkle 업데이트 화면을 연다.]
-      android: [GitHub Release의 APK 다운로드 화면을 연다.]
+      apple: [iPhone과 iPad는 TestFlight를 열며 직접 다운로드는 제공하지 않고, Mac은 Sparkle 확인과 자동 다운로드 설정을 제공한다.]
+      android: [DownloadManager 진행·취소·재시도 뒤 SHA-256·패키지·서명을 검증하고 시스템 설치자를 연다.]
     intentional_differences:
       - platform: all
         device_layout: all
@@ -45,12 +48,12 @@ capabilities:
         review_trigger: 배포 경로가 변경될 때
     implementations:
       apple:
-        status: implemented
+        status: implemented_source_only
         source_refs: [STand/UI/RootView.swift, STand/Services/MacUpdaterController.swift]
         tests: [STandTests/MacUpdaterControllerTests.swift]
-        evidence: [199 unit tests passed, STand UI catalog passed]
+        evidence: [199 unit tests passed, STand UI catalog passed, 자동 다운로드 변경은 source only이며 재검증 대기]
       android:
-        status: implemented
+        status: implemented_source_only
         source_refs:
           - app/src/main/java/com/armsone/stand/ui/StandHomeScreen.kt
           - app/src/main/java/com/armsone/stand/update/GitHubAppUpdateService.kt
@@ -60,6 +63,7 @@ capabilities:
         evidence:
           - .parity/evidence/2026-08-25/logo-update-check-behavior-trace.md
           - .parity/evidence/2026-08-25/google-tv-logo-update-latest.png
+          - 자동·수동 다운로드와 검증 상태는 source only이며 빌드·실행·캡처 대기
     dependencies: [NasFinder TestFlight API, Sparkle appcast, GitHub Releases API]
     parity_row_ids: [home.brand_update_check]
   - id: settings.music.six_slot_management

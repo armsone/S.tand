@@ -37,6 +37,12 @@ enum MacUpdaterBridgeEvent: Equatable {
 }
 
 enum MacUpdaterLogic {
+    static func automaticDownloadStatusText(enabled: Bool) -> String {
+        enabled
+            ? "새 버전을 자동으로 다운로드합니다."
+            : "새 버전을 확인한 뒤 직접 다운로드합니다."
+    }
+
     static func resolveAvailability(
         bridgeBundleFound: Bool,
         principalClassTrusted: Bool,
@@ -164,6 +170,7 @@ final class MacUpdaterController: NSObject, ObservableObject {
     @Published private(set) var availability: MacUpdaterAvailability = .unsupported
     #endif
     @Published private(set) var activity: MacUpdaterActivity = .idle
+    @Published private(set) var automaticDownloadEnabled = true
 
     private var bridge: NSObject?
 
@@ -214,12 +221,26 @@ final class MacUpdaterController: NSObject, ObservableObject {
         #endif
     }
 
+    func setAutomaticDownloadEnabled(_ enabled: Bool) {
+        #if targetEnvironment(macCatalyst)
+        guard availability == .ready, let bridge else { return }
+        _ = bridge.perform(Self.setAutomaticDownloadSelector, with: NSNumber(value: enabled))
+        automaticDownloadEnabled = enabled
+        #endif
+    }
+
+    var automaticDownloadStatusText: String {
+        MacUpdaterLogic.automaticDownloadStatusText(enabled: automaticDownloadEnabled)
+    }
+
     #if targetEnvironment(macCatalyst)
     private static let bridgeBundleName = "STandUpdaterBridge.bundle"
     private static let bridgeClassName = "STandUpdaterBridge"
     private static let statusHandlerSelector = NSSelectorFromString("setStatusHandler:")
     private static let startSelector = NSSelectorFromString("startUpdater")
     private static let checkSelector = NSSelectorFromString("checkForUpdates")
+    private static let automaticDownloadSelector = NSSelectorFromString("automaticDownloadEnabledValue")
+    private static let setAutomaticDownloadSelector = NSSelectorFromString("setAutomaticDownloadEnabledValue:")
 
     private func loadBridgeAndStart() -> MacUpdaterAvailability {
         guard
@@ -239,7 +260,9 @@ final class MacUpdaterController: NSObject, ObservableObject {
             NSStringFromClass(principal) == Self.bridgeClassName,
             principal.instancesRespond(to: Self.statusHandlerSelector),
             principal.instancesRespond(to: Self.startSelector),
-            principal.instancesRespond(to: Self.checkSelector)
+            principal.instancesRespond(to: Self.checkSelector),
+            principal.instancesRespond(to: Self.automaticDownloadSelector),
+            principal.instancesRespond(to: Self.setAutomaticDownloadSelector)
         else {
             return MacUpdaterLogic.resolveAvailability(
                 bridgeBundleFound: true,
@@ -263,6 +286,7 @@ final class MacUpdaterController: NSObject, ObservableObject {
         )
         if availability == .ready {
             self.bridge = bridge
+            automaticDownloadEnabled = (bridge.perform(Self.automaticDownloadSelector)?.takeUnretainedValue() as? NSNumber)?.boolValue ?? true
         }
         return availability
     }
