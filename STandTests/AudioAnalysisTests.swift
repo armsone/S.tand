@@ -796,6 +796,49 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
+    func testHomeEditEntryRequiresStationaryTwoSecondPress() {
+        XCTAssertEqual(HomeEditEntryPolicy.minimumPressDuration, 2.0)
+        XCTAssertEqual(HomeEditEntryPolicy.maximumMovement, 12)
+
+        // 2.0초 미만에서는 열리지 않고, 정확히 2.0초에 한 번만 열린다.
+        var stationary = HomeEditEntryPolicy.PendingEntry()
+        XCTAssertFalse(stationary.apply(.held(seconds: 0.8)))
+        XCTAssertFalse(stationary.apply(.held(seconds: 1.99)))
+        XCTAssertFalse(stationary.didEnter)
+        XCTAssertTrue(stationary.apply(.held(seconds: 2.0)))
+        XCTAssertTrue(stationary.didEnter)
+        XCTAssertFalse(stationary.apply(.held(seconds: 3.0)))
+
+        // 허용 이동량 이내의 흔들림은 편집 진입을 막지 않는다.
+        var slightMovement = HomeEditEntryPolicy.PendingEntry()
+        XCTAssertFalse(slightMovement.apply(.moved(distance: 12)))
+        XCTAssertFalse(slightMovement.isCancelled)
+        XCTAssertTrue(slightMovement.apply(.held(seconds: 2.0)))
+
+        // 세로 밝기·가로 음량 조절 수준의 이동은 손가락을 계속 대고 있어도 영구 취소한다.
+        var verticalAdjustment = HomeEditEntryPolicy.PendingEntry()
+        XCTAssertFalse(verticalAdjustment.apply(.moved(distance: 12.5)))
+        XCTAssertTrue(verticalAdjustment.isCancelled)
+        XCTAssertFalse(verticalAdjustment.apply(.moved(distance: 0)))
+        XCTAssertFalse(verticalAdjustment.apply(.held(seconds: 2.0)))
+        XCTAssertFalse(verticalAdjustment.apply(.held(seconds: 5.0)))
+        XCTAssertFalse(verticalAdjustment.didEnter)
+
+        // 2초 전에 끝나거나 취소되거나 손가락이 더 닿으면 열리지 않는다.
+        for terminal in [
+            HomeEditEntryPolicy.Event.ended,
+            .cancelled,
+            .additionalTouch
+        ] {
+            var entry = HomeEditEntryPolicy.PendingEntry()
+            XCTAssertFalse(entry.apply(.held(seconds: 1.5)))
+            XCTAssertFalse(entry.apply(terminal))
+            XCTAssertTrue(entry.isCancelled)
+            XCTAssertFalse(entry.apply(.held(seconds: 2.0)))
+            XCTAssertFalse(entry.didEnter)
+        }
+    }
+
     func testHomePanelMetricsMatchApprovedIOSLayout() {
         XCTAssertEqual(HomeMusicStripCardMetrics.height, 60)
         XCTAssertEqual(HomeMusicStripCardMetrics.cornerRadius, 13)

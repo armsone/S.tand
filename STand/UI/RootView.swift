@@ -238,6 +238,52 @@ enum HomeEditorResetPolicy {
 
 }
 
+/// 홈 화면 편집 모드 진입 계약. Android `StandPolicies`와 같은 기준을 공유한다.
+/// 편집 모드는 정지 상태로 2.0초를 계속 누른 뒤에만 열리고, 허용 이동량을 넘는 움직임
+/// (세로 밝기·가로 음량 조절 포함)은 그 제스처의 편집 진입을 영구히 취소한다.
+enum HomeEditEntryPolicy {
+    /// 편집 진입에 필요한 연속 정지 누름 시간(초). 2000ms.
+    static let minimumPressDuration: TimeInterval = 2.0
+    /// 기존 `LongPressGesture` 허용 이동량(pt). 이 값을 초과하면 편집 진입을 취소한다.
+    static let maximumMovement: CGFloat = 12
+
+    enum Event: Equatable {
+        /// 누름 시작점 기준 누적 이동 거리.
+        case moved(distance: CGFloat)
+        /// 누름 시작 이후 누적 경과 시간(초).
+        case held(seconds: TimeInterval)
+        case ended
+        case cancelled
+        case additionalTouch
+    }
+
+    /// 한 번의 누름 제스처에 대한 편집 진입 대기 상태. 순수 값 타입이라 결정적으로 검증할 수 있다.
+    struct PendingEntry: Equatable {
+        private(set) var isCancelled = false
+        private(set) var didEnter = false
+
+        /// 이벤트를 적용하고, 이 이벤트로 편집 모드에 진입해야 하면 `true`를 돌려준다.
+        @discardableResult
+        mutating func apply(_ event: Event) -> Bool {
+            guard !isCancelled, !didEnter else { return false }
+            switch event {
+            case .moved(let distance):
+                if distance > HomeEditEntryPolicy.maximumMovement {
+                    isCancelled = true
+                }
+                return false
+            case .held(let seconds):
+                guard seconds >= HomeEditEntryPolicy.minimumPressDuration else { return false }
+                didEnter = true
+                return true
+            case .ended, .cancelled, .additionalTouch:
+                isCancelled = true
+                return false
+            }
+        }
+    }
+}
+
 enum StandControlLayoutMetrics {
     static let itemHeight: CGFloat = 60
     static let hiddenControlLabelHeight: CGFloat = 40
@@ -547,6 +593,8 @@ struct RootView: View {
     @State private var showsCatalystBoyiso = false
     @State private var didInitialize = false
     @State private var screenAdjustmentDragState: ScreenAdjustmentDragState?
+    // 현재 누름 제스처의 편집 진입 대기 상태. 밝기·음량 드래그가 시작되면 취소된다.
+    @State private var homeEditEntry = HomeEditEntryPolicy.PendingEntry()
     @State private var clockScaleGestureStart: Double?
     @State private var clockScaleFeedback: Double?
     @State private var clockScaleFeedbackTask: Task<Void, Never>?
@@ -1562,6 +1610,10 @@ struct RootView: View {
     private var screenAdjustmentGesture: some Gesture {
         DragGesture(minimumDistance: 10)
             .onChanged { value in
+                // 세로 밝기·가로 음량 조절로 쓰이는 이동은 이 제스처의 편집 진입을 영구히 취소한다.
+                homeEditEntry.apply(
+                    .moved(distance: hypot(value.translation.width, value.translation.height))
+                )
                 guard !firstLaunchPermissions.shouldPresentExplanation,
                       !isEditingScreen,
                       presentedSheet == nil,
@@ -1590,6 +1642,8 @@ struct RootView: View {
                 }
             }
             .onEnded { _ in
+                // 손가락을 뗀 뒤 다음 누름은 새 제스처이므로 편집 진입 대기 상태를 초기화한다.
+                homeEditEntry = HomeEditEntryPolicy.PendingEntry()
                 guard !firstLaunchPermissions.shouldPresentExplanation,
                       !isEditingScreen
                 else { return }
@@ -1626,7 +1680,17 @@ struct RootView: View {
     }
 
     private var screenPressGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.8, maximumDistance: 12)
+        // 편집 진입은 정지 상태 2.0초 누름 뒤에만 열린다(HomeEditEntryPolicy). 허용 이동량을
+        // 넘는 움직임은 시스템 인식기가 실패 처리하고, 밝기·음량 드래그가 먼저 시작되면
+        // exclusively(before:)와 homeEditEntry 취소 상태가 함께 편집 진입을 막는다.
+        LongPressGesture(
+            minimumDuration: HomeEditEntryPolicy.minimumPressDuration,
+            maximumDistance: HomeEditEntryPolicy.maximumMovement
+        )
+            .onChanged { _ in
+                // 새 누름이 시작될 때마다 새 제스처로 취급해 이전 취소 상태를 지운다.
+                homeEditEntry = HomeEditEntryPolicy.PendingEntry()
+            }
             .exclusively(
                 before: TapGesture(count: 2)
                     .exclusively(before: TapGesture())
@@ -1636,8 +1700,10 @@ struct RootView: View {
                 case .first(true):
                     guard !firstLaunchPermissions.shouldPresentExplanation,
                           !isEditingScreen,
-                          presentedSheet == nil
+                          presentedSheet == nil,
+                          homeEditEntry.apply(.held(seconds: HomeEditEntryPolicy.minimumPressDuration))
                     else { return }
+                    homeEditEntry = HomeEditEntryPolicy.PendingEntry()
                     enterScreenEditing(isPortrait: currentIsPortrait)
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 case .second(let tapResult):

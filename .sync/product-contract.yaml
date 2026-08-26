@@ -26,7 +26,7 @@ capabilities:
       - Apple 모바일은 NasFinder TestFlight 빌드 API의 stand 항목을 사용한다.
       - Mac은 기존 Sparkle 앱캐스트와 자동 다운로드 환경설정을 사용한다.
       - Android는 GitHub Releases의 최신 릴리스와 sha256 digest가 있는 허용 APK 자산을 사용한다.
-      - 직접 배포 제품 버전은 2.1.1, Apple 내부 빌드는 340977, 공통 BuildStamp는 202608251857이다.
+      - 직접 배포 제품 버전은 2.2.1, Apple 내부 빌드는 342257, 공통 BuildStamp는 202608261617이다.
     producer_consumer_routes: [공개 릴리스 정보 > 버전 비교 > 홈 안내]
     persistence_relaunch: 확인 결과는 저장하지 않으며 업데이트 자동 다운로드 선택은 기본 켬으로 저장한다.
     permissions_privacy_security: [버전 확인 외 개인정보를 전송하지 않는다.]
@@ -157,3 +157,55 @@ capabilities:
         evidence: [.parity/evidence/2026-08-25/google-tv-settings-music.png]
     dependencies: [SettingsInformationArchitecture.CardOrder]
     parity_row_ids: [settings.responsive_panel_layout.parity]
+  - id: home.edit_mode.stationary_long_press_entry
+    purpose: 사용자가 홈 화면을 움직이지 않고 2초 동안 누르면 화면 편집 모드에 들어가고, 밝기·음량 조절 이동은 편집 진입을 취소한다.
+    source_refs:
+      - STand/UI/RootView.swift
+    entry_points: [홈 > 빈 화면 길게 누르기, 홈 접근성 동작 > 화면 편집 열기]
+    preconditions: [홈 화면이 보이고 편집 모드·시트·첫 실행 권한 안내가 열려 있지 않음]
+    inputs: [정지 상태 2초 누름, 세로 드래그, 가로 드래그, 손 떼기, 추가 터치]
+    normal_result: 정지 상태로 2.0초를 계속 누른 뒤에만 편집 모드가 열리고, 그보다 일찍 열리지 않는다.
+    states: [pending, cancelled, entered]
+    algorithms_and_thresholds:
+      - 편집 진입 기준 시간은 2000ms이며 누름 시작 후 연속 정지 시간으로만 센다.
+      - 누름 시작점 기준 허용 이동량(Apple 12pt, Android는 기존 터치 슬롭)을 초과하는 어느 방향 이동이든 그 제스처의 편집 진입을 영구히 취소한다.
+      - 세로 밝기 조절과 가로 음량 조절로 인식된 이동은 손가락이 2초를 넘겨 계속 닿아 있어도 편집 모드를 열지 않는다.
+      - 2초 전에 손을 떼거나 시스템이 취소하거나 손가락이 더 닿으면 편집 모드를 열지 않는다.
+    data_contracts: []
+    producer_consumer_routes: [누름·이동 이벤트 > 편집 진입 대기 상태 > 화면 편집기]
+    persistence_relaunch: 진입 대기 상태는 제스처 단위로만 존재하며 저장하지 않는다.
+    permissions_privacy_security: []
+    background_lifecycle: 제스처 도중 시트나 첫 실행 안내가 열리면 편집 진입을 무시한다.
+    gestures_accessibility:
+      - 한 번 탭, 두 번 탭, 세로 밝기, 가로 음량, 핀치 시계 크기 조절은 기존 동작을 유지한다.
+      - 보조 기술에서는 홈 화면 제어 요소의 화면 편집 열기 동작으로 누름 없이 진입한다.
+    supported_devices_layouts: [iPhone portrait, iPhone landscape, iPad, Mac, Android phone, Android tablet]
+    visual_reference: none
+    platform_adaptations:
+      apple:
+        - LongPressGesture(minimumDuration 2.0, maximumDistance 12)를 밝기·음량 DragGesture 뒤에 exclusively로 두고, 드래그 시작 시 HomeEditEntryPolicy.PendingEntry를 취소한다.
+        - Mac Catalyst는 가로 드래그를 음량 대신 무시 상태로 두지만 편집 취소 규칙은 동일하다.
+      android:
+        - StandPolicies의 동일 기준을 StandHomeScreen의 포인터 입력 처리에 적용한다.
+    intentional_differences:
+      - platform: all
+        device_layout: all
+        contract_field: movement_threshold
+        reason: 이동 허용량은 각 플랫폼의 기존 시스템 기준(Apple 12pt, Android 터치 슬롭)을 그대로 쓴다.
+        closest_equivalent: 두 플랫폼 모두 기준 초과 이동 시 그 제스처의 편집 진입을 영구 취소한다.
+        review_trigger: 어느 플랫폼이든 허용 이동량을 바꿀 때
+    implementations:
+      apple:
+        status: implemented_source_only
+        source_refs: [STand/UI/RootView.swift]
+        tests: [STandTests/AudioAnalysisTests.swift]
+        evidence: [uncompiled draft, 런타임·시각 검증 미실시]
+      android:
+        status: implemented_source_only
+        source_refs:
+          - app/src/main/java/com/armsone/stand/ui/StandHomeScreen.kt
+          - app/src/main/java/com/armsone/stand/model/StandPolicies.kt
+        tests: [app/src/test/java/com/armsone/stand/model/StandPoliciesTest.kt]
+        evidence: [source only]
+    dependencies: [HomeEditEntryPolicy, ScreenEditorView, StandPolicies]
+    parity_row_ids: [home.edit_mode.stationary_long_press_entry]

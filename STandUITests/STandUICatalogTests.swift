@@ -129,8 +129,30 @@ final class STandUICatalogTests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         launch()
         XCTAssertTrue(app.buttons["설정"].waitForExistence(timeout: 8))
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.76))
-            .press(forDuration: 1)
+        let gestureStart = app.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.12, dy: 0.76)
+        )
+
+        gestureStart.press(forDuration: 1)
+        XCTAssertFalse(app.buttons["저장"].exists)
+
+        gestureStart.press(
+            forDuration: 0.6,
+            thenDragTo: app.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.42, dy: 0.76)
+            )
+        )
+        XCTAssertFalse(app.buttons["저장"].exists)
+
+        gestureStart.press(
+            forDuration: 0.6,
+            thenDragTo: app.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.12, dy: 0.46)
+            )
+        )
+        XCTAssertFalse(app.buttons["저장"].exists)
+
+        gestureStart.press(forDuration: 2.1)
 
         XCTAssertTrue(app.buttons["저장"].waitForExistence(timeout: 5))
         capture("home_editor_landscape")
