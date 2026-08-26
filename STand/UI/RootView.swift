@@ -255,6 +255,48 @@ enum StandControlLayoutMetrics {
     }
 }
 
+/// 홈 음악 스트립 카드(라디오·외부 음악)의 iOS 확정 시안 지표.
+/// 첫 줄은 아이콘+제목, 둘째 줄은 상태로 고정된 2행 구조를 유지한다.
+enum HomeMusicStripCardMetrics {
+    static let height = InternetRadioPanelMetrics.height
+    static let cornerRadius = InternetRadioPanelMetrics.cornerRadius
+    static let splitGap: CGFloat = 2
+    static let iconSize: CGFloat = 24
+    static let iconTitleGap: CGFloat = 8
+    static let titleFontSize: CGFloat = 11
+    static let titleLineHeight: CGFloat = 13
+    static let statusFontSize: CGFloat = 8
+    static let statusLineHeight: CGFloat = 10
+    static let rowGap: CGFloat = 11
+    static let contentLift: CGFloat = 2
+    static let statusLift: CGFloat = 1
+    static let horizontalPadding: CGFloat = 11
+    static let verticalPadding: CGFloat = 5
+}
+
+/// 잠소리·보이소·설정 공용 카드의 iOS 확정 시안 지표.
+/// 아이콘+제목(1행), 상태(2행)의 공통 해부 구조를 세 카드가 함께 쓴다.
+enum HomeSharedControlMetrics {
+    static let portraitSize = CGSize(width: 98, height: 66)
+    static let phoneLandscapeSize = CGSize(width: 68, height: 60)
+    static let spacing: CGFloat = 6
+    static let cornerRadius: CGFloat = 13
+    static let splitGap: CGFloat = 2
+    static let iconSize: CGFloat = 17
+    static let iconTitleGap: CGFloat = 4
+    static let titleFontSize: CGFloat = 9
+    static let titleLineHeight: CGFloat = 10.5
+    static let statusFontSize: CGFloat = 7.5
+    static let statusLineHeight: CGFloat = 9
+    static let rowGap: CGFloat = 12
+    static let padding: CGFloat = 5
+    static let order: [StandControlKind] = [.recordings, .boyiso, .settings]
+
+    static func size(isPhoneLandscape: Bool) -> CGSize {
+        isPhoneLandscape ? phoneLandscapeSize : portraitSize
+    }
+}
+
 enum BottomControlLayoutPolicy {
     static func columnCount(availableWidth: CGFloat, isPortrait: Bool) -> Int {
         isPortrait && availableWidth < 700 ? 4 : 8
@@ -1755,15 +1797,13 @@ struct RootView: View {
             .accessibilityLabel("하단 기능 버튼 열기")
             .accessibilityHint("녹음 및 설정 버튼이 나타납니다")
         } else {
-            WrappingControlLayout {
+            // 잠소리·보이소·설정 공용 카드는 고정 크기(98x66)를 쓰므로
+            // 폭 계산 대신 6pt 간격으로 나열하고 좁은 폭에서만 줄바꿈한다.
+            WrappingControlLayout(spacing: HomeSharedControlMetrics.spacing) {
                 ForEach(visibleControlOrder(isPortrait: isPortrait)) { kind in
                     bottomControl(
                         for: kind,
-                        width: BottomControlLayoutPolicy.itemWidth(
-                            for: kind,
-                            availableWidth: availableWidth,
-                            isPortrait: isPortrait
-                        )
+                        size: HomeSharedControlMetrics.size(isPhoneLandscape: false)
                     )
                 }
             }
@@ -1774,9 +1814,12 @@ struct RootView: View {
     }
 
     private func phoneLandscapeSideControls() -> some View {
-        HStack(spacing: StandControlLayoutMetrics.rowSpacing) {
+        HStack(spacing: HomeSharedControlMetrics.spacing) {
             ForEach(visibleControlOrder(isPortrait: false)) { kind in
-                bottomControl(for: kind, width: PhoneLandscapeSideControlsPolicy.controlWidth)
+                bottomControl(
+                    for: kind,
+                    size: HomeSharedControlMetrics.size(isPhoneLandscape: true)
+                )
             }
         }
         .opacity(model.controlsVisible || !model.isNightSessionActive ? 1 : 0.62)
@@ -1788,20 +1831,27 @@ struct RootView: View {
         let order = isPortrait
             ? settings.value.portraitLayout.controlOrder
             : settings.value.landscapeLayout.controlOrder
-        let simplifiedOrder = order.filter { ![.flashlight, .brightness].contains($0) }
-        return simplifiedOrder
+        // 홈 공용 카드는 잠소리 -> 보이소 -> 설정 순서로 고정한다.
+        // 사용자 순서에서 빠진 항목만 그대로 숨긴다.
+        return HomeSharedControlMetrics.order.filter { order.contains($0) }
     }
 
     @ViewBuilder
-    private func bottomControl(for kind: StandControlKind, width: CGFloat) -> some View {
+    private func bottomControl(for kind: StandControlKind, size: CGSize) -> some View {
         switch kind {
         case .flashlight:
-            ControlButton(
+            HomeSharedControlCard(
                 title: "플래시 연동",
-                systemImage: settings.value.torchEnabled ? "flashlight.on.fill" : "flashlight.off.fill",
                 status: settings.value.torchEnabled ? "일반 10% · 강한 알림은 어두울 때 최대" : "사용하지 않음",
+                size: size,
                 hint: "일반 움직임과 핑거스냅은 10퍼센트, 강한 소리 알림은 방이 어두울 때 최대 밝기로 켭니다",
-                width: width
+                icon: {
+                    HomeSharedControlSymbolIcon(
+                        systemImage: settings.value.torchEnabled
+                            ? "flashlight.on.fill"
+                            : "flashlight.off.fill"
+                    )
+                }
             ) {
                 settings.value.torchEnabled.toggle()
                 if settings.value.torchEnabled { model.activateLamp() }
@@ -1810,7 +1860,7 @@ struct RootView: View {
             CompactBrightnessRuleControl(
                 currentBrightness: model.displayBrightness,
                 currentMode: model.environmentDisplayMode,
-                width: width,
+                width: size.width,
                 threshold: Binding(
                     get: { settings.value.brightnessModeThreshold },
                     set: { settings.value.brightnessModeThreshold = $0 }
@@ -1823,20 +1873,20 @@ struct RootView: View {
         case .stopDetection:
             EmptyView()
         case .recordings:
-            ControlButton(
+            HomeSharedControlCard(
                 title: "잠소리",
-                systemImage: "waveform",
                 status: library.clips.isEmpty ? "잠소리 없음" : "잠소리 \(library.clips.count)개",
+                size: size,
                 hint: "저장된 잠소리를 확인합니다",
-                width: width
+                icon: { HomeSharedControlSymbolIcon(systemImage: "waveform") }
             ) {
                 openRecordings()
             }
         case .boyiso:
-            BoyisoControlButton(
+            BoyisoHomeSharedControlCard(
                 title: BoyisoBranding.primaryName,
                 status: boyiso.isEnabled ? boyiso.role.title : "연결 안 됨",
-                width: width,
+                size: size,
                 tap: {
                     if !boyiso.isEnabled { openBoyiso() }
                     else if boyiso.role == .walkie { _ = boyiso.sendWalkiePress() }
@@ -1845,11 +1895,12 @@ struct RootView: View {
                 longPress: { openBoyiso() }
             )
         case .settings:
-            ControlButton(
+            HomeSharedControlCard(
                 title: "설정",
-                systemImage: "slider.horizontal.3",
+                status: "화면·감지",
+                size: size,
                 hint: "밝기, 감지, 녹음 설정을 엽니다",
-                width: width
+                icon: { HomeSharedControlSymbolIcon(systemImage: "slider.horizontal.3") }
             ) {
                 openSettings()
             }
@@ -2607,7 +2658,11 @@ private struct HomeMusicStripCard: View {
 
     private var normalCardBody: some View {
         ZStack {
-            FlipPanelSurface(isDimmed: false, cornerRadius: 13, splitGap: 2)
+            FlipPanelSurface(
+                isDimmed: false,
+                cornerRadius: HomeMusicStripCardMetrics.cornerRadius,
+                splitGap: HomeMusicStripCardMetrics.splitGap
+            )
 
             switch channel {
             case let .external(service):
@@ -2618,7 +2673,7 @@ private struct HomeMusicStripCard: View {
                 emptyRadioContent
             }
         }
-        .frame(width: width, height: InternetRadioPanelMetrics.height)
+        .frame(width: width, height: HomeMusicStripCardMetrics.height)
         .foregroundStyle(.white.opacity(0.80))
     }
 
@@ -2716,122 +2771,76 @@ private struct HomeMusicStripCard: View {
 
     private func externalContent(_ service: ExternalMusicService) -> some View {
         let isActive = activeExternalMusicService == service
+        let isPlaying = isActive && externalMusicPlaybackState == .playing
         let title = isActive && !(externalMusicTrackTitle ?? "").isEmpty
             ? externalMusicTrackTitle!
             : service.displayName
+        let nextAction = ExternalMusicTitleTapPolicy.action(
+            isActive: isActive,
+            playbackState: externalMusicPlaybackState
+        )
 
         return ZStack {
-            Button {
-                switch ExternalMusicTitleTapPolicy.action(
-                    isActive: isActive,
-                    playbackState: externalMusicPlaybackState
-                ) {
-                case .play:
-                    onToggleExternalMusic(service)
-                case .next:
-                    onSkipExternalMusic(service)
-                }
-            } label: {
-                MarqueeText(text: title)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    .padding(.horizontal, 42)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(
-                "\(title), \(isActive && externalMusicPlaybackState == .playing ? "다음 곡" : "재생")"
+            HomeMusicStripCardContent(
+                systemImage: externalIcon(isActive: isActive),
+                title: title,
+                status: externalStatus(isActive: isActive),
+                scrollsTitle: true
             )
 
-            HStack {
-                Button {
-                    onToggleExternalMusic(service)
-                } label: {
-                    VStack(spacing: 2) {
-                        Image(systemName: externalIcon(isActive: isActive))
-                            .symbolRenderingMode(.hierarchical)
-                            .font(.system(size: 17, weight: .semibold))
-                        Text(externalStatus(isActive: isActive))
-                            .font(.system(size: 7.5, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.52))
+            HomeMusicStripCardHalves(
+                leadingLabel: "\(service.displayName) \(isPlaying ? "일시 정지" : "재생")",
+                trailingLabel: "\(title), \(nextAction == .next ? "다음 곡" : "재생")",
+                onLeading: { onToggleExternalMusic(service) },
+                onTrailing: {
+                    // 정지 상태에서는 오른쪽 절반도 기존 정책대로 이 항목부터 재생한다.
+                    switch nextAction {
+                    case .play:
+                        onToggleExternalMusic(service)
+                    case .next:
+                        onSkipExternalMusic(service)
                     }
-                    .frame(width: 40, height: InternetRadioPanelMetrics.height)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(service.displayName) \(isActive && externalMusicPlaybackState == .playing ? "일시 정지" : "재생")")
-                Spacer(minLength: 0)
-            }
-            .padding(.leading, 3)
+            )
         }
+        .accessibilityHint("왼쪽 절반은 재생과 일시 정지, 오른쪽 절반은 다음 곡으로 이동합니다")
     }
 
     private func radioContent(_ configuration: InternetRadioConfiguration) -> some View {
         let isActive = activeRadioChannelID == configuration.id
-        return HStack(spacing: 4) {
-            Button {
-                onToggleRadio(configuration.id)
-            } label: {
-                VStack(spacing: 2) {
-                    Image(systemName: radioIcon(isActive: isActive))
-                        .symbolRenderingMode(.hierarchical)
-                        .font(.system(size: 17, weight: .semibold))
-                    Text(isActive ? radioStatus : "대기 중")
-                        .font(.system(size: 7.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.52))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.65)
-                }
-                .frame(width: 44, height: InternetRadioPanelMetrics.height)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(
-                "\(configuration.displayName) \(isActive && radioState == .playing ? "정지" : "재생")"
+        let isPlaying = isActive && radioState == .playing
+        return ZStack {
+            HomeMusicStripCardContent(
+                systemImage: radioIcon(isActive: isActive),
+                title: configuration.displayName,
+                status: isActive ? radioStatus : "대기 중",
+                scrollsTitle: false
             )
 
-            Button {
-                onSelectRadioTitle(configuration.id)
-            } label: {
-                Text(configuration.displayName)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(
-                "\(configuration.displayName), \(radioState == .playing ? "다음 라디오" : "재생")"
+            HomeMusicStripCardHalves(
+                leadingLabel: "\(configuration.displayName) \(isPlaying ? "정지" : "재생")",
+                trailingLabel: "\(configuration.displayName), \(radioState == .playing ? "다음 라디오" : "재생")",
+                onLeading: { onToggleRadio(configuration.id) },
+                // 정지 상태에서는 기존 InternetRadioTitleTapPolicy가 이 채널부터 재생한다.
+                onTrailing: { onSelectRadioTitle(configuration.id) }
             )
         }
-        .padding(.leading, 3)
-        .padding(.trailing, 11)
         .onLongPressGesture(minimumDuration: 0.8) { onEditRadio(configuration.id) }
-        .accessibilityHint("제목을 두 번 탭해 재생하거나 다음 라디오로 이동하고 길게 눌러 채널을 편집합니다")
+        .accessibilityHint("왼쪽 절반은 재생과 정지, 오른쪽 절반은 다음 라디오로 이동하고 길게 눌러 채널을 편집합니다")
     }
 
     private var emptyRadioContent: some View {
         Button(action: onRegisterRadio) {
-            HStack(spacing: 8) {
-                Image(systemName: "radio.fill")
-                    .symbolRenderingMode(.hierarchical)
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("인터넷 라디오")
-                        .font(.system(size: 10.5, weight: .semibold))
-                    Text("등록을 기다림")
-                        .font(.system(size: 8.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.52))
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 11)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            HomeMusicStripCardContent(
+                systemImage: "radio.fill",
+                title: "인터넷 라디오",
+                status: "등록을 기다림",
+                scrollsTitle: false
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("인터넷 라디오, 등록을 기다림")
         .accessibilityHint("두 번 탭해 설정에서 라디오 주소를 등록합니다")
     }
 
@@ -2871,6 +2880,91 @@ private struct HomeMusicStripCard: View {
         case .idle: "대기 중"
         case .failed: "연결 실패"
         }
+    }
+}
+
+/// 음악 스트립 카드의 공통 2행 본문: 가운데 정렬된 아이콘+제목, 가운데 정렬된 상태.
+/// 터치는 받지 않고 `HomeMusicStripCardHalves`가 좌우 절반 히트 영역을 담당한다.
+private struct HomeMusicStripCardContent: View {
+    let systemImage: String
+    let title: String
+    let status: String
+    let scrollsTitle: Bool
+
+    var body: some View {
+        VStack(spacing: HomeMusicStripCardMetrics.rowGap) {
+            HStack(spacing: HomeMusicStripCardMetrics.iconTitleGap) {
+                Image(systemName: systemImage)
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.system(size: HomeMusicStripCardMetrics.iconSize, weight: .semibold))
+                    .frame(
+                        width: HomeMusicStripCardMetrics.iconSize,
+                        height: HomeMusicStripCardMetrics.iconSize
+                    )
+                    .accessibilityHidden(true)
+
+                titleText
+                    .font(.system(size: HomeMusicStripCardMetrics.titleFontSize, weight: .semibold))
+                    .lineLimit(1)
+                    .frame(height: HomeMusicStripCardMetrics.titleLineHeight)
+            }
+            .frame(maxWidth: .infinity)
+
+            Text(status)
+                .font(.system(size: HomeMusicStripCardMetrics.statusFontSize, weight: .medium))
+                .foregroundStyle(.white.opacity(0.52))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(height: HomeMusicStripCardMetrics.statusLineHeight)
+                .frame(maxWidth: .infinity)
+                .offset(y: -HomeMusicStripCardMetrics.statusLift)
+        }
+        .offset(y: -HomeMusicStripCardMetrics.contentLift)
+        .padding(.horizontal, HomeMusicStripCardMetrics.horizontalPadding)
+        .padding(.vertical, HomeMusicStripCardMetrics.verticalPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var titleText: some View {
+        if scrollsTitle {
+            MarqueeText(text: title, fitsIntrinsicWidth: true)
+        } else {
+            Text(title)
+                .truncationMode(.tail)
+        }
+    }
+}
+
+/// 카드를 정확히 좌우 50:50으로 나눈 두 개의 투명 버튼.
+private struct HomeMusicStripCardHalves: View {
+    let leadingLabel: String
+    let trailingLabel: String
+    let onLeading: () -> Void
+    let onTrailing: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: onLeading) {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(leadingLabel)
+
+            Button(action: onTrailing) {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(trailingLabel)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
     }
 }
 
@@ -2992,10 +3086,25 @@ private struct MarqueeTextWidthKey: PreferenceKey {
 
 private struct MarqueeText: View {
     let text: String
+    /// true면 텍스트의 고유 폭(가용 폭 이내)만 차지해 옆 아이콘과 함께 가운데 정렬할 수 있다.
+    var fitsIntrinsicWidth = false
     @State private var contentWidth: CGFloat = 0
     @State private var animationStartedAt = Date()
 
     var body: some View {
+        if fitsIntrinsicWidth {
+            // 숨긴 Text가 고유 폭(넘치면 가용 폭)을 잡고 그 위에서 마퀴가 흐른다.
+            Text(text)
+                .lineLimit(1)
+                .hidden()
+                .overlay { scrollingText }
+                .accessibilityLabel(text)
+        } else {
+            scrollingText
+        }
+    }
+
+    private var scrollingText: some View {
         GeometryReader { proxy in
             TimelineView(
                 .animation(
@@ -4978,70 +5087,93 @@ private struct BatteryStatusPill: View {
     }
 }
 
-private struct ControlButton: View {
+/// 잠소리·보이소·설정 카드가 공유하는 2행 본문(아이콘+제목 / 상태)과 타일 표면.
+private struct HomeSharedControlCardBody<Icon: View>: View {
     let title: String
+    let status: String
+    let size: CGSize
+    @ViewBuilder let icon: () -> Icon
+
+    var body: some View {
+        VStack(spacing: HomeSharedControlMetrics.rowGap) {
+            HStack(spacing: HomeSharedControlMetrics.iconTitleGap) {
+                icon()
+                    .frame(
+                        width: HomeSharedControlMetrics.iconSize,
+                        height: HomeSharedControlMetrics.iconSize
+                    )
+                    .accessibilityHidden(true)
+
+                Text(title)
+                    .font(.system(size: HomeSharedControlMetrics.titleFontSize, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(height: HomeSharedControlMetrics.titleLineHeight)
+            }
+            .frame(maxWidth: .infinity)
+
+            Text(status)
+                .font(.system(size: HomeSharedControlMetrics.statusFontSize, weight: .medium))
+                .foregroundStyle(.white.opacity(0.52))
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .frame(height: HomeSharedControlMetrics.statusLineHeight)
+                .frame(maxWidth: .infinity)
+        }
+        .foregroundStyle(.white.opacity(StandControlLayoutMetrics.foregroundOpacity))
+        .padding(HomeSharedControlMetrics.padding)
+        .frame(width: size.width, height: size.height)
+        .background {
+            FlipPanelSurface(
+                isDimmed: false,
+                cornerRadius: HomeSharedControlMetrics.cornerRadius,
+                splitGap: HomeSharedControlMetrics.splitGap
+            )
+        }
+        .opacity(StandControlLayoutMetrics.tileOpacity)
+    }
+}
+
+private struct HomeSharedControlSymbolIcon: View {
     let systemImage: String
-    var status: String? = nil
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: HomeSharedControlMetrics.iconSize, weight: .semibold))
+    }
+}
+
+private struct HomeSharedControlCard<Icon: View>: View {
+    let title: String
+    let status: String
+    let size: CGSize
     var hint: String? = nil
-    let width: CGFloat
+    @ViewBuilder let icon: () -> Icon
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 20, height: 16)
-
-                Text(title)
-                    .font(.system(size: StandControlLayoutMetrics.titleFontSize, weight: .semibold))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
-
-                if let status {
-                    Text(status)
-                        .font(.system(size: StandControlLayoutMetrics.statusFontSize, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.52))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.65)
-                }
-            }
-            .foregroundStyle(.white.opacity(StandControlLayoutMetrics.foregroundOpacity))
-            .padding(.horizontal, 4)
-            .frame(
-                width: width,
-                height: StandControlLayoutMetrics.itemHeight
-            )
-            .background {
-                FlipPanelSurface(isDimmed: false, cornerRadius: 13, splitGap: 2)
-            }
-            .opacity(StandControlLayoutMetrics.tileOpacity)
+            HomeSharedControlCardBody(title: title, status: status, size: size, icon: icon)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(status)
         .accessibilityHint(hint ?? "")
     }
 }
 
-private struct BoyisoControlButton: View {
+private struct BoyisoHomeSharedControlCard: View {
     let title: String
     let status: String
-    let width: CGFloat
+    let size: CGSize
     let tap: () -> Void
     let longPress: () -> Void
 
     var body: some View {
-        VStack(spacing: 3) {
+        HomeSharedControlCardBody(title: title, status: status, size: size) {
             BoyisoBabyFaceIcon(lineWidth: 1.35)
-                .frame(width: 18, height: 18)
-            Text(title).font(.system(size: StandControlLayoutMetrics.titleFontSize, weight: .semibold))
-            Text(status).font(.system(size: StandControlLayoutMetrics.statusFontSize, weight: .medium))
-                .foregroundStyle(.white.opacity(0.52)).lineLimit(1).minimumScaleFactor(0.6)
         }
-        .foregroundStyle(.white.opacity(StandControlLayoutMetrics.foregroundOpacity))
-        .padding(.horizontal, 4)
-        .frame(width: width, height: StandControlLayoutMetrics.itemHeight)
-        .background { FlipPanelSurface(isDimmed: false, cornerRadius: 13, splitGap: 2) }
         .contentShape(Rectangle())
         .gesture(
             LongPressGesture(minimumDuration: 0.7, maximumDistance: 12)

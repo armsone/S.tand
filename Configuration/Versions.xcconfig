@@ -1,7 +1,7 @@
 // S.tand release version and platform-compatible internal build number.
-MARKETING_VERSION = 2.1.1
-CURRENT_PROJECT_VERSION = 340977
-DISPLAY_BUILD_NUMBER = 202608251857
+MARKETING_VERSION = 2.2.0
+CURRENT_PROJECT_VERSION = 341836
+DISPLAY_BUILD_NUMBER = 202608260916
 
 // Sparkle EdDSA 공개 키 (base64). 공개 키는 앱에 포함되며 비밀 키만 로그인
 // Keychain의 STand 계정에 보관한다.

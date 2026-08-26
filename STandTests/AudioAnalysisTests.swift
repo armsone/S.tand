@@ -796,6 +796,36 @@ final class AudioAnalysisTests: XCTestCase {
         )
     }
 
+    func testHomePanelMetricsMatchApprovedIOSLayout() {
+        XCTAssertEqual(HomeMusicStripCardMetrics.height, 60)
+        XCTAssertEqual(HomeMusicStripCardMetrics.cornerRadius, 13)
+        XCTAssertEqual(HomeMusicStripCardMetrics.splitGap, 2)
+        XCTAssertEqual(HomeMusicStripCardMetrics.iconSize, 24)
+        XCTAssertEqual(HomeMusicStripCardMetrics.iconTitleGap, 8)
+        XCTAssertEqual(HomeMusicStripCardMetrics.titleFontSize, 11)
+        XCTAssertEqual(HomeMusicStripCardMetrics.titleLineHeight, 13)
+        XCTAssertEqual(HomeMusicStripCardMetrics.statusFontSize, 8)
+        XCTAssertEqual(HomeMusicStripCardMetrics.statusLineHeight, 10)
+        XCTAssertEqual(HomeMusicStripCardMetrics.rowGap, 11)
+        XCTAssertEqual(HomeMusicStripCardMetrics.contentLift, 2)
+        XCTAssertEqual(HomeMusicStripCardMetrics.statusLift, 1)
+        XCTAssertEqual(HomeMusicStripCardMetrics.horizontalPadding, 11)
+        XCTAssertEqual(HomeMusicStripCardMetrics.verticalPadding, 5)
+
+        XCTAssertEqual(HomeSharedControlMetrics.portraitSize, CGSize(width: 98, height: 66))
+        XCTAssertEqual(HomeSharedControlMetrics.phoneLandscapeSize, CGSize(width: 68, height: 60))
+        XCTAssertEqual(HomeSharedControlMetrics.spacing, 6)
+        XCTAssertEqual(HomeSharedControlMetrics.iconSize, 17)
+        XCTAssertEqual(HomeSharedControlMetrics.iconTitleGap, 4)
+        XCTAssertEqual(HomeSharedControlMetrics.titleFontSize, 9)
+        XCTAssertEqual(HomeSharedControlMetrics.titleLineHeight, 10.5)
+        XCTAssertEqual(HomeSharedControlMetrics.statusFontSize, 7.5)
+        XCTAssertEqual(HomeSharedControlMetrics.statusLineHeight, 9)
+        XCTAssertEqual(HomeSharedControlMetrics.rowGap, 12)
+        XCTAssertEqual(HomeSharedControlMetrics.padding, 5)
+        XCTAssertEqual(HomeSharedControlMetrics.order, [.recordings, .boyiso, .settings])
+    }
+
     func testAudioInterruptionOnlyResumesWhenSystemAllowsIt() {
         let resumable = Notification(
             name: AVAudioSession.interruptionNotification,
