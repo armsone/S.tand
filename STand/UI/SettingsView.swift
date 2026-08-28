@@ -36,6 +36,11 @@ struct SettingsView: View {
     @State private var radioDraftAddress = ""
     @State private var radioValidationMessage: String?
     @State private var pendingRadioDeletion: InternetRadioConfiguration?
+    @State private var radioExportDocument: InternetRadioPresetDocument?
+    @State private var showsRadioExporter = false
+    @State private var showsRadioImporter = false
+    @State private var radioImportPreview: InternetRadioImportPreview?
+    @State private var radioImportErrorMessage: String?
     @State private var draggedHomeMusicChannelID: String?
     @State private var editingRadioSlot: Int?
     @State private var radioScrollRequest = 0
@@ -246,6 +251,34 @@ struct SettingsView: View {
             Button("취소", role: .cancel) {}
         } message: {
             Text("저장한 라디오 채널을 포함해 앱 설정이 처음 모습으로 돌아갑니다.")
+        }
+        .fileExporter(
+            isPresented: $showsRadioExporter,
+            document: radioExportDocument,
+            contentType: .json,
+            defaultFilename: InternetRadioPresetFile.defaultFilename
+        ) { result in
+            if case .failure = result {
+                radioImportErrorMessage = "파일을 저장하지 못했습니다."
+            }
+        }
+        .fileImporter(
+            isPresented: $showsRadioImporter,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            handleRadioImportResult(result.map { urls in urls[0] })
+        }
+        .sheet(item: $radioImportPreview) { preview in
+            InternetRadioImportPreviewSheet(
+                preview: preview,
+                existingCount: store.value.internetRadioChannels.count,
+                maximumCount: AppSettings.maximumInternetRadioChannelCount,
+                accent: accent,
+                onAdd: { model.addImportedInternetRadioChannels(preview.newEntries.map(\.channel)) },
+                onReplace: { model.replaceInternetRadioChannels(with: preview.entries.map(\.channel)) },
+                onCancel: {}
+            )
         }
         .onAppear {
             library.reload()
@@ -507,6 +540,31 @@ struct SettingsView: View {
                 }
 
                 SettingsHelpText("길게 눌러 홈 순서를 바꾸고, 라디오의 연필을 누르면 같은 자리에서 바로 수정할 수 있습니다.")
+
+                HStack(spacing: 8) {
+                    SettingsInlineButton(
+                        title: "채널 내보내기",
+                        systemImage: "square.and.arrow.up",
+                        accent: accent,
+                        action: beginExportingRadioPresets
+                    )
+                    .accessibilityHint("등록한 라디오 채널을 파일로 저장합니다")
+
+                    SettingsInlineButton(
+                        title: "채널 가져오기",
+                        systemImage: "square.and.arrow.down",
+                        accent: accent
+                    ) {
+                        showsRadioImporter = true
+                    }
+                    .accessibilityHint("다른 기기에서 내보낸 라디오 채널 파일을 불러옵니다")
+                }
+
+                if let radioImportErrorMessage {
+                    Label(radioImportErrorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             SettingsHelpText(
@@ -692,7 +750,7 @@ struct SettingsView: View {
                 .padding(11)
                 .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
 
-            TextField("https://…", text: $radioDraftAddress, axis: .vertical)
+            TextField("http:// 또는 https://…", text: $radioDraftAddress, axis: .vertical)
                 .keyboardType(.URL)
                 .textContentType(.URL)
                 .accessibilityIdentifier("internet-radio-address-field")
@@ -855,6 +913,40 @@ struct SettingsView: View {
         guard let pasted = UIPasteboard.general.string else { return }
         radioDraftAddress = pasted
         radioValidationMessage = nil
+    }
+
+    private func beginExportingRadioPresets() {
+        radioImportErrorMessage = nil
+        do {
+            let data = try model.exportInternetRadioPresetData()
+            radioExportDocument = InternetRadioPresetDocument(data: data)
+            showsRadioExporter = true
+        } catch {
+            radioImportErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func handleRadioImportResult(_ result: Result<URL, Error>) {
+        radioImportErrorMessage = nil
+        switch result {
+        case .success(let url):
+            let accessedResource = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessedResource { url.stopAccessingSecurityScopedResource() }
+            }
+            guard let data = try? Data(contentsOf: url) else {
+                radioImportErrorMessage = InternetRadioPresetError.decodingFailed.localizedDescription
+                return
+            }
+            switch model.parseInternetRadioPresetPreview(from: data) {
+            case .success(let preview):
+                radioImportPreview = preview
+            case .failure(let error):
+                radioImportErrorMessage = error.localizedDescription
+            }
+        case .failure:
+            radioImportErrorMessage = "파일을 열 수 없습니다."
+        }
     }
 
     private var informationCard: some View {
@@ -2007,7 +2099,7 @@ struct InternetRadioChannelManagementView: View {
                         ContentUnavailableView {
                             Label("저장한 채널이 없습니다", systemImage: "radio")
                         } description: {
-                            Text("직접 이용할 수 있는 HTTPS 스트림 주소를 추가해 주세요.")
+                            Text("직접 이용할 수 있는 HTTP 또는 HTTPS 스트림 주소를 추가해 주세요.")
                         } actions: {
                             Button {
                                 addChannel()
@@ -2083,7 +2175,7 @@ struct InternetRadioChannelManagementView: View {
                         } label: {
                             Label("채널 추가", systemImage: "plus")
                         }
-                        .accessibilityHint("이름과 HTTPS 스트림 주소를 직접 입력합니다")
+                        .accessibilityHint("이름과 HTTP 또는 HTTPS 스트림 주소를 직접 입력합니다")
                     }
                 }
             }
@@ -2308,7 +2400,7 @@ struct InternetRadioChannelEditorView: View {
                     .textInputAutocapitalization(.never)
                     .accessibilityHint("비워 두면 인터넷 라디오로 저장됩니다")
 
-                TextField("https://…", text: $address, axis: .vertical)
+                TextField("http:// 또는 https://…", text: $address, axis: .vertical)
                     .keyboardType(.URL)
                     .textContentType(.URL)
                     .textInputAutocapitalization(.never)
@@ -2332,7 +2424,7 @@ struct InternetRadioChannelEditorView: View {
             } header: {
                 Text("채널 정보")
             } footer: {
-                Text("직접 이용 권한을 확인한 합법적인 HTTPS 스트림 주소만 등록해 주세요. 이름은 최대 30자, 주소는 최대 2,048자로 저장됩니다.")
+                Text("직접 이용 권한을 확인한 HTTP 또는 HTTPS 스트림 주소만 등록해 주세요. HTTP 주소는 암호화되지 않습니다. 이름은 최대 30자, 주소는 최대 2,048자로 저장됩니다.")
             }
 
             Section {

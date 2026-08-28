@@ -39,7 +39,7 @@ final class ShareViewController: UIViewController {
         addressLabel.adjustsFontForContentSizeCategory = true
 
         let explanationLabel = UILabel()
-        explanationLabel.text = "Safari에서 라디오가 직접 재생되는 합법적인 HTTPS 주소만 저장해 주세요. 일반 웹페이지 주소는 재생되지 않을 수 있습니다."
+        explanationLabel.text = "Safari에서 라디오가 직접 재생되는 HTTP 또는 HTTPS 주소만 저장해 주세요. HTTP 주소는 암호화되지 않으며, 일반 웹페이지 주소는 재생되지 않을 수 있습니다."
         explanationLabel.font = .preferredFont(forTextStyle: .footnote)
         explanationLabel.textColor = .secondaryLabel
         explanationLabel.textAlignment = .center

@@ -6,6 +6,7 @@ enum InternetRadioConfigurationError: LocalizedError, Equatable {
     case secureAddressRequired
     case missingHost
     case credentialsNotAllowed
+    case fragmentNotAllowed
 
     var errorDescription: String? {
         switch self {
@@ -14,11 +15,13 @@ enum InternetRadioConfigurationError: LocalizedError, Equatable {
         case .addressTooLong:
             "라디오 주소가 너무 깁니다."
         case .secureAddressRequired:
-            "https://로 시작하는 안전한 스트림 주소만 사용할 수 있습니다."
+            "http:// 또는 https://로 시작하는 스트림 주소만 사용할 수 있습니다."
         case .missingHost:
             "서버 주소를 확인해 주세요."
         case .credentialsNotAllowed:
             "아이디나 비밀번호가 포함된 주소는 저장할 수 없습니다."
+        case .fragmentNotAllowed:
+            "# 이후 부분이 포함된 주소는 저장할 수 없습니다."
         }
     }
 }
@@ -44,7 +47,8 @@ struct InternetRadioConfiguration: Codable, Equatable, Hashable, Identifiable {
             throw InternetRadioConfigurationError.addressTooLong
         }
         guard let components = URLComponents(string: trimmedAddress),
-              components.scheme?.lowercased() == "https"
+              let scheme = components.scheme?.lowercased(),
+              scheme == "https" || scheme == "http"
         else {
             throw InternetRadioConfigurationError.secureAddressRequired
         }
@@ -53,6 +57,9 @@ struct InternetRadioConfiguration: Codable, Equatable, Hashable, Identifiable {
         }
         guard components.user == nil, components.password == nil else {
             throw InternetRadioConfigurationError.credentialsNotAllowed
+        }
+        guard components.fragment == nil else {
+            throw InternetRadioConfigurationError.fragmentNotAllowed
         }
 
         let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -64,6 +71,11 @@ struct InternetRadioConfiguration: Codable, Equatable, Hashable, Identifiable {
     var streamURL: URL {
         // The throwing initializer only stores URLComponents values that can form a URL.
         URL(string: urlString)!
+    }
+
+    /// True for legacy `http://` direct streams, used to show a non-blocking warning.
+    var isInsecureStream: Bool {
+        streamURL.scheme?.lowercased() == "http"
     }
 
     private enum CodingKeys: String, CodingKey {

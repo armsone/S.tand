@@ -49,7 +49,10 @@
 		B00000000000000000000031 /* BoyisoConnectivityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000031 /* BoyisoConnectivityService.swift */; };
 		B00000000000000000000032 /* BoyisoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000032 /* BoyisoView.swift */; };
 		B00000000000000000000033 /* boyiso_toktok.wav in Resources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000033 /* boyiso_toktok.wav */; };
+		B0000000000000000000002E /* InternetRadioPresetFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002E /* InternetRadioPresetFile.swift */; };
+		B0000000000000000000002F /* InternetRadioPresetTransferView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002F /* InternetRadioPresetTransferView.swift */; };
 		B00000000000000000000101 /* AudioAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000101 /* AudioAnalysisTests.swift */; };
+		B00000000000000000000103 /* InternetRadioPresetFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000103 /* InternetRadioPresetFileTests.swift */; };
 		U00000000000000000000001 /* STandUICatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = U00000000000000000000101 /* STandUICatalogTests.swift */; };
 		D90000000000000000000001 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000001 /* ShareViewController.swift */; };
 		D90000000000000000000002 /* STandRadioShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* STandRadioShare.appex */; platformFilter = ios; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -157,11 +160,14 @@
 		F0000000000000000000002B /* InternetRadioConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InternetRadioConfiguration.swift; sourceTree = "<group>"; };
 		F0000000000000000000002C /* InternetRadioBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InternetRadioBrowserView.swift; sourceTree = "<group>"; };
 		F0000000000000000000002D /* FirstLaunchPermissionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstLaunchPermissionView.swift; sourceTree = "<group>"; };
+		F0000000000000000000002E /* InternetRadioPresetFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InternetRadioPresetFile.swift; sourceTree = "<group>"; };
+		F0000000000000000000002F /* InternetRadioPresetTransferView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InternetRadioPresetTransferView.swift; sourceTree = "<group>"; };
 		F00000000000000000000030 /* BoyisoModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoyisoModels.swift; sourceTree = "<group>"; };
 		F00000000000000000000031 /* BoyisoConnectivityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoyisoConnectivityService.swift; sourceTree = "<group>"; };
 		F00000000000000000000032 /* BoyisoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoyisoView.swift; sourceTree = "<group>"; };
 		F00000000000000000000033 /* boyiso_toktok.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = boyiso_toktok.wav; sourceTree = "<group>"; };
 		F00000000000000000000101 /* AudioAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAnalysisTests.swift; sourceTree = "<group>"; };
+		F00000000000000000000103 /* InternetRadioPresetFileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InternetRadioPresetFileTests.swift; sourceTree = "<group>"; };
 		F00000000000000000000201 /* STand.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = STand.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000202 /* STandTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = STandTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000203 /* STandWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = STandWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -277,6 +283,7 @@
 			children = (
 				F00000000000000000000002 /* AppSettings.swift */,
 				F0000000000000000000002B /* InternetRadioConfiguration.swift */,
+				F0000000000000000000002E /* InternetRadioPresetFile.swift */,
 				F00000000000000000000030 /* BoyisoModels.swift */,
 			);
 			path = Models;
@@ -303,6 +310,7 @@
 				F00000000000000000000008 /* SettingsView.swift */,
 				F0000000000000000000002C /* InternetRadioBrowserView.swift */,
 				F0000000000000000000002D /* FirstLaunchPermissionView.swift */,
+				F0000000000000000000002F /* InternetRadioPresetTransferView.swift */,
 				F00000000000000000000009 /* RecordingsView.swift */,
 				F00000000000000000000032 /* BoyisoView.swift */,
 			);
@@ -330,6 +338,7 @@
 			children = (
 				F00000000000000000000101 /* AudioAnalysisTests.swift */,
 				F00000000000000000000102 /* MacUpdaterControllerTests.swift */,
+				F00000000000000000000103 /* InternetRadioPresetFileTests.swift */,
 			);
 			path = STandTests;
 			sourceTree = "<group>";
@@ -714,6 +723,8 @@
 				B0000000000000000000002B /* InternetRadioConfiguration.swift in Sources */,
 				B0000000000000000000002C /* InternetRadioBrowserView.swift in Sources */,
 				B0000000000000000000002D /* FirstLaunchPermissionView.swift in Sources */,
+				B0000000000000000000002E /* InternetRadioPresetFile.swift in Sources */,
+				B0000000000000000000002F /* InternetRadioPresetTransferView.swift in Sources */,
 				B00000000000000000000030 /* BoyisoModels.swift in Sources */,
 				B00000000000000000000031 /* BoyisoConnectivityService.swift in Sources */,
 				B00000000000000000000032 /* BoyisoView.swift in Sources */,
@@ -727,6 +738,7 @@
 			files = (
 				B00000000000000000000101 /* AudioAnalysisTests.swift in Sources */,
 				B00000000000000000000102 /* MacUpdaterControllerTests.swift in Sources */,
+				B00000000000000000000103 /* InternetRadioPresetFileTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

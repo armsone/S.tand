@@ -3402,7 +3402,7 @@ private struct InternetRadioPanel: View {
     }
 
     private var statusText: String {
-        guard configuration != nil else { return "HTTPS 주소 등록" }
+        guard configuration != nil else { return "라디오 주소 등록" }
         if showsEditBadge { return "채널 편집" }
         return switch state {
         case .idle: "대기 중"
@@ -4342,7 +4342,7 @@ private struct InternetRadioConfigurationView: View {
                 Section {
                     TextField("이름 (선택)", text: $displayName)
                         .textInputAutocapitalization(.never)
-                    TextField("https://…", text: $address)
+                    TextField("http:// 또는 https://…", text: $address)
                         .keyboardType(.URL)
                         .textContentType(.URL)
                         .textInputAutocapitalization(.never)
@@ -4443,7 +4443,7 @@ private struct InternetRadioConfigurationView: View {
     }
 
     private var radioInformationFooter: String {
-        "직접 이용 권한을 확인한 합법적인 HTTPS 스트림 주소만 등록해 주세요. 주소는 이 기기에만 저장되며 방송을 저장하거나 중계하지 않습니다."
+        "직접 이용 권한을 확인한 HTTP 또는 HTTPS 스트림 주소만 등록해 주세요. HTTP 주소는 암호화되지 않습니다. 주소는 이 기기에만 저장되며 방송을 저장하거나 중계하지 않습니다."
     }
 
     private func save() {

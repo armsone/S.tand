@@ -1632,6 +1632,54 @@ final class StandViewModel: ObservableObject {
         SharedInternetRadioImportStore().clearPendingConfiguration()
     }
 
+    func exportInternetRadioPresetData() throws -> Data {
+        try InternetRadioPresetCodec.exportData(channels: settings.value.internetRadioChannels)
+    }
+
+    func parseInternetRadioPresetPreview(
+        from data: Data
+    ) -> Result<InternetRadioImportPreview, InternetRadioPresetError> {
+        do {
+            let parsedChannels = try InternetRadioPresetCodec.parse(data)
+            let existing = settings.value.internetRadioChannels
+            let entries = parsedChannels.map { channel in
+                InternetRadioImportPreview.Entry(
+                    channel: channel,
+                    isDuplicate: InternetRadioPresetCodec.isDuplicate(channel, among: existing)
+                )
+            }
+            return .success(InternetRadioImportPreview(entries: entries))
+        } catch let error as InternetRadioPresetError {
+            return .failure(error)
+        } catch {
+            return .failure(.decodingFailed)
+        }
+    }
+
+    /// Adds only the non-duplicate imported channels into any remaining slots,
+    /// leaving existing channels and their selection untouched.
+    func addImportedInternetRadioChannels(_ channels: [InternetRadioConfiguration]) {
+        let availableSlots = AppSettings.maximumInternetRadioChannelCount
+            - settings.value.internetRadioChannels.count
+        guard availableSlots > 0 else { return }
+        for channel in channels.prefix(availableSlots) {
+            addInternetRadioChannel(channel, select: false)
+        }
+    }
+
+    /// Replaces the entire radio channel list with the imported channels.
+    func replaceInternetRadioChannels(with channels: [InternetRadioConfiguration]) {
+        stopInternetRadioPlayback()
+        var value = settings.value
+        for existing in value.internetRadioChannels {
+            _ = value.removeInternetRadioChannel(id: existing.id)
+        }
+        for channel in channels.prefix(AppSettings.maximumInternetRadioChannelCount) {
+            value.addInternetRadioChannel(channel, select: false)
+        }
+        settings.value = value
+    }
+
     private func importSharedInternetRadioIfNeeded() {
         guard let configuration = SharedInternetRadioImportStore().pendingConfiguration() else { return }
         sharedInternetRadioDraft = InternetRadioImportPolicy.draft(

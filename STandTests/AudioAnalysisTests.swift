@@ -290,7 +290,7 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertNil(settings.internetRadio)
     }
 
-    func testInternetRadioConfigurationAcceptsOnlySafeHTTPSStreams() throws {
+    func testInternetRadioConfigurationAcceptsCredentialFreeHTTPAndHTTPSStreams() throws {
         let configuration = try InternetRadioConfiguration(
             displayName: "  나의 라디오  ",
             urlString: "  https://radio.example.com/live.mp3  \n"
@@ -307,12 +307,11 @@ final class AudioAnalysisTests: XCTestCase {
         XCTAssertEqual(unnamed.displayName, InternetRadioConfiguration.defaultDisplayName)
 
         XCTAssertThrowsError(try InternetRadioConfiguration(displayName: "", urlString: ""))
-        XCTAssertThrowsError(
-            try InternetRadioConfiguration(
-                displayName: "테스트",
-                urlString: "http://radio.example.com/stream"
-            )
+        let legacyHTTP = try InternetRadioConfiguration(
+            displayName: "구형 라디오",
+            urlString: "http://radio.example.com/stream"
         )
+        XCTAssertTrue(legacyHTTP.isInsecureStream)
         XCTAssertThrowsError(
             try InternetRadioConfiguration(displayName: "테스트", urlString: "file:///tmp/radio")
         )
@@ -323,6 +322,12 @@ final class AudioAnalysisTests: XCTestCase {
             try InternetRadioConfiguration(
                 displayName: "테스트",
                 urlString: "https://user:password@radio.example.com/stream"
+            )
+        )
+        XCTAssertThrowsError(
+            try InternetRadioConfiguration(
+                displayName: "테스트",
+                urlString: "https://radio.example.com/stream#fragment"
             )
         )
     }

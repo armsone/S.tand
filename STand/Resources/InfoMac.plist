@@ -41,6 +41,11 @@
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsForMedia</key>
+		<true/>
+	</dict>
 	<key>SUFeedURL</key>
 	<string>https://nasfinder.com/appcasts/stand.xml</string>
 	<key>SUPublicEDKey</key>
