@@ -1502,10 +1502,11 @@ final class StandViewModel: ObservableObject {
         syncSleepCareMonitoring()
     }
 
+    @discardableResult
     func addInternetRadioChannel(
         _ configuration: InternetRadioConfiguration,
         select: Bool = true
-    ) {
+    ) -> Bool {
         var value = settings.value
         let existing = value.internetRadioChannels.first(where: { $0.id == configuration.id })
         let willSelect = select || value.selectedInternetRadioID == nil
@@ -1525,8 +1526,11 @@ final class StandViewModel: ObservableObject {
             stopInternetRadioPlayback()
         }
 
-        value.addInternetRadioChannel(configuration, select: select)
+        guard value.addInternetRadioChannel(configuration, select: select) else {
+            return false
+        }
         settings.value = value
+        return true
     }
 
     @discardableResult
@@ -1600,7 +1604,8 @@ final class StandViewModel: ObservableObject {
         return true
     }
 
-    func saveInternetRadioConfiguration(_ configuration: InternetRadioConfiguration) {
+    @discardableResult
+    func saveInternetRadioConfiguration(_ configuration: InternetRadioConfiguration) -> Bool {
         let identity = sharedInternetRadioDraft?.id
             ?? settings.value.internetRadio?.id
             ?? configuration.id
@@ -1610,16 +1615,21 @@ final class StandViewModel: ObservableObject {
             urlString: configuration.urlString
         )) ?? configuration
 
+        let didSave: Bool
         if settings.value.internetRadioChannels.contains(where: {
             $0.id == identifiedConfiguration.id
         }) {
-            _ = updateInternetRadioChannel(identifiedConfiguration)
-            _ = selectInternetRadioChannel(id: identifiedConfiguration.id)
+            didSave = updateInternetRadioChannel(identifiedConfiguration)
+            if didSave {
+                _ = selectInternetRadioChannel(id: identifiedConfiguration.id)
+            }
         } else {
-            addInternetRadioChannel(identifiedConfiguration)
+            didSave = addInternetRadioChannel(identifiedConfiguration)
         }
+        guard didSave else { return false }
         sharedInternetRadioDraft = nil
         SharedInternetRadioImportStore().clearPendingConfiguration()
+        return true
     }
 
     func removeInternetRadioConfiguration() {

@@ -683,15 +683,16 @@ struct AppSettings: Codable, Equatable {
         try container.encodeIfPresent(internetRadio, forKey: .internetRadio)
     }
 
+    @discardableResult
     mutating func addInternetRadioChannel(
         _ configuration: InternetRadioConfiguration,
         select: Bool = true
-    ) {
+    ) -> Bool {
         if let index = internetRadioChannels.firstIndex(where: { $0.id == configuration.id }) {
             internetRadioChannels[index] = configuration
         } else {
             guard internetRadioChannels.count < Self.maximumInternetRadioChannelCount else {
-                return
+                return false
             }
             internetRadioChannels.append(configuration)
         }
@@ -702,6 +703,7 @@ struct AppSettings: Codable, Equatable {
             homeMusicChannels,
             radioChannels: internetRadioChannels
         )
+        return true
     }
 
     @discardableResult

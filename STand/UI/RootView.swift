@@ -862,9 +862,9 @@ struct RootView: View {
                         && radioConfigurationForEditor != nil,
                     onSave: { configuration in
                         if radioEditorChannelID != nil {
-                            _ = model.updateInternetRadioChannel(configuration)
+                            return model.updateInternetRadioChannel(configuration)
                         } else {
-                            model.saveInternetRadioConfiguration(configuration)
+                            return model.saveInternetRadioConfiguration(configuration)
                         }
                     },
                     onDelete: {
@@ -4312,7 +4312,7 @@ private struct InternetRadioConfigurationView: View {
     let accent: Color
     let isSharedImport: Bool
     let allowsDeletion: Bool
-    let onSave: (InternetRadioConfiguration) -> Void
+    let onSave: (InternetRadioConfiguration) -> Bool
     let onDelete: () -> Void
     let onCancel: () -> Void
 
@@ -4321,7 +4321,7 @@ private struct InternetRadioConfigurationView: View {
         accent: Color = .orange,
         isSharedImport: Bool = false,
         allowsDeletion: Bool? = nil,
-        onSave: @escaping (InternetRadioConfiguration) -> Void,
+        onSave: @escaping (InternetRadioConfiguration) -> Bool,
         onDelete: @escaping () -> Void,
         onCancel: @escaping () -> Void = {}
     ) {
@@ -4453,8 +4453,10 @@ private struct InternetRadioConfigurationView: View {
                 displayName: displayName,
                 urlString: address
             )
+            guard onSave(configuration) else {
+                throw InternetRadioConfigurationError.channelLimitReached
+            }
             validationMessage = nil
-            onSave(configuration)
             dismiss()
         } catch {
             validationMessage = error.localizedDescription

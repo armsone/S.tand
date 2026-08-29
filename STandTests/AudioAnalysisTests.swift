@@ -584,14 +584,14 @@ final class AudioAnalysisTests: XCTestCase {
         )
         XCTAssertEqual(decoded.homeInternetRadios.map(\.id), [first.id, second.id])
 
-        settings.addInternetRadioChannel(overflow)
+        XCTAssertFalse(settings.addInternetRadioChannel(overflow))
         XCTAssertEqual(
             settings.internetRadioChannels.map(\.id),
             [first.id, second.id, third.id, fourth.id]
         )
 
         XCTAssertEqual(settings.removeInternetRadioChannel(id: first.id), first)
-        settings.addInternetRadioChannel(overflow, select: false)
+        XCTAssertTrue(settings.addInternetRadioChannel(overflow, select: false))
         XCTAssertEqual(
             settings.internetRadioChannels.map(\.id),
             [second.id, third.id, fourth.id, overflow.id]

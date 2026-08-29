@@ -7,6 +7,7 @@ enum InternetRadioConfigurationError: LocalizedError, Equatable {
     case missingHost
     case credentialsNotAllowed
     case fragmentNotAllowed
+    case channelLimitReached
 
     var errorDescription: String? {
         switch self {
@@ -22,6 +23,8 @@ enum InternetRadioConfigurationError: LocalizedError, Equatable {
             "아이디나 비밀번호가 포함된 주소는 저장할 수 없습니다."
         case .fragmentNotAllowed:
             "# 이후 부분이 포함된 주소는 저장할 수 없습니다."
+        case .channelLimitReached:
+            "채널은 최대 4개까지 저장할 수 있습니다. 기존 채널을 삭제한 뒤 다시 시도해 주세요."
         }
     }
 }

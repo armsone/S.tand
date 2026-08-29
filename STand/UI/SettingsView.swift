@@ -889,6 +889,9 @@ struct SettingsView: View {
                     saved,
                     select: store.value.internetRadioChannels.isEmpty
                 )
+                guard store.value.internetRadioChannel(id: saved.id) != nil else {
+                    throw InternetRadioConfigurationError.channelLimitReached
+                }
                 if let requestedHomeIndex,
                    let addedSelection = store.value.homeMusicChannels.first(where: {
                        $0.radioID == saved.id
@@ -900,6 +903,9 @@ struct SettingsView: View {
                 }
             } else if !model.updateInternetRadioChannel(saved) {
                 model.addInternetRadioChannel(saved, select: false)
+                guard store.value.internetRadioChannel(id: saved.id) != nil else {
+                    throw InternetRadioConfigurationError.channelLimitReached
+                }
             }
             closeInlineRadioEditor()
             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -2330,7 +2336,8 @@ struct InternetRadioChannelManagementView: View {
         path.append(.editor(InternetRadioEditorRoute(configuration: channel)))
     }
 
-    private func save(_ configuration: InternetRadioConfiguration) {
+    @discardableResult
+    private func save(_ configuration: InternetRadioConfiguration) -> Bool {
         if store.value.internetRadioChannels.contains(where: { $0.id == configuration.id }) {
             if !model.updateInternetRadioChannel(configuration) {
                 model.addInternetRadioChannel(configuration, select: true)
@@ -2338,6 +2345,7 @@ struct InternetRadioChannelManagementView: View {
         } else {
             model.addInternetRadioChannel(configuration, select: true)
         }
+        return store.value.internetRadioChannel(id: configuration.id) != nil
     }
 
     private func delete(_ channel: InternetRadioConfiguration) {
@@ -2367,7 +2375,7 @@ struct InternetRadioChannelEditorView: View {
 
     let configuration: InternetRadioConfiguration?
     let accent: Color
-    let onSave: (InternetRadioConfiguration) -> Void
+    let onSave: (InternetRadioConfiguration) -> Bool
     let onDelete: (UUID) -> Void
 
     init(
@@ -2375,7 +2383,7 @@ struct InternetRadioChannelEditorView: View {
         initialAddress: String = "",
         suggestedName: String = "",
         accent: Color = .orange,
-        onSave: @escaping (InternetRadioConfiguration) -> Void,
+        onSave: @escaping (InternetRadioConfiguration) -> Bool,
         onDelete: @escaping (UUID) -> Void = { _ in }
     ) {
         self.configuration = configuration
@@ -2494,8 +2502,10 @@ struct InternetRadioChannelEditorView: View {
                 displayName: displayName,
                 urlString: address
             )
+            guard onSave(saved) else {
+                throw InternetRadioConfigurationError.channelLimitReached
+            }
             validationMessage = nil
-            onSave(saved)
             dismiss()
         } catch {
             validationMessage = error.localizedDescription
