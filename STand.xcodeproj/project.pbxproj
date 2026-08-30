@@ -53,6 +53,7 @@
 		B0000000000000000000002F /* InternetRadioPresetTransferView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000002F /* InternetRadioPresetTransferView.swift */; };
 		B00000000000000000000101 /* AudioAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000101 /* AudioAnalysisTests.swift */; };
 		B00000000000000000000103 /* InternetRadioPresetFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000103 /* InternetRadioPresetFileTests.swift */; };
+		B00000000000000000000104 /* OvernightReliabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000104 /* OvernightReliabilityTests.swift */; };
 		U00000000000000000000001 /* STandUICatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = U00000000000000000000101 /* STandUICatalogTests.swift */; };
 		D90000000000000000000001 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000001 /* ShareViewController.swift */; };
 		D90000000000000000000002 /* STandRadioShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* STandRadioShare.appex */; platformFilter = ios; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -168,6 +169,7 @@
 		F00000000000000000000033 /* boyiso_toktok.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = boyiso_toktok.wav; sourceTree = "<group>"; };
 		F00000000000000000000101 /* AudioAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAnalysisTests.swift; sourceTree = "<group>"; };
 		F00000000000000000000103 /* InternetRadioPresetFileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InternetRadioPresetFileTests.swift; sourceTree = "<group>"; };
+		F00000000000000000000104 /* OvernightReliabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OvernightReliabilityTests.swift; sourceTree = "<group>"; };
 		F00000000000000000000201 /* STand.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = STand.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000202 /* STandTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = STandTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00000000000000000000203 /* STandWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = STandWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -339,6 +341,7 @@
 				F00000000000000000000101 /* AudioAnalysisTests.swift */,
 				F00000000000000000000102 /* MacUpdaterControllerTests.swift */,
 				F00000000000000000000103 /* InternetRadioPresetFileTests.swift */,
+				F00000000000000000000104 /* OvernightReliabilityTests.swift */,
 			);
 			path = STandTests;
 			sourceTree = "<group>";
@@ -739,6 +742,7 @@
 				B00000000000000000000101 /* AudioAnalysisTests.swift in Sources */,
 				B00000000000000000000102 /* MacUpdaterControllerTests.swift in Sources */,
 				B00000000000000000000103 /* InternetRadioPresetFileTests.swift in Sources */,
+				B00000000000000000000104 /* OvernightReliabilityTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

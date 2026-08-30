@@ -1102,6 +1102,9 @@ private struct SleepSessionInsightCard: View {
     }
 
     private var activityDescription: String {
+        if let quietDescription = SleepSessionQuietNightPolicy.description(for: session) {
+            return quietDescription
+        }
         guard let range = insight.busiestRange(sessionStart: session.startedAt) else {
             return "기록된 소리나 뒤척임이 없습니다."
         }

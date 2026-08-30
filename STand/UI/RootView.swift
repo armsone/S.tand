@@ -1198,13 +1198,30 @@ struct RootView: View {
             ? ((objectModeLocked || mateModeLocked) ? "lock.fill" : model.experienceMode.systemImage)
             : "stop.circle.fill"
 
+        let monitoringStatus = model.soundMonitoringStatus
+
         return ZStack {
             HStack(spacing: 12) {
-                Label(statusTitle, systemImage: statusImage)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.62))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                VStack(alignment: .leading, spacing: 1) {
+                    Label(statusTitle, systemImage: statusImage)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+
+                    if monitoringStatus != .inactive {
+                        Text(monitoringStatus.title)
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.44))
+                            .lineLimit(1)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(
+                    monitoringStatus == .inactive
+                        ? statusTitle
+                        : "\(statusTitle), \(monitoringStatus.title)"
+                )
 
                 Spacer(minLength: 12)
 

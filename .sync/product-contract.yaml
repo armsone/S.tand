@@ -8,6 +8,50 @@ reference_inventory:
     - STand/Models/AppSettings.swift
   uncovered_source_refs: []
 capabilities:
+  - id: mate_mode.overnight_reliability_and_status
+    purpose: 화면을 끄거나 앱을 벗어나도 매이트의 소리 감시를 이어가고, 조용한 밤과 감시 실패를 사용자가 구분한다.
+    source_refs:
+      - STand/UI/StandViewModel.swift
+      - STand/Services/RecordingLibrary.swift
+      - STand/UI/RootView.swift
+      - STand/UI/RecordingsView.swift
+    entry_points: [활성 세션 > 화면 잠금 또는 앱 전환, 홈 상단 상태, 수면 소리 기록]
+    preconditions: [활성 세션, 백그라운드 감시 켜짐, 마이크 권한, 매이트 모드 또는 자동 모드]
+    inputs: [앱 비활성 전환, 화면 잠금, 오디오 캡처 상태, 마이크 권한, 감시 중단 사유]
+    normal_result: 자동 모드는 매이트로 확정되고 같은 세션의 마이크 감시가 이어지며, 아침에 정상 감시된 소리 0개와 감시 실패를 서로 다른 문구로 표시한다.
+    states: [inactive, learning, monitoring, saving, permission_required, suspended, failed]
+    algorithms_and_thresholds:
+      - 자동 모드는 백그라운드 전환 직전에 카메라 판정 없이 매이트로 확정한다.
+      - 백그라운드 감시 기본값은 켜짐이며 기존 설치에는 한 번 적용하고 이후 사용자 선택은 유지한다.
+      - 실제 오디오 캡처가 monitoring 상태에 도달한 세션만 정상 감시된 조용한 밤으로 판정한다.
+    data_contracts:
+      - 세션은 감시 확인 상태를 이전 기록과 호환되는 형태로 저장한다.
+      - 소리와 녹음 파일은 계속 기기 안에만 저장한다.
+    producer_consumer_routes: [오디오 캡처 상태 > 세션 감시 확인 > 홈 상태와 수면 기록 문구]
+    persistence_relaunch: 백그라운드 설정과 감시 확인 세션 메타데이터를 저장하고 재실행 때 복원한다.
+    permissions_privacy_security: [마이크 권한이 없으면 감시하지 않고 권한 필요 상태를 표시한다., 원음과 녹음은 자동 전송하지 않는다.]
+    background_lifecycle: 자격이 있는 매이트 세션은 화면 잠금과 앱 전환에도 유지하며, 자격이 사라질 때만 캡처와 세션을 닫는다.
+    gestures_accessibility:
+      - 홈 상태 이름과 실제 감시 상태를 하나의 접근성 설명으로 읽는다.
+    supported_devices_layouts: [iPhone, iPad, Android phone, Android tablet]
+    visual_reference: none
+    platform_adaptations:
+      apple: [UIBackgroundModes audio와 AVAudioSession record를 사용하고 전면 권한이 남아 있을 때 자동 매이트 오디오를 시작한다.]
+      android: [microphone foreground service와 ongoing notification, partial wake lock을 사용한다.]
+    intentional_differences: []
+    implementations:
+      apple:
+        status: implemented
+        source_refs: [STand/UI/StandViewModel.swift, STand/Services/RecordingLibrary.swift, STand/UI/RootView.swift, STand/UI/RecordingsView.swift]
+        tests: [STandTests/OvernightReliabilityTests.swift]
+        evidence: [233 STand unit tests passed]
+      android:
+        status: implemented
+        source_refs: [app/src/main/java/com/armsone/stand/audio/MateMonitoringService.kt, app/src/main/java/com/armsone/stand/StandViewModel.kt, app/src/main/java/com/armsone/stand/recording/RecordingSessionStore.kt]
+        tests: [app/src/test/java/com/armsone/stand/model/StandBackgroundLifecyclePolicyTest.kt, app/src/test/java/com/armsone/stand/model/MateMonitoringStatusPolicyTest.kt, app/src/test/java/com/armsone/stand/recording/RecordingSessionStoreTest.kt]
+        evidence: [.parity/evidence/2026-08-30/mate-overnight-device-trace.md]
+    dependencies: [AVAudioSession, Android foreground service, microphone permission]
+    parity_row_ids: [mate_mode.overnight_reliability_and_status]
   - id: home.brand_update_check
     purpose: 사용자가 설치된 앱의 최신 여부를 확인하고 직접 배포 대상에서는 자동 또는 수동으로 안전하게 다운로드한다.
     source_refs:

@@ -374,7 +374,7 @@ struct AppSettings: Codable, Equatable {
     var multiStimulusWakeEnabled = true
     var modePreference = StandModePreference.automatic
     var cameraAmbientSensingEnabled = false
-    var backgroundModeEnabled = false
+    var backgroundModeEnabled = true
     var weatherLocationEnabled = true
     private(set) var internetRadioChannels: [InternetRadioConfiguration] = []
     private(set) var selectedInternetRadioID: UUID?
@@ -459,7 +459,7 @@ struct AppSettings: Codable, Equatable {
         multiStimulusWakeEnabled: Bool = true,
         modePreference: StandModePreference = .automatic,
         cameraAmbientSensingEnabled: Bool = false,
-        backgroundModeEnabled: Bool = false,
+        backgroundModeEnabled: Bool = true,
         weatherLocationEnabled: Bool = true,
         internetRadio: InternetRadioConfiguration? = nil,
         internetRadioChannels: [InternetRadioConfiguration] = [],
@@ -609,7 +609,7 @@ struct AppSettings: Codable, Equatable {
         backgroundModeEnabled = try container.decodeIfPresent(
             Bool.self,
             forKey: .backgroundModeEnabled
-        ) ?? false
+        ) ?? true
         weatherLocationEnabled = try container.decodeIfPresent(
             Bool.self,
             forKey: .weatherLocationEnabled
@@ -930,6 +930,7 @@ enum SettingsMigration {
     static let internetRadioChannelsKey = "settingsMigration.internetRadioChannels.v1"
     static let currentExperienceDefaultsKey = "settingsMigration.currentExperienceDefaults.v1"
     static let landscapeLayoutDefaultKey = "settingsMigration.landscapeLayoutDefault.v4"
+    static let backgroundModeDefaultOnKey = "settingsMigration.backgroundModeDefaultOn.v1"
 
     static func applyingTorchDefault(
         to settings: AppSettings,
@@ -970,6 +971,18 @@ enum SettingsMigration {
         migrated.landscapeLayout = .landscape
         return migrated
     }
+
+    /// 밤새 매이트 모드 감시가 조용히 꺼지는 것을 막기 위해 백그라운드 감시
+    /// 기본값을 켜짐으로 한 번 전환한다. 이후 사용자가 직접 끈 선택은 유지된다.
+    static func applyingBackgroundModeDefaultOn(
+        to settings: AppSettings,
+        hasMigrated: Bool
+    ) -> AppSettings {
+        guard !hasMigrated else { return settings }
+        var migrated = settings
+        migrated.backgroundModeEnabled = true
+        return migrated
+    }
 }
 
 @MainActor
@@ -1004,6 +1017,9 @@ final class SettingsStore: ObservableObject {
         let hasMigratedLandscapeLayoutDefault = defaults.bool(
             forKey: SettingsMigration.landscapeLayoutDefaultKey
         )
+        let hasMigratedBackgroundModeDefaultOn = defaults.bool(
+            forKey: SettingsMigration.backgroundModeDefaultOnKey
+        )
         let torchMigrated = SettingsMigration.applyingTorchDefault(
             to: saved,
             hasMigrated: hasMigratedTorchDefault
@@ -1016,9 +1032,13 @@ final class SettingsStore: ObservableObject {
             to: holdDurationMigrated,
             hasMigrated: hasMigratedCurrentExperienceDefaults
         )
-        value = SettingsMigration.applyingLandscapeLayoutDefault(
+        let landscapeLayoutMigrated = SettingsMigration.applyingLandscapeLayoutDefault(
             to: currentExperienceDefaultsMigrated,
             hasMigrated: hasMigratedLandscapeLayoutDefault
+        )
+        value = SettingsMigration.applyingBackgroundModeDefaultOn(
+            to: landscapeLayoutMigrated,
+            hasMigrated: hasMigratedBackgroundModeDefaultOn
         )
 
         // Preserve an unreadable payload until the user explicitly changes a setting.
@@ -1029,6 +1049,7 @@ final class SettingsStore: ObservableObject {
                 || !hasMigratedInternetRadioChannels
                 || !hasMigratedCurrentExperienceDefaults
                 || !hasMigratedLandscapeLayoutDefault
+                || !hasMigratedBackgroundModeDefaultOn
         else { return }
         if let data = try? JSONEncoder().encode(value) {
             defaults.set(data, forKey: storageKey)
@@ -1046,6 +1067,9 @@ final class SettingsStore: ObservableObject {
             }
             if !hasMigratedLandscapeLayoutDefault {
                 defaults.set(true, forKey: SettingsMigration.landscapeLayoutDefaultKey)
+            }
+            if !hasMigratedBackgroundModeDefaultOn {
+                defaults.set(true, forKey: SettingsMigration.backgroundModeDefaultOnKey)
             }
         }
     }

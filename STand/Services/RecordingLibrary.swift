@@ -40,23 +40,29 @@ struct SleepRecordingSession: Identifiable, Codable, Equatable {
     var endedAt: Date?
     var clipFileNames: [String]
     var startleEvents: [SleepStartleEvent]
+    /// 오디오 캡처가 실제로 `.monitoring` 상태에 도달했는지를 기록한다. 소리
+    /// 후보가 없는 밤과, 감시 자체가 시작되지 못한 실패를 구분하는 최소한의
+    /// 근거로 쓰인다.
+    var monitoringConfirmed: Bool
 
     init(
         id: UUID,
         startedAt: Date,
         endedAt: Date?,
         clipFileNames: [String],
-        startleEvents: [SleepStartleEvent] = []
+        startleEvents: [SleepStartleEvent] = [],
+        monitoringConfirmed: Bool = false
     ) {
         self.id = id
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.clipFileNames = clipFileNames
         self.startleEvents = startleEvents
+        self.monitoringConfirmed = monitoringConfirmed
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, startedAt, endedAt, clipFileNames, startleEvents
+        case id, startedAt, endedAt, clipFileNames, startleEvents, monitoringConfirmed
     }
 
     init(from decoder: Decoder) throws {
@@ -72,6 +78,12 @@ struct SleepRecordingSession: Identifiable, Codable, Equatable {
             [SleepStartleEvent].self,
             forKey: .startleEvents
         ) ?? []
+        // 이전 버전 기록에는 이 값이 없다. 이미 저장된 소리 후보나 화들짝 반응이
+        // 있다면 감시가 실제로 진행됐다는 뜻이므로 그 사실로 값을 보수적으로 채운다.
+        monitoringConfirmed = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .monitoringConfirmed
+        ) ?? !(clipFileNames.isEmpty && startleEvents.isEmpty)
     }
 }
 
@@ -82,6 +94,28 @@ struct RecordingSessionGroup: Identifiable {
     let clips: [RecordingClip]
     let startleEvents: [SleepStartleEvent]
     let isInferred: Bool
+    /// 소리 후보 없이 끝난 구간이 실제로 감시된 조용한 밤인지, 감시 자체가
+    /// 실패한 구간인지 구분한다. 추정 구간(`isInferred`)에는 근거가 없어 항상
+    /// `true`로 취급해 과거 기록의 문구를 바꾸지 않는다.
+    let monitoringConfirmed: Bool
+
+    init(
+        id: String,
+        startedAt: Date,
+        endedAt: Date,
+        clips: [RecordingClip],
+        startleEvents: [SleepStartleEvent],
+        isInferred: Bool,
+        monitoringConfirmed: Bool = true
+    ) {
+        self.id = id
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.clips = clips
+        self.startleEvents = startleEvents
+        self.isInferred = isInferred
+        self.monitoringConfirmed = monitoringConfirmed
+    }
 
     var totalDuration: TimeInterval {
         clips.reduce(0) { $0 + $1.duration }
@@ -135,6 +169,19 @@ struct SleepSessionInsight: Equatable {
         let bucketDuration = sessionDuration / Double(Self.bucketCount)
         let start = sessionStart.addingTimeInterval(Double(busiestBucketIndex) * bucketDuration)
         return start..<start.addingTimeInterval(bucketDuration)
+    }
+}
+
+/// 소리 후보와 화들짝 반응이 전혀 없는 구간에 보여줄 문구를 결정한다.
+/// 실제로 감시가 확인된 조용한 밤과, 감시 자체가 실패한 구간을 구분해
+/// 실패한 구간을 "조용한 밤"으로 오인하지 않도록 한다.
+enum SleepSessionQuietNightPolicy {
+    static func description(for session: RecordingSessionGroup) -> String? {
+        let insight = session.insight
+        guard insight.soundCount == 0, insight.movementCount == 0 else { return nil }
+        return session.monitoringConfirmed
+            ? "감시는 정상적으로 진행됐고 저장할 소리가 없었어요"
+            : "감시가 정상적으로 진행되지 못해 저장된 소리가 없어요"
     }
 }
 
@@ -296,7 +343,8 @@ final class RecordingLibrary: ObservableObject {
             let sessionClips = session.clipFileNames
                 .compactMap { clipsByName[$0] }
                 .sorted { $0.createdAt < $1.createdAt }
-            guard !sessionClips.isEmpty || !session.startleEvents.isEmpty else { continue }
+            // 소리 후보가 없어도 세션 자체는 보여준다. 그래야 조용히 잘 감시된
+            // 밤과 감시가 아예 실패한 밤을 사용자가 구분할 수 있다.
             assignedNames.formUnion(sessionClips.map { $0.url.lastPathComponent })
             let lastClipEnd = sessionClips
                 .map { $0.createdAt.addingTimeInterval($0.duration) }
@@ -315,7 +363,8 @@ final class RecordingLibrary: ObservableObject {
                     endedAt: endedAt,
                     clips: sessionClips,
                     startleEvents: session.startleEvents,
-                    isInferred: false
+                    isInferred: false,
+                    monitoringConfirmed: session.monitoringConfirmed
                 )
             )
         }
@@ -394,6 +443,18 @@ final class RecordingLibrary: ObservableObject {
                 end
             )
         }
+        persistSleepSessions()
+        objectWillChange.send()
+    }
+
+    /// 오디오 캡처가 실제로 감시 상태에 도달했을 때 한 번 표시한다. 이후
+    /// 소리가 없어도 이 값으로 조용한 밤과 감시 실패를 구분한다.
+    func confirmMonitoring(sessionID: UUID?) {
+        guard let sessionID,
+              let index = sleepSessions.firstIndex(where: { $0.id == sessionID }),
+              !sleepSessions[index].monitoringConfirmed
+        else { return }
+        sleepSessions[index].monitoringConfirmed = true
         persistSleepSessions()
         objectWillChange.send()
     }
@@ -674,7 +735,10 @@ final class RecordingLibrary: ObservableObject {
     private func removeExpiredEmptySessions(at referenceDate: Date) -> Bool {
         let previousCount = sleepSessions.count
         sleepSessions.removeAll { session in
-            guard session.clipFileNames.isEmpty,
+            // 감시가 실제로 확인된 세션은 소리 후보가 없어도 조용한 밤의 근거로
+            // 남긴다. 정리 대상은 감시가 시작조차 못 한 순간적인 진입뿐이다.
+            guard !session.monitoringConfirmed,
+                  session.clipFileNames.isEmpty,
                   session.startleEvents.isEmpty,
                   let endedAt = session.endedAt else {
                 return false

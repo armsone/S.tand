@@ -379,6 +379,89 @@ enum SleepCareMonitoringPolicy {
     }
 }
 
+/// 화면 잠금·백그라운드 전환 순간에 이미 진행 중이던 매이트 감시를 이어갈지
+/// 결정한다. `SleepCareMonitoringPolicy`와 같은 조건을 쓰되, 배경 감시 설정과
+/// 실제로 재개 가능한 상태(마이크 권한·중단 여부)까지 함께 확인한다.
+enum BackgroundMonitoringPolicy {
+    static func shouldKeepMotionMonitoring(
+        backgroundModeEnabled: Bool,
+        isNightSessionActive: Bool,
+        environmentDisplayMode: EnvironmentDisplayMode
+    ) -> Bool {
+        backgroundModeEnabled && SleepCareMonitoringPolicy.shouldMonitor(
+            isNightSessionActive: isNightSessionActive,
+            environmentDisplayMode: environmentDisplayMode
+        )
+    }
+
+    static func shouldKeepAudioMonitoring(
+        environmentDisplayMode: EnvironmentDisplayMode,
+        soundSensingEnabled: Bool,
+        isSuspended: Bool,
+        microphoneAccess: MicrophoneAccess
+    ) -> Bool {
+        guard environmentDisplayMode == .sleeping,
+              soundSensingEnabled,
+              !isSuspended,
+              microphoneAccess == .granted
+        else { return false }
+        return true
+    }
+}
+
+/// 매이트 모드 상태만으로는 실제 마이크 감시 여부를 알 수 없으므로, 홈 화면에
+/// 보여줄 진짜 감시 상태를 오디오 캡처 상태·권한·중단 사유에서 그대로 유도한다.
+enum SoundMonitoringStatus: Equatable {
+    case inactive
+    case monitoring
+    case learningRoomSound
+    case savingSound
+    case microphonePermissionNeeded
+    case suspended
+    case failedToStart(String)
+
+    var title: String {
+        switch self {
+        case .inactive: ""
+        case .monitoring: "소리 감시 중"
+        case .learningRoomSound: "방 소리 익히는 중"
+        case .savingSound: "소리 저장 중"
+        case .microphonePermissionNeeded: "마이크 권한 필요"
+        case .suspended: "감시 일시 중지"
+        case .failedToStart: "감시를 시작하지 못했어요"
+        }
+    }
+}
+
+enum SoundMonitoringStatusPolicy {
+    static func status(
+        isNightSessionActive: Bool,
+        environmentDisplayMode: EnvironmentDisplayMode,
+        soundSensingEnabled: Bool,
+        isSuspended: Bool,
+        audioState: AudioCaptureState,
+        microphoneAccess: MicrophoneAccess,
+        isWritingClip: Bool,
+        noiseCalibrationProgress: Double
+    ) -> SoundMonitoringStatus {
+        guard isNightSessionActive,
+              environmentDisplayMode == .sleeping,
+              soundSensingEnabled
+        else { return .inactive }
+        if microphoneAccess == .denied { return .microphonePermissionNeeded }
+        if isSuspended { return .suspended }
+        switch audioState {
+        case .monitoring:
+            if isWritingClip { return .savingSound }
+            return noiseCalibrationProgress < 1 ? .learningRoomSound : .monitoring
+        case .starting, .stopped:
+            return .learningRoomSound
+        case .failed(let message):
+            return .failedToStart(message)
+        }
+    }
+}
+
 enum BoyisoRemoteWakePolicy {
     static func shouldWake(
         for event: BoyisoEvent,
@@ -556,6 +639,19 @@ final class StandViewModel: ObservableObject {
         return environmentDisplayMode == .stand ? .object : .mate
     }
 
+    var soundMonitoringStatus: SoundMonitoringStatus {
+        SoundMonitoringStatusPolicy.status(
+            isNightSessionActive: isNightSessionActive,
+            environmentDisplayMode: environmentDisplayMode,
+            soundSensingEnabled: settings.value.soundSensingEnabled,
+            isSuspended: !monitoringSuspensions.isEmpty,
+            audioState: audio.state,
+            microphoneAccess: audio.microphoneAccess,
+            isWritingClip: audio.isWritingClip,
+            noiseCalibrationProgress: audio.noiseCalibrationProgress
+        )
+    }
+
     var isDisplayDark: Bool {
         isNightSessionActive && lampPhase == .off && !controlsVisible
     }
@@ -576,6 +672,7 @@ final class StandViewModel: ObservableObject {
     private var ambientSamplingTask: Task<Void, Never>?
     private var pendingModeTarget: EnvironmentDisplayMode?
     private var settingsSubscription: AnyCancellable?
+    private var audioStateSubscription: AnyCancellable?
     private var screenBrightnessSubscription: AnyCancellable?
     private var batterySubscriptions: Set<AnyCancellable> = []
     private var musicSubscriptions: Set<AnyCancellable> = []
@@ -663,6 +760,11 @@ final class StandViewModel: ObservableObject {
             self.library.add(url)
         }
         audio.configure(settings: settings.value)
+        audioStateSubscription = audio.$state
+            .sink { [weak self] state in
+                guard let self, state == .monitoring else { return }
+                self.library.confirmMonitoring(sessionID: self.activeRecordingSessionID)
+            }
         radio.onPlaybackBecameInactive = { [weak self] in
             guard let self else { return }
             self.monitoringSuspensions.remove(.internetRadio)
@@ -860,10 +962,27 @@ final class StandViewModel: ObservableObject {
     }
 
     func appWillResignActive() {
+        // 자동 모드가 밝은 상태로 잠기면 배경에서 아무 감시도 하지 않는 채로
+        // 밤을 보낼 수 있으므로, 아직 전면 실행 권한이 있을 때 매이트로 확정하고
+        // 오디오 감시도 실제로 시작한 뒤 백그라운드 자격을 평가한다.
+        if isNightSessionActive, settings.value.modePreference == .automatic {
+            forceSleepingModeForBackgroundLock()
+            syncSleepCareMonitoring()
+        }
         appIsActive = false
-        let keepsBackgroundMonitoring = settings.value.backgroundModeEnabled
-            && isNightSessionActive
-            && environmentDisplayMode == .sleeping
+        let motionEligible = BackgroundMonitoringPolicy.shouldKeepMotionMonitoring(
+            backgroundModeEnabled: settings.value.backgroundModeEnabled,
+            isNightSessionActive: isNightSessionActive,
+            environmentDisplayMode: environmentDisplayMode
+        )
+        let audioEligible = motionEligible
+            && BackgroundMonitoringPolicy.shouldKeepAudioMonitoring(
+                environmentDisplayMode: environmentDisplayMode,
+                soundSensingEnabled: settings.value.soundSensingEnabled,
+                isSuspended: !monitoringSuspensions.isEmpty,
+                microphoneAccess: audio.microphoneAccess
+            )
+        let keepsBackgroundMonitoring = motionEligible || audioEligible
         updateBoyisoLocalState(monitoring: keepsBackgroundMonitoring)
         isAdjustingBrightness = false
         brightnessEndpointLockTask?.cancel()
@@ -891,15 +1010,23 @@ final class StandViewModel: ObservableObject {
             ? ambientCamera.currentState
             : .disabled
         guard isNightSessionActive else { return }
-        if !keepsBackgroundMonitoring {
-            audio.stop()
-            motionMonitor.stop()
-        }
-        // 앱이 화면을 떠난 동안에는 실제 감시가 중단되므로 잠자기 모드 구간도
-        // 여기서 닫는다. 다시 30분 이내 돌아오면 같은 잠자리로 재개된다.
+        if !motionEligible { motionMonitor.stop() }
+        if !audioEligible { audio.stop() }
+        guard !keepsBackgroundMonitoring else { return }
+        // 백그라운드 감시가 허용되지 않거나 실제로 이어질 수 없을 때만 잠자기
+        // 모드 구간을 닫는다. 다시 30분 이내 돌아오면 같은 잠자리로 재개된다.
         finishStartleEvent()
         library.endSleepSession(id: activeRecordingSessionID)
         activeRecordingSessionID = nil
+    }
+
+    /// 화면 잠금 등 배경 전환 직전에 자동 모드를 매이트로 확정한다. 배경에서는
+    /// 금지된 카메라 측정이나 조명 애니메이션 없이 표시 모드와 녹음 세션만 맞춘다.
+    private func forceSleepingModeForBackgroundLock() {
+        guard environmentDisplayMode != .sleeping else { return }
+        environmentDisplayMode = .sleeping
+        mateModeEnteredAt = ProcessInfo.processInfo.systemUptime
+        syncRecordingSessionForDisplayMode()
     }
 
     func activateLamp() {
@@ -1916,6 +2043,9 @@ final class StandViewModel: ObservableObject {
         case .sleeping:
             if activeRecordingSessionID == nil {
                 activeRecordingSessionID = library.beginSleepSession(at: date)
+                if audio.state == .monitoring {
+                    library.confirmMonitoring(sessionID: activeRecordingSessionID)
+                }
             }
         case .stand:
             guard activeRecordingSessionID != nil else { return }
