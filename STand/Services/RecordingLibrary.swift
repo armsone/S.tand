@@ -528,6 +528,46 @@ final class RecordingLibrary: ObservableObject {
         if let firstError { throw firstError }
     }
 
+    /// 잠자리 패널 하나를 통째로 지운다. 그 안의 모든 녹음 파일과, 영속된
+    /// 세션 메타데이터를 함께 제거해 빈 패널이 남지 않도록 한다.
+    func deleteSession(_ session: RecordingSessionGroup) throws {
+        var firstError: Error?
+        for clip in session.clips {
+            do {
+                try FileManager.default.removeItem(at: clip.url)
+            } catch {
+                if firstError == nil { firstError = error }
+            }
+        }
+        removeSessionReferences(to: session.clips.map(\.url))
+        if let sessionID = Self.sessionID(fromGroupID: session.id),
+           let index = sleepSessions.firstIndex(where: { $0.id == sessionID }) {
+            sleepSessions.remove(at: index)
+            persistSleepSessions()
+        }
+        reload()
+        if let firstError { throw firstError }
+    }
+
+    /// 화면의 "전체 삭제"는 녹음뿐 아니라 잠자리 패널 이력까지 모두 지우는
+    /// 명시적인 초기화 동작이다. `deleteAll(at:)`은 진행 중이거나 방금 끝난
+    /// 잠자기 모드를 재개 판정용으로 보존해야 하므로 그 규칙은 그대로 두고,
+    /// 이 메서드에서만 남은 세션 메타데이터를 추가로 비운다.
+    func deleteAllIncludingSessions(at date: Date = Date()) throws {
+        var deleteAllError: Error?
+        do {
+            try deleteAll(at: date)
+        } catch {
+            deleteAllError = error
+        }
+        if !sleepSessions.isEmpty {
+            sleepSessions.removeAll()
+            persistSleepSessions()
+            reload()
+        }
+        if let deleteAllError { throw deleteAllError }
+    }
+
     func deleteAll(at date: Date = Date()) throws {
         // clips 배열에 아직 반영되지 않은 저장 완료 콜백도 빠짐없이 지운다.
         let storedAudioURLs = (try? FileManager.default.contentsOfDirectory(
@@ -747,6 +787,12 @@ final class RecordingLibrary: ObservableObject {
                 > SleepSessionGroupingPolicy.sleepModeResumeGap
         }
         return sleepSessions.count != previousCount
+    }
+
+    private static func sessionID(fromGroupID groupID: String) -> UUID? {
+        let prefix = "session-"
+        guard groupID.hasPrefix(prefix) else { return nil }
+        return UUID(uuidString: String(groupID.dropFirst(prefix.count)))
     }
 
     private static func dateFromFileName(_ url: URL) -> Date? {

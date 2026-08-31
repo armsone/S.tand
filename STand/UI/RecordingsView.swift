@@ -40,8 +40,11 @@ struct RecordingsView: View {
     @State private var confirmsDeleteAll = false
     @State private var confirmsDeleteSelected = false
     @State private var confirmsMergeAndDelete = false
+    @State private var confirmsDeleteSelectedSessions = false
     @State private var selectedClipURLs: Set<URL> = []
     @State private var expandedSessionIDs: Set<String> = []
+    @State private var isSessionSelectionMode = false
+    @State private var selectedSessionIDs: Set<String> = []
     @State private var showsSelectionTools = false
     @State private var showsMergedRecordings = false
     @State private var isMerging = false
@@ -79,6 +82,20 @@ struct RecordingsView: View {
 
                 ScrollView {
                     LazyVStack(spacing: 12) {
+                        if selectedPage == .sounds, isSessionSelectionMode {
+                            SessionSelectionActionsRow(
+                                allSelected: allSessionsSelected,
+                                accent: accent,
+                                canMerge: canMergeSelectedSessions,
+                                canDelete: !selectedSessionIDs.isEmpty && !isMerging,
+                                isMerging: isMerging,
+                                hasSessions: !library.recordingSessions.isEmpty,
+                                toggleSelectAll: toggleSelectAllSessions,
+                                merge: mergeSelectedSessions,
+                                delete: { confirmsDeleteSelectedSessions = true }
+                            )
+                        }
+
                         pagePicker
 
                         switch selectedPage {
@@ -123,7 +140,9 @@ struct RecordingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("완료") {
-                        if let onClose {
+                        if isSessionSelectionMode {
+                            exitSessionSelectionMode()
+                        } else if let onClose {
                             onClose()
                         } else {
                             dismiss()
@@ -132,7 +151,14 @@ struct RecordingsView: View {
                         .fontWeight(.semibold)
                         .foregroundStyle(accent)
                 }
-                if selectedPage == .sounds, !library.clips.isEmpty {
+                if selectedPage == .sounds, isSessionSelectionMode {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Text("\(selectedSessionIDs.count)개 선택")
+                            .font(.subheadline.monospacedDigit().weight(.semibold))
+                            .lineLimit(1)
+                            .foregroundStyle(accent)
+                    }
+                } else if selectedPage == .sounds, !library.clips.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
                         Menu {
                             Button("전체 선택", systemImage: "checkmark.square.fill") {
@@ -174,16 +200,17 @@ struct RecordingsView: View {
                     guard !isMerging else { return }
                     player.stop()
                     do {
-                        try library.deleteAll()
+                        try library.deleteAllIncludingSessions()
                         selectedClipURLs.removeAll()
                         expandedSessionIDs.removeAll()
+                        playbackQueue.removeAll()
                     } catch {
                         mergeErrorMessage = error.localizedDescription
                     }
                 }
                 Button("취소", role: .cancel) {}
             } message: {
-                Text("삭제한 녹음은 복구할 수 없습니다.")
+                Text("잠자리 기록과 녹음이 모두 사라지며 복구할 수 없습니다.")
             }
             .confirmationDialog(
                 "선택한 녹음 \(selectedClips.count)개를 삭제할까요?",
@@ -209,6 +236,19 @@ struct RecordingsView: View {
                 Button("취소", role: .cancel) {}
             } message: {
                 Text("합본은 남지만 선택한 원본 녹음은 복구할 수 없습니다.")
+            }
+            .confirmationDialog(
+                "선택한 잠자리 \(selectedSessionIDs.count)개를 삭제할까요?",
+                isPresented: $confirmsDeleteSelectedSessions,
+                titleVisibility: .visible
+            ) {
+                Button("선택 잠자리 삭제", role: .destructive) {
+                    guard !isMerging else { return }
+                    deleteSelectedSessions()
+                }
+                Button("취소", role: .cancel) {}
+            } message: {
+                Text("선택한 잠자리의 녹음과 기록이 모두 사라지며 복구할 수 없습니다.")
             }
             .confirmationDialog(
                 "이 녹음을 삭제할까요?",
@@ -499,29 +539,50 @@ struct RecordingsView: View {
 
     private func sessionCard(_ session: RecordingSessionGroup) -> some View {
         let isExpanded = expandedSessionIDs.contains(session.id)
-        let selectedCount = session.clips.filter { selectedClipURLs.contains($0.url) }.count
+        let selectedClipCount = session.clips.filter { selectedClipURLs.contains($0.url) }.count
+        let isSessionSelected = selectedSessionIDs.contains(session.id)
 
         return VStack(spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.24)) {
-                    if isExpanded {
-                        expandedSessionIDs.remove(session.id)
-                    } else {
-                        expandedSessionIDs.insert(session.id)
-                    }
+            HStack(spacing: 4) {
+                if isSessionSelectionMode {
+                    Image(systemName: isSessionSelected ? "checkmark.square.fill" : "square")
+                        .font(.title3)
+                        .foregroundStyle(isSessionSelected ? accent : .white.opacity(0.58))
+                        .frame(width: 40, height: 40)
+                        .padding(.leading, 8)
+                        .accessibilityHidden(true)
                 }
-            } label: {
+
                 SleepSessionTimelineHeader(
                     session: session,
                     isExpanded: isExpanded,
-                    selectedCount: selectedCount,
-                    accent: accent
+                    selectedCount: selectedClipCount,
+                    accent: accent,
+                    showsDisclosure: !isSessionSelectionMode
                 )
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if isSessionSelectionMode {
+                    toggleSessionSelection(session)
+                } else {
+                    withAnimation(.easeInOut(duration: 0.24)) {
+                        if isExpanded {
+                            expandedSessionIDs.remove(session.id)
+                        } else {
+                            expandedSessionIDs.insert(session.id)
+                        }
+                    }
+                }
+            }
+            .onLongPressGesture {
+                isSessionSelectionMode = true
+                selectedSessionIDs.insert(session.id)
+            }
+            .accessibilityAddTraits(isSessionSelected ? .isSelected : [])
+            .accessibilityHint(isSessionSelectionMode ? "" : "길게 눌러 잠자리 여러 개를 고릅니다")
 
-            if isExpanded {
+            if isExpanded, !isSessionSelectionMode {
                 Rectangle()
                     .fill(.white.opacity(0.07))
                     .frame(height: 1)
@@ -537,6 +598,12 @@ struct RecordingsView: View {
             }
         }
         .background { RecordingPanelSurface(accent: accent, cornerRadius: 22) }
+        .overlay {
+            if isSessionSelected {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(accent, lineWidth: 2)
+            }
+        }
     }
 
     private var mergedRecordingsCard: some View {
@@ -731,6 +798,86 @@ struct RecordingsView: View {
             mergeErrorMessage = error.localizedDescription
         }
     }
+
+    private func deleteSession(_ session: RecordingSessionGroup) throws {
+        let sessionURLs = Set(session.clips.map(\.url))
+        if let playingURL = player.playingURL, sessionURLs.contains(playingURL) {
+            player.stop()
+        }
+        try library.deleteSession(session)
+        expandedSessionIDs.remove(session.id)
+        selectedClipURLs.subtract(sessionURLs)
+        selectedSessionIDs.remove(session.id)
+        playbackQueue.removeAll { sessionURLs.contains($0.url) }
+    }
+
+    private var selectedSessionClips: [RecordingClip] {
+        library.recordingSessions
+            .filter { selectedSessionIDs.contains($0.id) }
+            .flatMap(\.clips)
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private var canMergeSelectedSessions: Bool {
+        !playbackDisabled && !isMerging && selectedSessionClips.count >= 2
+    }
+
+    private func exitSessionSelectionMode() {
+        isSessionSelectionMode = false
+        selectedSessionIDs.removeAll()
+    }
+
+    private var allSessionsSelected: Bool {
+        !library.recordingSessions.isEmpty
+            && selectedSessionIDs.count == library.recordingSessions.count
+    }
+
+    private func toggleSelectAllSessions() {
+        if allSessionsSelected {
+            selectedSessionIDs.removeAll()
+        } else {
+            selectedSessionIDs = Set(library.recordingSessions.map(\.id))
+        }
+    }
+
+    private func toggleSessionSelection(_ session: RecordingSessionGroup) {
+        if selectedSessionIDs.contains(session.id) {
+            selectedSessionIDs.remove(session.id)
+            if selectedSessionIDs.isEmpty { isSessionSelectionMode = false }
+        } else {
+            selectedSessionIDs.insert(session.id)
+        }
+    }
+
+    private func mergeSelectedSessions() {
+        let clips = selectedSessionClips
+        guard clips.count >= 2 else { return }
+        isMerging = true
+        player.stop()
+        Task {
+            defer { isMerging = false }
+            do {
+                let merged = try await library.merge(clips, kind: .selected, deleteSources: false)
+                mergeStatusMessage = "선택한 잠자리 소리 \(clips.count)개를 합쳤습니다 · \(merged.createdAt.formatted(date: .omitted, time: .shortened)) 시작 · 원본 보관됨"
+                exitSessionSelectionMode()
+            } catch {
+                mergeErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func deleteSelectedSessions() {
+        let sessions = library.recordingSessions.filter { selectedSessionIDs.contains($0.id) }
+        do {
+            for session in sessions {
+                try deleteSession(session)
+            }
+            mergeStatusMessage = "선택한 잠자리 \(sessions.count)개를 삭제했습니다."
+            exitSessionSelectionMode()
+        } catch {
+            mergeErrorMessage = error.localizedDescription
+        }
+    }
 }
 
 enum RecordingSelectionPolicy {
@@ -814,6 +961,46 @@ private struct RecordingNoticeCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
             .background(.white.opacity(0.11), in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private struct SessionSelectionActionsRow: View {
+    let allSelected: Bool
+    let accent: Color
+    let canMerge: Bool
+    let canDelete: Bool
+    let isMerging: Bool
+    let hasSessions: Bool
+    let toggleSelectAll: () -> Void
+    let merge: () -> Void
+    let delete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: toggleSelectAll) {
+                Text(allSelected ? "전체 해제" : "전체 선택")
+                    .frame(maxWidth: .infinity)
+            }
+            .disabled(isMerging || !hasSessions)
+
+            Button(action: merge) {
+                Text("합치기")
+                    .frame(maxWidth: .infinity)
+            }
+            .disabled(!canMerge)
+
+            Button(role: .destructive, action: delete) {
+                Text("지우기")
+                    .frame(maxWidth: .infinity)
+            }
+            .disabled(!canDelete)
+        }
+        .font(.footnote.weight(.semibold))
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .tint(accent)
+        .lineLimit(1)
+        .minimumScaleFactor(0.9)
     }
 }
 
