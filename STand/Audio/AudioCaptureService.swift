@@ -282,32 +282,21 @@ final class AudioCaptureService: ObservableObject {
                 duration: duration
             )
             applyEffectiveThresholds(adaptiveState)
-            let detection: AudioDetection
-            if AudioCalibrationPolicy.canReact(adaptiveState) {
-                detection = detector.analyze(
-                    rmsDB: levels.rmsDB,
-                    peakDB: levels.peakDB,
-                    bufferDuration: duration,
-                    now: now
-                )
-            } else {
-                detector.reset()
-                soundClassifier.reset()
-                continuousSoundDuration = 0
-                detection = AudioDetection(
-                    clapDetected: false,
-                    soundBegan: false,
-                    isAboveSoundThreshold: false
-                )
-            }
+            let canReactToRoomSound = AudioCalibrationPolicy.canReact(adaptiveState)
+            let detection = detector.analyze(
+                rmsDB: levels.rmsDB,
+                peakDB: levels.peakDB,
+                bufferDuration: duration,
+                now: now
+            )
 
             if detection.clapDetected {
                 DispatchQueue.main.async { self.onClap?() }
             }
-            if detection.soundBegan {
+            if canReactToRoomSound, detection.soundBegan {
                 DispatchQueue.main.async { self.onRelativeSoundRise?() }
             }
-            continuousSoundDuration = detection.isAboveSoundThreshold
+            continuousSoundDuration = canReactToRoomSound && detection.isAboveSoundThreshold
                 ? continuousSoundDuration + duration
                 : 0
             if continuousSoundDuration >= 2, now - lastContinuousSoundAt >= 5 {

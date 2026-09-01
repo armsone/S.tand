@@ -54,12 +54,7 @@ enum AdaptiveSoundThresholdPolicy {
         userThresholdDB: Float = quietestThresholdDB,
         configuredPeakThresholdDB: Float = -18
     ) -> Float {
-        let soundThreshold = soundThreshold(
-            noiseFloorDB: noiseFloorDB,
-            userThresholdDB: userThresholdDB
-        )
-        let adaptivePeak = min(-8, max(-45, soundThreshold + 12))
-        return max(adaptivePeak, min(-8, max(-45, configuredPeakThresholdDB)))
+        min(-8, max(-70, (noiseFloorDB ?? -50) + 12))
     }
 
     private static func clamped(_ value: Float) -> Float {
@@ -75,12 +70,11 @@ enum AudioCalibrationPolicy {
 
 struct AdaptiveNoiseFloorTracker {
     private static let bucketDuration: TimeInterval = 1
-    private static let adaptationWindowCount = 8
+    private static let adaptationWindowCount = 12
 
     private var totalObservedDuration: TimeInterval = 0
     private var currentBucketDuration: TimeInterval = 0
     private var currentBucketSamples: [Float] = []
-    private var calibrationBuckets: [Float] = []
     private var adaptationBuckets: [Float] = []
     private var noiseFloorDB: Float?
 
@@ -119,7 +113,6 @@ struct AdaptiveNoiseFloorTracker {
         totalObservedDuration = 0
         currentBucketDuration = 0
         currentBucketSamples.removeAll(keepingCapacity: true)
-        calibrationBuckets.removeAll(keepingCapacity: true)
         adaptationBuckets.removeAll(keepingCapacity: true)
         noiseFloorDB = nil
     }
@@ -131,12 +124,6 @@ struct AdaptiveNoiseFloorTracker {
         currentBucketDuration = 0
         currentBucketSamples.removeAll(keepingCapacity: true)
 
-        if totalObservedDuration <= AdaptiveSoundThresholdPolicy.calibrationDuration {
-            calibrationBuckets.append(bucketFloor)
-            noiseFloorDB = Self.percentile(calibrationBuckets, fraction: 0.5)
-            return
-        }
-
         adaptationBuckets.append(bucketFloor)
         if adaptationBuckets.count > Self.adaptationWindowCount {
             adaptationBuckets.removeFirst(adaptationBuckets.count - Self.adaptationWindowCount)
@@ -146,8 +133,8 @@ struct AdaptiveNoiseFloorTracker {
             noiseFloorDB = candidate
             return
         }
-        // 지속 소음이 생기면 약 10초, 조용해지면 약 5초 안에 다시 민감해진다.
-        let rate: Float = candidate > current ? 0.12 : 0.22
+        // 최근 환경의 변화에 맞춰 매초 기준을 다시 조정한다.
+        let rate: Float = candidate > current ? 0.18 : 0.28
         noiseFloorDB = current + (candidate - current) * rate
     }
 

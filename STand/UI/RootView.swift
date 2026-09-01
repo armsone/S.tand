@@ -649,6 +649,9 @@ struct RootView: View {
                 scale: presentationScale
             )
             let isPortrait = contentSize.height > contentSize.width
+            let activeContentOpacity = model.isNightSessionActive
+                ? model.lampIntensity
+                : 1
 
             ZStack {
                 SystemVolumeBridge(controller: systemVolume)
@@ -703,20 +706,20 @@ struct RootView: View {
                     }
                     .padding(.top, isPortrait ? 18 : 20)
                     .padding(.bottom, StandControlLayoutMetrics.bottomPadding(isPortrait: isPortrait))
-                    .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
+                    .opacity(didInitialize ? activeContentOpacity : 0)
                     .zIndex(5)
 
                     centerContent(isPortrait: isPortrait, canvasSize: contentSize)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.horizontal, isPortrait ? 20 : 32)
-                        .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
+                        .opacity(didInitialize ? activeContentOpacity : 0)
 
                     VStack(spacing: 0) {
                         Spacer(minLength: 0)
                         HStack(spacing: 7) {
                             Text(AppVersion.build)
                             Text("·")
-                            Text("밝기 \(Int((model.displayBrightness * 100).rounded()))%")
+                            Text("밝기 \(Int((model.lampIntensity * 100).rounded()))%")
                                 .monospacedDigit()
                         }
                             .font(.system(
@@ -729,9 +732,9 @@ struct RootView: View {
                     }
                     .allowsHitTesting(false)
                     .accessibilityLabel(
-                        "빌드 번호 \(AppVersion.build), 현재 밝기 \(Int((model.displayBrightness * 100).rounded()))퍼센트"
+                        "빌드 번호 \(AppVersion.build), 현재 밝기 \(Int((model.lampIntensity * 100).rounded()))퍼센트"
                     )
-                    .opacity(model.isDisplayDark || !didInitialize ? 0 : 1)
+                    .opacity(didInitialize ? activeContentOpacity : 0)
                     .zIndex(6)
 
                     if let screenAdjustmentDragState {
@@ -1552,7 +1555,10 @@ struct RootView: View {
             canvasSize: canvasSize,
             isPortrait: isPortrait,
             isDimmed: isDimmed,
-            dimmedIntensity: settings.value.silhouetteIntensity,
+            dimmedIntensity: min(
+                1,
+                0.05 / max(model.displayBrightness, 0.05)
+            ),
             intensity: isDimmed ? 0 : model.lampIntensity,
             clockScale: settings.value.clockScale,
             clockFont: settings.value.clockFont,

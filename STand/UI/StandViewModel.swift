@@ -206,6 +206,26 @@ enum AppBrightnessSystemSyncPolicy {
     }
 }
 
+/// `UIScreen.brightnessDidChangeNotification`이 누락되더라도 오브제 모드에
+/// 갇히지 않도록, 밝기 알림에 의존하지 않는 주기적 재확인의 실행 조건을 정한다.
+enum AutomaticBrightnessPollingPolicy {
+    static let interval: Duration = .seconds(20)
+
+    static func shouldPoll(
+        isSessionActive: Bool,
+        isForeground: Bool,
+        modePreference: StandModePreference,
+        isAdjustingBrightness: Bool,
+        isFaceDown: Bool
+    ) -> Bool {
+        isSessionActive
+            && isForeground
+            && modePreference == .automatic
+            && !isAdjustingBrightness
+            && !isFaceDown
+    }
+}
+
 enum StandExperienceMode: String, Equatable {
     case object
     case mate
@@ -292,7 +312,7 @@ enum AmbientCameraSamplingPolicy {
 }
 
 enum StartleActivationPolicy {
-    static let delay: TimeInterval = 120
+    static let delay: TimeInterval = 60
 
     static func canActivate(
         mateModeEnteredAt: TimeInterval?,
@@ -484,11 +504,13 @@ enum StartleLightingProfile: Equatable {
     case urgent
 
     static let totalDuration: TimeInterval = 10
+    static let cooldownDuration: TimeInterval = 10
+    static let streakResetDuration: TimeInterval = 60
 
-    var riseDuration: TimeInterval { self == .gentle ? 2 : 1 }
-    var fadeDuration: TimeInterval { self == .gentle ? 2 : 1 }
-    var peakDisplayIntensity: Double { self == .gentle ? 0.4 : 1 }
-    var peakTorchLevel: Double { self == .gentle ? 0.1 : 1 }
+    var riseDuration: TimeInterval { 0 }
+    var fadeDuration: TimeInterval { Self.totalDuration }
+    var peakDisplayIntensity: Double { 0.5 }
+    var peakTorchLevel: Double { 0.15 }
     var fadeStart: TimeInterval { Self.totalDuration - fadeDuration }
 
     static func forEvent(_ event: BoyisoEvent) -> StartleLightingProfile {
@@ -615,6 +637,7 @@ final class StandViewModel: ObservableObject {
         powerState: .unknown
     )
     @Published private(set) var batteryProtectionActive = false
+    private var shouldResumeSessionAfterBatteryProtection = false
     /// S.tand 화면 안에만 적용하는 조명 밝기입니다.
     #if targetEnvironment(macCatalyst)
     @Published private(set) var displayBrightness = 1.0
@@ -653,7 +676,7 @@ final class StandViewModel: ObservableObject {
     }
 
     var isDisplayDark: Bool {
-        isNightSessionActive && lampPhase == .off && !controlsVisible
+        isNightSessionActive && lampPhase == .off
     }
 
     let settings: SettingsStore
@@ -670,6 +693,7 @@ final class StandViewModel: ObservableObject {
     private var tapBrightnessTransitionTask: Task<Void, Never>?
     private var brightnessEndpointLockTask: Task<Void, Never>?
     private var ambientSamplingTask: Task<Void, Never>?
+    private var brightnessPollingTask: Task<Void, Never>?
     private var pendingModeTarget: EnvironmentDisplayMode?
     private var settingsSubscription: AnyCancellable?
     private var audioStateSubscription: AnyCancellable?
@@ -684,6 +708,9 @@ final class StandViewModel: ObservableObject {
     private var activeLampBaseIntensity = 0.0
     private var activeStartleLightingProfile = StartleLightingProfile.gentle
     private var isMovementTriggeredLamp = false
+    private var lastStartleActivationTime = -Double.infinity
+    private var startleStreakCount = 0
+    private var isStartleTorchEnabled = false
     private enum MonitoringSuspensionReason: Hashable {
         case recordingPlayback
         case internetRadio
@@ -702,6 +729,7 @@ final class StandViewModel: ObservableObject {
     #endif
     private var appIsActive = true
     private var isAdjustingBrightness = false
+    private var lastObservedSystemBrightness = 1.0
     private var activeRecordingSessionID: UUID?
     private var activeStartleEventID: UUID?
     private var mateModeEnteredAt: TimeInterval?
@@ -729,7 +757,7 @@ final class StandViewModel: ObservableObject {
                 intensity: max(0.2, self.audio.normalizedLevel),
                 detail: "finger_snap"
             )
-            self.wakeForSleepMovement(profile: .gentle)
+            self.wakeForSleepMovement(profile: .gentle, respectsMateWarmup: false)
         }
         audio.onRelativeSoundRise = { [weak self] in
             guard let self,
@@ -820,6 +848,7 @@ final class StandViewModel: ObservableObject {
                     preference: value.modePreference,
                     performTransition: isNightSessionActive
                 )
+                startBrightnessPollingIfNeeded()
                 if !value.cameraAmbientSensingEnabled {
                     ambientCamera.cancel()
                     ambientSamplingTask?.cancel()
@@ -840,14 +869,26 @@ final class StandViewModel: ObservableObject {
             .sink { [weak self] notification in
                 guard let screen = notification.object as? UIScreen else { return }
                 guard let self else { return }
-                guard !isFaceDown else { return }
-                guard AppBrightnessSystemSyncPolicy.shouldAdoptSystemBrightness(
-                    isAdjustingBrightness: isAdjustingBrightness,
-                    modePreference: settings.value.modePreference
-                ) else { return }
                 let newBrightness = Double(screen.brightness)
+                guard abs(newBrightness - lastObservedSystemBrightness) > 0.001 else { return }
+                lastObservedSystemBrightness = newBrightness
+                guard !isFaceDown else { return }
+                guard !isAdjustingBrightness else { return }
+                let currentPreference = settings.value.modePreference
+                // 끝값으로 고정한 매이트·오브제 모드는 시스템 자동 밝기 변화가
+                // 풀지 않는다. 자동 모드만 실제 아이폰 밝기를 새 기준으로 채택한다.
+                guard currentPreference == .automatic else { return }
+                guard isNightSessionActive else {
+                    displayBrightness = newBrightness
+                    return
+                }
                 displayBrightness = newBrightness
-                applyBaseBrightness(newBrightness, animated: false)
+                var updated = settings.value
+                updated.lampIntensity = newBrightness
+                settings.value = updated
+                if environmentDisplayMode == .stand {
+                    applyBaseBrightness(newBrightness, animated: false)
+                }
                 refreshEnvironmentDisplayMode(
                     preference: .automatic,
                     performTransition: true
@@ -872,13 +913,19 @@ final class StandViewModel: ObservableObject {
         batteryProtectionActive = false
         isNightSessionActive = true
         displayBrightness = platformDisplayBrightness
+        lastObservedSystemBrightness = displayBrightness
         var initialSettings = settings.value
         initialSettings.modePreference = .automatic
         initialSettings.lampIntensity = displayBrightness
+        initialSettings.silhouetteIntensity = 0.05
         initialSettings.brightnessModeThreshold = SimplifiedBrightnessModePolicy.mateUpperBound
-        initialSettings.automaticDimmingEnabled = false
+        initialSettings.automaticDimmingEnabled = true
         settings.value = initialSettings
-        applyEnvironmentDisplayMode(.stand, performTransition: false)
+        let initialMode = SimplifiedBrightnessModePolicy.mode(
+            for: displayBrightness,
+            preference: .automatic
+        )
+        applyEnvironmentDisplayMode(initialMode, performTransition: false)
         UIApplication.shared.isIdleTimerDisabled = true
         audio.configure(settings: settings.value)
         syncSleepCareMonitoring()
@@ -886,16 +933,18 @@ final class StandViewModel: ObservableObject {
         weather.refreshIfNeeded()
         controlsTask?.cancel()
         controlsVisible = true
-        applyBaseBrightness(displayBrightness, animated: false)
+        activateLamp()
         if settings.value.cameraAmbientSensingEnabled {
             measureAmbientBrightnessIfNeeded()
             startAmbientSamplingIfNeeded()
         }
+        startBrightnessPollingIfNeeded()
     }
 
     func stopNightSession() {
         guard isNightSessionActive else { return }
         isNightSessionActive = false
+        shouldResumeSessionAfterBatteryProtection = false
         stopInternetRadioPlayback()
         endExternalMusicSession()
         audio.stop()
@@ -916,6 +965,8 @@ final class StandViewModel: ObservableObject {
         ambientSamplingTask?.cancel()
         ambientSamplingTask = nil
         ambientCamera.cancel()
+        brightnessPollingTask?.cancel()
+        brightnessPollingTask = nil
         UIApplication.shared.isIdleTimerDisabled = false
     }
 
@@ -924,15 +975,15 @@ final class StandViewModel: ObservableObject {
         syncSystemMusicPlayback()
         importSharedInternetRadioIfNeeded()
         manualDimmingHoldActive = false
+        lastObservedSystemBrightness = platformDisplayBrightness
         if settings.value.modePreference == .automatic {
-            displayBrightness = platformDisplayBrightness
+            displayBrightness = lastObservedSystemBrightness
         } else {
             displayBrightness = SimplifiedBrightnessModePolicy.clamped(
                 settings.value.lampIntensity
             )
         }
         if isNightSessionActive, settings.value.modePreference == .automatic {
-            applyBaseBrightness(displayBrightness, animated: false)
             refreshEnvironmentDisplayMode(
                 preference: .automatic,
                 performTransition: false
@@ -954,11 +1005,12 @@ final class StandViewModel: ObservableObject {
         weather.refreshIfNeeded()
         controlsTask?.cancel()
         controlsVisible = true
-        applyBaseBrightness(displayBrightness, animated: false)
+        activateLamp()
         if settings.value.cameraAmbientSensingEnabled {
             measureAmbientBrightnessIfNeeded()
             startAmbientSamplingIfNeeded()
         }
+        startBrightnessPollingIfNeeded()
     }
 
     func appWillResignActive() {
@@ -1006,6 +1058,8 @@ final class StandViewModel: ObservableObject {
         ambientCamera.cancel()
         ambientSamplingTask?.cancel()
         ambientSamplingTask = nil
+        brightnessPollingTask?.cancel()
+        brightnessPollingTask = nil
         ambientCameraState = settings.value.cameraAmbientSensingEnabled
             ? ambientCamera.currentState
             : .disabled
@@ -1030,7 +1084,52 @@ final class StandViewModel: ObservableObject {
     }
 
     func activateLamp() {
-        applyBaseBrightness(displayBrightness, animated: true)
+        guard isNightSessionActive else { return }
+        lampTask?.cancel()
+        movementTorchSyncTask?.cancel()
+        movementTorchSyncTask = nil
+        finishStartleEvent()
+        activeStartleLightingProfile = .gentle
+        isMovementTriggeredLamp = false
+        automaticDimmingPaused = false
+
+        let maximumIntensity = SimplifiedBrightnessModePolicy.clamped(displayBrightness)
+        activeLampBaseIntensity = maximumIntensity
+        activeLampMaximumIntensity = max(maximumIntensity, 0.01)
+        lampPhase = maximumIntensity > 0 ? .holding : .off
+        withAnimation(.easeOut(duration: 0.3)) {
+            lampIntensity = maximumIntensity
+        }
+        torch.turnOff()
+
+        let shouldFade = settings.value.automaticDimmingEnabled
+            && settings.value.modePreference == .automatic
+            && environmentDisplayMode == .sleeping
+        guard shouldFade else { return }
+
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        let holdDuration = max(0, settings.value.holdDuration)
+        let fadeDuration = max(0.1, settings.value.fadeDuration)
+        lampTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(50))
+                guard let self, !Task.isCancelled else { return }
+                let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
+                if elapsed <= holdDuration {
+                    lampPhase = .holding
+                    lampIntensity = maximumIntensity
+                    continue
+                }
+                let progress = min(1, (elapsed - holdDuration) / fadeDuration)
+                lampPhase = progress < 1 ? .fading : .off
+                lampIntensity = maximumIntensity * (1 - progress)
+                if progress >= 1 {
+                    lampIntensity = 0
+                    torch.turnOff()
+                    return
+                }
+            }
+        }
     }
 
     private func activateLamp(
@@ -1038,14 +1137,21 @@ final class StandViewModel: ObservableObject {
         profile: StartleLightingProfile = .gentle
     ) {
         guard isNightSessionActive else { return }
-        guard triggeredBySleepMovement else {
-            applyBaseBrightness(displayBrightness, animated: true)
-            return
-        }
-        lampTask?.cancel()
+        guard triggeredBySleepMovement else { return }
 
         let now = ProcessInfo.processInfo.systemUptime
-        let baseIntensity = SimplifiedBrightnessModePolicy.clamped(displayBrightness)
+        guard now - lastStartleActivationTime >= StartleLightingProfile.cooldownDuration else {
+            return
+        }
+        if now - lastStartleActivationTime > StartleLightingProfile.streakResetDuration {
+            startleStreakCount = 0
+        }
+        startleStreakCount += 1
+        isStartleTorchEnabled = startleStreakCount >= 3
+        if isStartleTorchEnabled { startleStreakCount = 0 }
+        lastStartleActivationTime = now
+        lampTask?.cancel()
+        let baseIntensity = SimplifiedBrightnessModePolicy.clamped(lampIntensity)
         let maximumIntensity = max(baseIntensity, profile.peakDisplayIntensity)
         activeLampBaseIntensity = baseIntensity
         activeLampMaximumIntensity = maximumIntensity
@@ -1053,8 +1159,8 @@ final class StandViewModel: ObservableObject {
         isMovementTriggeredLamp = true
         automaticDimmingPaused = false
 
-        lampPhase = .holding
-        lampIntensity = baseIntensity
+        lampPhase = .fading
+        lampIntensity = maximumIntensity
         syncTorch()
 
         lampTask = Task { [weak self] in
@@ -1065,9 +1171,10 @@ final class StandViewModel: ObservableObject {
                 let elapsed = ProcessInfo.processInfo.systemUptime - now
                 if elapsed >= StartleLightingProfile.totalDuration {
                     lampIntensity = baseIntensity
-                    lampPhase = .holding
+                    lampPhase = baseIntensity > 0 ? .holding : .off
                     torch.turnOff()
                     isMovementTriggeredLamp = false
+                    isStartleTorchEnabled = false
                     finishStartleEvent()
                     return
                 }
@@ -1219,9 +1326,22 @@ final class StandViewModel: ObservableObject {
         #if targetEnvironment(macCatalyst)
         1
         #else
-        Double(UIScreen.main.brightness)
+        Double(foregroundSceneScreen.brightness)
         #endif
     }
+
+    #if !targetEnvironment(macCatalyst)
+    // 씬 기반 앱에서 UIScreen.main은 앱 씬의 실제 화면과 분리된 고정값(0.5)을
+    // 돌려줄 수 있으므로, 앱 씬에 연결된 화면을 우선 사용한다.
+    private var foregroundSceneScreen: UIScreen {
+        let windowScenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+        return windowScenes.first { $0.activationState == .foregroundActive }?.screen
+            ?? windowScenes.first?.screen
+            ?? UIScreen.main
+    }
+
+    #endif
 
     func toggleInternetRadioPlayback(channelID: UUID) {
         guard let configuration = settings.value.internetRadioChannel(id: channelID) else { return }
@@ -1938,7 +2058,7 @@ final class StandViewModel: ObservableObject {
         if isNightSessionActive { syncRecordingSessionForDisplayMode() }
         guard performTransition, changed, isNightSessionActive else { return }
         syncSleepCareMonitoring()
-        applyBaseBrightness(displayBrightness, animated: true)
+        activateLamp()
     }
 
     func setModePreference(_ preference: StandModePreference) {
@@ -2036,6 +2156,49 @@ final class StandViewModel: ObservableObject {
         }
     }
 
+    /// 화면 밝기 변경 알림이 누락되더라도 자동 모드가 오브제에 갇히지 않도록,
+    /// 알림과 무관하게 주기적으로 시스템 밝기를 다시 읽어 전환 판단을 되돌린다.
+    private func startBrightnessPollingIfNeeded() {
+        brightnessPollingTask?.cancel()
+        guard AutomaticBrightnessPollingPolicy.shouldPoll(
+            isSessionActive: isNightSessionActive,
+            isForeground: appIsActive,
+            modePreference: settings.value.modePreference,
+            isAdjustingBrightness: isAdjustingBrightness,
+            isFaceDown: isFaceDown
+        ) else {
+            brightnessPollingTask = nil
+            return
+        }
+        brightnessPollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: AutomaticBrightnessPollingPolicy.interval)
+                guard let self, !Task.isCancelled else { return }
+                guard AutomaticBrightnessPollingPolicy.shouldPoll(
+                    isSessionActive: self.isNightSessionActive,
+                    isForeground: self.appIsActive,
+                    modePreference: self.settings.value.modePreference,
+                    isAdjustingBrightness: self.isAdjustingBrightness,
+                    isFaceDown: self.isFaceDown
+                ) else {
+                    self.brightnessPollingTask = nil
+                    return
+                }
+                let sampled = self.platformDisplayBrightness
+                guard abs(sampled - self.lastObservedSystemBrightness) > 0.001 else { continue }
+                self.lastObservedSystemBrightness = sampled
+                self.displayBrightness = sampled
+                if self.environmentDisplayMode == .stand {
+                    self.applyBaseBrightness(sampled, animated: false)
+                }
+                self.refreshEnvironmentDisplayMode(
+                    preference: .automatic,
+                    performTransition: true
+                )
+            }
+        }
+    }
+
     /// 녹음 묶음은 감지 세션 전체가 아니라 실제 잠자기 모드 구간을 기준으로 한다.
     /// 잠자기 모드 사이의 짧은 깨어남은 RecordingLibrary가 30분까지 같은 세션으로 잇는다.
     private func syncRecordingSessionForDisplayMode(at date: Date = Date()) {
@@ -2105,13 +2268,16 @@ final class StandViewModel: ObservableObject {
             guard isNightSessionActive else { return }
             isFaceDown = true
             applyBaseBrightness(0, animated: false)
+            brightnessPollingTask?.cancel()
+            brightnessPollingTask = nil
             return
         }
 
         isFaceDown = false
         if isNightSessionActive {
-            applyBaseBrightness(displayBrightness, animated: false)
             refreshEnvironmentDisplayMode(performTransition: true)
+            activateLamp()
+            startBrightnessPollingIfNeeded()
         }
     }
 
@@ -2122,6 +2288,7 @@ final class StandViewModel: ObservableObject {
         brightnessEndpointLockTask?.cancel()
         brightnessEndpointLockTask = nil
         isAdjustingBrightness = true
+        startBrightnessPollingIfNeeded()
         if settings.value.cameraAmbientSensingEnabled {
             ambientCamera.cancel()
         }
@@ -2171,13 +2338,17 @@ final class StandViewModel: ObservableObject {
         guard isNightSessionActive else { return }
         isAdjustingBrightness = false
         applyBaseBrightness(displayBrightness, animated: false)
+        startBrightnessPollingIfNeeded()
     }
 
     func toggleObjectMateMode() {
         guard isNightSessionActive else { return }
         tapBrightnessTransitionTask?.cancel()
+        brightnessEndpointLockTask?.cancel()
+        brightnessEndpointLockTask = nil
         let target = SimplifiedBrightnessModePolicy.tapLevel(from: environmentDisplayMode)
-        displayBrightness = target
+        // 탭은 앱 안의 매이트/오브제 표현만 전환한다. UIScreen.brightness를
+        // 기록하면 iOS 자동 밝기가 수동값으로 덮이므로 시스템 밝기는 읽기만 한다.
         applyBaseBrightness(target, animated: false)
         var updated = settings.value
         updated.lampIntensity = target
@@ -2224,6 +2395,10 @@ final class StandViewModel: ObservableObject {
     private func syncTorch(using settingsOverride: AppSettings? = nil) {
         let currentSettings = settingsOverride ?? settings.value
         guard isNightSessionActive, lampPhase != .off else {
+            torch.turnOff()
+            return
+        }
+        if isMovementTriggeredLamp, !isStartleTorchEnabled {
             torch.turnOff()
             return
         }
@@ -2282,6 +2457,10 @@ final class StandViewModel: ObservableObject {
         batteryStatus = .current()
         if batteryStatus.shouldProtectBattery {
             pauseForLowBattery()
+        } else if batteryStatus.isCharging, shouldResumeSessionAfterBatteryProtection {
+            batteryProtectionActive = false
+            shouldResumeSessionAfterBatteryProtection = false
+            startNightSession()
         }
     }
 
@@ -2289,6 +2468,9 @@ final class StandViewModel: ObservableObject {
         batteryProtectionActive = true
         UIApplication.shared.isIdleTimerDisabled = false
         let wasNightSessionActive = isNightSessionActive
+        if wasNightSessionActive {
+            shouldResumeSessionAfterBatteryProtection = true
+        }
         isNightSessionActive = false
         stopInternetRadioPlayback()
         endExternalMusicSession()
@@ -2304,6 +2486,8 @@ final class StandViewModel: ObservableObject {
         ambientSamplingTask?.cancel()
         ambientSamplingTask = nil
         ambientCamera.cancel()
+        brightnessPollingTask?.cancel()
+        brightnessPollingTask = nil
     }
 
     private func scheduleControlsHide() {

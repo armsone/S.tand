@@ -363,7 +363,7 @@ struct AppSettings: Codable, Equatable {
     var brightnessModeThreshold = 0.4
     var holdDuration = 5.0
     var fadeDuration = 30.0
-    var automaticDimmingEnabled = false
+    var automaticDimmingEnabled = true
     var preventAutoDimmingWhenScreenBright = true
     var soundThresholdDB: Float = -36
     var recordingEnabled = true
@@ -448,7 +448,7 @@ struct AppSettings: Codable, Equatable {
         brightnessModeThreshold: Double = 0.4,
         holdDuration: Double = 5,
         fadeDuration: Double = 30,
-        automaticDimmingEnabled: Bool = false,
+        automaticDimmingEnabled: Bool = true,
         preventAutoDimmingWhenScreenBright: Bool = true,
         soundThresholdDB: Float = -36,
         recordingEnabled: Bool = true,
@@ -580,7 +580,7 @@ struct AppSettings: Codable, Equatable {
         automaticDimmingEnabled = try container.decodeIfPresent(
             Bool.self,
             forKey: .automaticDimmingEnabled
-        ) ?? false
+        ) ?? true
         preventAutoDimmingWhenScreenBright = try container.decodeIfPresent(
             Bool.self,
             forKey: .preventAutoDimmingWhenScreenBright
