@@ -224,6 +224,15 @@ private struct MusicChannelStripFramePreferenceKey: PreferenceKey {
     }
 }
 
+/// 빠방 플레이어 패널의 루트 좌표계 프레임. 밝기·음량 드래그와 화면 탭이 영상 위에서 시작되면 무시한다.
+private struct PpabangPanelFramePreferenceKey: PreferenceKey {
+    static var defaultValue = CGRect.zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
 enum HomeEditorResetPolicy {
     static func panels(in layout: StandScreenLayout, isPortrait: Bool) -> StandScreenLayout {
         let usesPhoneLandscapeLayout = PhoneLandscapeSideControlsPolicy.isEnabled(
@@ -585,6 +594,7 @@ struct RootView: View {
     @ObservedObject private var weather: WeatherService
     @ObservedObject private var boyiso: BoyisoConnectivityService
     @ObservedObject private var firstLaunchPermissions: FirstLaunchPermissionCoordinator
+    @ObservedObject private var ppabang: PpabangPlayerSession
     @StateObject private var systemVolume = SystemVolumeController()
     @Environment(\.scenePhase) private var scenePhase
     @State private var presentedSheet: PresentedSheet?
@@ -615,6 +625,8 @@ struct RootView: View {
     @State private var musicChannelStripOffset: CGFloat = 0
     @State private var musicChannelStripDragStartOffset: CGFloat?
     @State private var musicChannelStripFrame = MusicChannelStripFramePreferenceKey.defaultValue
+    @State private var ppabangPanelFrame = PpabangPanelFramePreferenceKey.defaultValue
+    @State private var ppabangCardFrame = CGRect.zero
     // Mac Catalyst 전용 카드 순서 편집 모드. 다른 플랫폼에서는 항상 false로 유지되어 동작에 영향을 주지 않습니다.
     @State private var isMusicStripReorderingCatalyst = false
     @State private var musicStripDraggingChannelID: String?
@@ -638,6 +650,7 @@ struct RootView: View {
         _weather = ObservedObject(wrappedValue: model.weather)
         _boyiso = ObservedObject(wrappedValue: model.boyiso)
         _firstLaunchPermissions = ObservedObject(wrappedValue: firstLaunchPermissions)
+        _ppabang = ObservedObject(wrappedValue: model.ppabang)
         _isEditingScreen = State(initialValue: UICatalogLaunch.startsInEditor)
     }
 
@@ -844,6 +857,22 @@ struct RootView: View {
         .gesture(screenAdjustmentGesture.exclusively(before: screenPressGesture))
         .simultaneousGesture(clockMagnificationGesture)
         .persistentSystemOverlays(.hidden)
+        .overlay {
+            if ppabang.isPresented {
+                PpabangFloatingPlayer(
+                    session: ppabang,
+                    anchorFrame: ppabangCardFrame,
+                    accent: settings.value.displayTheme.accentColor,
+                    onSelectCategory: { model.startPpabangPlayback(category: $0) },
+                    onPlay: model.requestPpabangPlay,
+                    onStop: model.stopPpabangPlayback,
+                    onNext: model.skipToNextPpabangTrack,
+                    onFrameChanged: { ppabangPanelFrame = $0 }
+                )
+                .onDisappear { ppabangPanelFrame = .zero }
+            }
+        }
+        .coordinateSpace(name: RootCoordinateSpace.name)
         .sheet(item: $presentedSheet, onDismiss: {
             model.resumeMonitoringAfterPlayback()
         }) { sheet in
@@ -961,6 +990,17 @@ struct RootView: View {
             guard draft != nil else { return }
             presentedSheet = .internetRadio
         }
+        .onChange(of: presentedSheet) { _, sheet in
+            // 모달이 플레이어를 가리면 빠방 재생을 멈춘다. 모달을 닫아도 자동으로 다시 시작하지 않는다.
+            guard sheet != nil else { return }
+            model.stopPpabangPlayback()
+        }
+        #if targetEnvironment(macCatalyst)
+        .onChange(of: showsCatalystSettings || showsCatalystRecordings || showsCatalystBoyiso) { _, isCovered in
+            guard isCovered else { return }
+            model.stopPpabangPlayback()
+        }
+        #endif
         #if targetEnvironment(macCatalyst)
         .onChange(of: macUpdater.activity) { _, newActivity in
             handleMacUpdaterActivityChange(newActivity)
@@ -1379,6 +1419,38 @@ struct RootView: View {
         .animation(.easeOut(duration: 0.2), value: isMusicStripReorderingCatalyst)
     }
 
+    /// 홈 음악 스트립 바로 아래에 보이는 빠방 플레이어. 영상은 항상 노출되고,
+    /// 정지·다른 음원 시작·앱 비활성·모달 표시·편집 진입 시 닫히면서 웹뷰가 해제된다.
+    private func ppabangPlayerPanel(isPortrait: Bool) -> some View {
+        PpabangPlayerPanel(
+            session: ppabang,
+            accent: settings.value.displayTheme.accentColor,
+            onSelectCategory: { category in
+                model.startPpabangPlayback(category: category)
+            },
+            onPlay: model.requestPpabangPlay,
+            onStop: model.stopPpabangPlayback,
+            onNext: model.skipToNextPpabangTrack
+        )
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, isPortrait ? 20 : 32)
+        .padding(.top, 8)
+        .background {
+            GeometryReader { frameProxy in
+                Color.clear.preference(
+                    key: PpabangPanelFramePreferenceKey.self,
+                    value: frameProxy.frame(in: .named(RootCoordinateSpace.name))
+                )
+            }
+        }
+        .onPreferenceChange(PpabangPanelFramePreferenceKey.self) {
+            ppabangPanelFrame = $0
+        }
+        .onDisappear {
+            ppabangPanelFrame = .zero
+        }
+    }
+
     #if targetEnvironment(macCatalyst)
     private func musicChannelStripEditingBar(isPortrait: Bool) -> some View {
         HStack(spacing: 10) {
@@ -1423,8 +1495,10 @@ struct RootView: View {
                 activeExternalMusicService: model.activeExternalMusicService,
                 externalMusicPlaybackState: model.externalMusicPlaybackState,
                 externalMusicTrackTitle: model.externalMusicTrackTitle,
-                orderIndex: index,
-                selectionID: selectionIDs.indices.contains(index) ? selectionIDs[index] : channel.id,
+                ppabangState: ppabang.state,
+                ppabangCategory: ppabang.category,
+                orderIndex: max(0, index - 1),
+                selectionID: selectionIDs.indices.contains(index - 1) ? selectionIDs[index - 1] : channel.id,
                 onToggleRadio: model.toggleInternetRadioPlayback(channelID:),
                 onSelectRadioTitle: { channelID in
                     guard let targetChannelID = handleInternetRadioTitleTap(channelID),
@@ -1442,6 +1516,10 @@ struct RootView: View {
                 },
                 onToggleExternalMusic: model.toggleExternalMusicPlayback,
                 onSkipExternalMusic: model.skipToNextExternalMusicTrack,
+                onTogglePpabang: model.togglePpabangPlayback,
+                onSelectPpabangCategory: { category in
+                    model.startPpabangPlayback(category: category)
+                },
                 onEditRadio: { channelID in
                     radioEditorChannelID = channelID
                     presentedSheet = .internetRadio
@@ -1452,7 +1530,7 @@ struct RootView: View {
                 onMoveChannel: { selectionID, destinationIndex in
                     model.moveHomeMusicChannel(id: selectionID, to: destinationIndex)
                 },
-                isReorderingCatalyst: isMusicStripReorderingCatalyst,
+                isReorderingCatalyst: isMusicStripReorderingCatalyst && index > 0,
                 draggingChannelID: $musicStripDraggingChannelID,
                 onBeginReordering: {
                     withAnimation(.easeOut(duration: 0.2)) {
@@ -1460,6 +1538,17 @@ struct RootView: View {
                     }
                 }
             )
+            .background {
+                if index == 0 {
+                    GeometryReader { card in
+                        Color.clear
+                            .onAppear { ppabangCardFrame = card.frame(in: .named(RootCoordinateSpace.name)) }
+                            .onChange(of: card.frame(in: .named(RootCoordinateSpace.name))) { _, frame in
+                                ppabangCardFrame = frame
+                            }
+                    }
+                }
+            }
         }
     }
 
@@ -1586,7 +1675,7 @@ struct RootView: View {
     }
 
     private var homeMusicChannels: [HomeMusicChannel] {
-        settings.value.homeMusicChannels.compactMap { selection in
+        let savedChannels: [HomeMusicChannel] = settings.value.homeMusicChannels.compactMap { selection in
             switch selection.kind {
             case .appleMusic:
                 .external(.appleMusic)
@@ -1601,6 +1690,8 @@ struct RootView: View {
                 }
             }
         }
+        // 빠방은 저장 설정을 건드리지 않는 추가 카드로 스트립 맨 앞에 둔다.
+        return [.ppabang] + savedChannels
     }
 
     private var internetRadioEditorIdentity: String {
@@ -1615,6 +1706,8 @@ struct RootView: View {
     }
 
     private func enterScreenEditing(isPortrait: Bool) {
+        // 편집 화면은 홈 레이어를 통째로 숨기므로 빠방 영상도 함께 정지한다.
+        model.stopPpabangPlayback()
         editingIsPortrait = isPortrait
         editingLayout = isPortrait ? settings.value.portraitLayout : settings.value.landscapeLayout
         model.revealControls()
@@ -1640,7 +1733,8 @@ struct RootView: View {
                 guard !firstLaunchPermissions.shouldPresentExplanation,
                       !isEditingScreen,
                       presentedSheet == nil,
-                      !musicChannelStripFrame.contains(value.startLocation)
+                      !musicChannelStripFrame.contains(value.startLocation),
+                      !ppabangPanelFrame.contains(value.startLocation)
                 else { return }
                 let state = screenAdjustmentDragState ?? initialAdjustmentState(for: value.translation)
                 screenAdjustmentDragState = state
@@ -1715,8 +1809,13 @@ struct RootView: View {
                 homeEditEntry = HomeEditEntryPolicy.PendingEntry()
             }
             .exclusively(
-                before: TapGesture(count: 2)
-                    .exclusively(before: TapGesture())
+                before: SpatialTapGesture(
+                    count: 2,
+                    coordinateSpace: .named(RootCoordinateSpace.name)
+                )
+                    .exclusively(before: SpatialTapGesture(
+                        coordinateSpace: .named(RootCoordinateSpace.name)
+                    ))
             )
             .onEnded { result in
                 switch result {
@@ -1730,10 +1829,15 @@ struct RootView: View {
                     enterScreenEditing(isPortrait: currentIsPortrait)
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 case .second(let tapResult):
+                    // 빠방 영상 위에서 시작된 탭은 웹 플레이어의 공식 컨트롤에 맡긴다.
                     switch tapResult {
-                    case .first:
+                    case .first(let tap):
+                        guard !ppabangPanelFrame.contains(tap.location),
+                              !musicChannelStripFrame.contains(tap.location) else { return }
                         toggleDisplayTheme()
-                    case .second:
+                    case .second(let tap):
+                        guard !ppabangPanelFrame.contains(tap.location),
+                              !musicChannelStripFrame.contains(tap.location) else { return }
                         handleScreenTap()
                     }
                 default:
@@ -2450,12 +2554,15 @@ private enum HomeMusicChannel: Identifiable {
     case radio(InternetRadioConfiguration)
     case external(ExternalMusicService)
     case emptyRadio(slot: Int)
+    /// 빠방 웹 플레이어 카드. 저장된 홈 음악 채널 목록과 별개로 항상 마지막에 덧붙는다.
+    case ppabang
 
     var id: String {
         switch self {
         case let .radio(configuration): "radio:\(configuration.id.uuidString)"
         case let .external(service): "external:\(service.id)"
         case let .emptyRadio(slot): "radio:empty:\(slot)"
+        case .ppabang: "ppabang"
         }
     }
 }
@@ -2667,6 +2774,9 @@ private struct HomeMusicPanel: View {
                 drawsSurface: drawsSurface,
                 allowsInteraction: false
             )
+        case .ppabang:
+            // 빠방은 홈 음악 스트립 카드와 인라인 플레이어 패널로만 표시한다.
+            EmptyView()
         }
     }
 
@@ -2705,12 +2815,16 @@ private struct HomeMusicStripCard: View {
     let activeExternalMusicService: ExternalMusicService?
     let externalMusicPlaybackState: ExternalMusicPlaybackState
     let externalMusicTrackTitle: String?
+    let ppabangState: PpabangPlaybackState
+    let ppabangCategory: PpabangCategory
     let orderIndex: Int
     let selectionID: String
     let onToggleRadio: (UUID) -> Void
     let onSelectRadioTitle: (UUID) -> Void
     let onToggleExternalMusic: (ExternalMusicService) -> Void
     let onSkipExternalMusic: (ExternalMusicService) -> Void
+    let onTogglePpabang: () -> Void
+    let onSelectPpabangCategory: (PpabangCategory) -> Void
     let onEditRadio: (UUID) -> Void
     let onRegisterRadio: () -> Void
     let onMoveChannel: (String, Int) -> Void
@@ -2760,6 +2874,8 @@ private struct HomeMusicStripCard: View {
                 radioContent(configuration)
             case .emptyRadio:
                 emptyRadioContent
+            case .ppabang:
+                ppabangContent
             }
         }
         .frame(width: width, height: HomeMusicStripCardMetrics.height)
@@ -2830,6 +2946,8 @@ private struct HomeMusicStripCard: View {
             configuration.displayName
         case .emptyRadio:
             "인터넷 라디오"
+        case .ppabang:
+            "빠방"
         }
     }
 
@@ -2852,11 +2970,67 @@ private struct HomeMusicStripCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("인터넷 라디오 등록")
-        case .external:
+        case .external, .ppabang:
             EmptyView()
         }
     }
     #endif
+
+    /// 빠방 카드: 왼쪽 절반은 재생·정지, 오른쪽 절반은 아홉 개 채널 메뉴.
+    private var ppabangContent: some View {
+        let isOpen = ppabangState != .idle
+        return ZStack {
+            HomeMusicStripCardContent(
+                systemImage: ppabangIcon,
+                title: "빠방 · \(ppabangCategory.displayName)",
+                status: ppabangState.statusText,
+                scrollsTitle: true
+            )
+
+            HStack(spacing: 0) {
+                Button(action: onTogglePpabang) {
+                    Color.clear
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("빠방 \(ppabangCategory.displayName) \(isOpen ? "정지" : "재생")")
+
+                Menu {
+                    ForEach(PpabangCategory.allCases) { category in
+                        Button {
+                            onSelectPpabangCategory(category)
+                        } label: {
+                            if category == ppabangCategory {
+                                Label(category.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(category.displayName)
+                            }
+                        }
+                    }
+                } label: {
+                    Color.clear
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("빠방 채널 선택, 현재 \(ppabangCategory.displayName)")
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .accessibilityHint("왼쪽 절반은 재생과 정지, 오른쪽 절반은 아홉 개 채널 중 하나를 고릅니다")
+    }
+
+    private var ppabangIcon: String {
+        switch ppabangState {
+        case .idle: "play.rectangle.fill"
+        case .loading, .requested, .buffering: "arrow.clockwise.circle.fill"
+        case .ready, .paused, .blocked: "play.fill"
+        case .playing: "stop.circle.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        }
+    }
 
     private func externalContent(_ service: ExternalMusicService) -> some View {
         let isActive = activeExternalMusicService == service

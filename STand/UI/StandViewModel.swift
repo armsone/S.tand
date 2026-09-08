@@ -685,6 +685,8 @@ final class StandViewModel: ObservableObject {
     let boyiso: BoyisoConnectivityService
     let radio: InternetRadioPlayer
     let weather: WeatherService
+    /// 빠방 웹 플레이어 세션. 홈 음악 스트립의 빠방 카드와 인라인 플레이어 패널이 공유한다.
+    let ppabang = PpabangPlayerSession()
 
     private var lampTask: Task<Void, Never>?
     private var movementTorchSyncTask: Task<Void, Never>?
@@ -715,6 +717,7 @@ final class StandViewModel: ObservableObject {
         case recordingPlayback
         case internetRadio
         case externalMusic
+        case ppabang
     }
 
     private var monitoringSuspensions: Set<MonitoringSuspensionReason> = []
@@ -1040,6 +1043,8 @@ final class StandViewModel: ObservableObject {
         brightnessEndpointLockTask?.cancel()
         brightnessEndpointLockTask = nil
         stopInternetRadioPlayback()
+        // 앱이 비활성화되면 빠방 영상도 즉시 멈춘다. 감시 재개는 아래 활성 상태 판정이 맡는다.
+        endPpabangPlayback(resumesMonitoring: false)
         manualDimmingHoldActive = false
         automaticDimmingPaused = false
         UIApplication.shared.isIdleTimerDisabled = false
@@ -1312,6 +1317,7 @@ final class StandViewModel: ObservableObject {
     func pauseMonitoringForPlayback() {
         monitoringSuspensions.insert(.recordingPlayback)
         stopInternetRadioPlayback()
+        endPpabangPlayback(resumesMonitoring: false)
         audio.stop()
     }
 
@@ -1382,8 +1388,58 @@ final class StandViewModel: ObservableObject {
         return true
     }
 
+    // MARK: - 빠방
+
+    /// 빠방 플레이어를 열고 선택한 채널을 재생한다. 라디오·Apple Music은 먼저 멈춘다.
+    func startPpabangPlayback(category: PpabangCategory? = nil) {
+        monitoringSuspensions.insert(.ppabang)
+        stopInternetRadioPlayback()
+        if activeExternalMusicService != nil {
+            endExternalMusicSession()
+        }
+        audio.stop()
+        ppabang.start(category: category)
+    }
+
+    /// 빠방 카드 왼쪽 절반: 열려 있으면 정지, 닫혀 있으면 현재 채널을 재생한다.
+    func togglePpabangPlayback() {
+        if ppabang.isPresented {
+            endPpabangPlayback(resumesMonitoring: true)
+        } else {
+            startPpabangPlayback()
+        }
+    }
+
+    /// 플레이어 패널의 재생 버튼. 닫혀 있으면 열고, 열려 있으면 플레이어에 재생을 요청한다.
+    func requestPpabangPlay() {
+        if ppabang.isPresented {
+            ppabang.requestPlay()
+        } else {
+            startPpabangPlayback()
+        }
+    }
+
+    /// 정지: 재생을 초기화하고 플레이어를 닫은 뒤 잠자리 감시를 되살린다.
+    func stopPpabangPlayback() {
+        endPpabangPlayback(resumesMonitoring: true)
+    }
+
+    func skipToNextPpabangTrack() {
+        ppabang.skipToNext()
+    }
+
+    private func endPpabangPlayback(resumesMonitoring: Bool) {
+        let wasPresented = ppabang.isPresented
+        ppabang.stop()
+        guard monitoringSuspensions.remove(.ppabang) != nil || wasPresented else { return }
+        if resumesMonitoring {
+            syncSleepCareMonitoring()
+        }
+    }
+
     private func beginExternalMusicSession(_ service: ExternalMusicService) {
         stopInternetRadioPlayback()
+        endPpabangPlayback(resumesMonitoring: false)
         activeExternalMusicService = service
         monitoringSuspensions.insert(.externalMusic)
         audio.stop()
@@ -1946,6 +2002,7 @@ final class StandViewModel: ObservableObject {
     }
 
     private func startInternetRadioPlayback(_ configuration: InternetRadioConfiguration) {
+        endPpabangPlayback(resumesMonitoring: false)
         appleMusicPlayer.stop()
         activeExternalMusicService = nil
         externalMusicPlaybackState = .idle
