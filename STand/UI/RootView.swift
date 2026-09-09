@@ -2809,6 +2809,73 @@ private struct MusicChannelStripEdgeMask: View {
     }
 }
 
+private struct PpabangCategoryPicker: View {
+    let selectedCategory: PpabangCategory
+    let onSelect: (PpabangCategory) -> Void
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("빠방 재생목록")
+                        .font(.title3.weight(.bold))
+                    Text("원하는 음악과 영상을 골라 주세요")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "music.note.list")
+                    .font(.title3)
+                    .foregroundStyle(.tint)
+            }
+
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(PpabangCategory.allCases) { category in
+                    let isSelected = category == selectedCategory
+                    Button {
+                        onSelect(category)
+                    } label: {
+                        VStack(spacing: 7) {
+                            Image(systemName: symbol(for: category))
+                                .font(.system(size: 18, weight: .semibold))
+                            Text(category.displayName)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                .font(.caption)
+                                .opacity(isSelected ? 1 : 0.22)
+                        }
+                        .foregroundStyle(isSelected ? Color.white : Color.primary)
+                        .frame(maxWidth: .infinity, minHeight: 82)
+                        .background(
+                            isSelected ? Color.accentColor : Color.primary.opacity(0.08),
+                            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(category.displayName)\(isSelected ? ", 선택됨" : "")")
+                }
+            }
+        }
+        .padding(20)
+    }
+
+    private func symbol(for category: PpabangCategory) -> String {
+        switch category {
+        case .golfVertical, .golfHorizontal: "figure.golf"
+        case .camping: "tent"
+        case .girlgroup: "music.mic"
+        case .legends: "star.fill"
+        case .ballad: "radio"
+        case .ccm: "music.note"
+        case .lounge: "cup.and.saucer.fill"
+        case .bedroom: "bed.double.fill"
+        }
+    }
+}
+
 private struct HomeMusicStripCard: View {
     let channel: HomeMusicChannel
     let width: CGFloat
@@ -3021,27 +3088,35 @@ private struct HomeMusicStripCard: View {
             .contentShape(Rectangle())
         }
         .accessibilityHint("왼쪽 절반은 재생과 정지, 오른쪽 절반은 다음 곡이며 길게 누르면 재생목록을 고릅니다")
+        #if targetEnvironment(macCatalyst)
         .popover(
             isPresented: $showsPpabangCategoryPicker,
             attachmentAnchor: .rect(.bounds),
             arrowEdge: .bottom
         ) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("빠방 재생목록")
-                    .font(.headline)
-                    .padding(.bottom, 4)
-                ForEach(PpabangCategory.allCases) { category in
-                    Button(category.displayName) {
-                        showsPpabangCategoryPicker = false
-                        onSelectPpabangCategory(category)
-                    }
-                    .buttonStyle(.plain)
-                    .frame(minWidth: 140, alignment: .leading)
-                    .padding(.vertical, 6)
+            PpabangCategoryPicker(
+                selectedCategory: ppabangCategory,
+                onSelect: { category in
+                    showsPpabangCategoryPicker = false
+                    onSelectPpabangCategory(category)
                 }
-            }
+            )
+            .frame(width: 338)
             .padding(12)
         }
+        #else
+        .sheet(isPresented: $showsPpabangCategoryPicker) {
+            PpabangCategoryPicker(
+                selectedCategory: ppabangCategory,
+                onSelect: { category in
+                    showsPpabangCategoryPicker = false
+                    onSelectPpabangCategory(category)
+                }
+            )
+            .presentationDetents([.height(370)])
+            .presentationDragIndicator(.visible)
+        }
+        #endif
     }
 
     private var ppabangIcon: String {
