@@ -730,7 +730,7 @@ struct RootView: View {
                     VStack(spacing: 0) {
                         Spacer(minLength: 0)
                         HStack(spacing: 7) {
-                            Text(AppVersion.build)
+                            Text(AppVersion.marketing)
                             Text("·")
                             Text("밝기 \(Int((model.lampIntensity * 100).rounded()))%")
                                 .monospacedDigit()
@@ -745,7 +745,7 @@ struct RootView: View {
                     }
                     .allowsHitTesting(false)
                     .accessibilityLabel(
-                        "빌드 번호 \(AppVersion.build), 현재 밝기 \(Int((model.lampIntensity * 100).rounded()))퍼센트"
+                        "버전 \(AppVersion.marketing), 현재 밝기 \(Int((model.lampIntensity * 100).rounded()))퍼센트"
                     )
                     .opacity(didInitialize ? activeContentOpacity : 0)
                     .zIndex(6)
@@ -858,7 +858,7 @@ struct RootView: View {
         .simultaneousGesture(clockMagnificationGesture)
         .persistentSystemOverlays(.hidden)
         .overlay {
-            if ppabang.isPresented && !currentIsPortrait {
+            if ppabang.isPresented && !currentIsPortrait && !usesMacPortraitPpabangLayout {
                 PpabangFloatingPlayer(
                     session: ppabang,
                     accent: settings.value.displayTheme.accentColor,
@@ -1961,7 +1961,7 @@ struct RootView: View {
 
     @ViewBuilder
     private func bottomControls(isPortrait: Bool, availableWidth: CGFloat) -> some View {
-        if isPortrait, ppabang.isPresented {
+        if (isPortrait || usesMacPortraitPpabangLayout), ppabang.isPresented {
             HStack(alignment: .bottom, spacing: HomeSharedControlMetrics.spacing) {
                 VStack(spacing: HomeSharedControlMetrics.spacing) {
                     ForEach(visibleControlOrder(isPortrait: true)) { kind in
@@ -2029,6 +2029,16 @@ struct RootView: View {
         // 홈 공용 카드는 잠소리 -> 보이소 -> 설정 순서로 고정한다.
         // 사용자 순서에서 빠진 항목만 그대로 숨긴다.
         return HomeSharedControlMetrics.order.filter { order.contains($0) }
+    }
+
+    /// Mac에서는 창이 가로여도 iPhone 세로 화면과 동일하게 설정 카드와
+    /// 빠방 영상을 하나의 하단 묶음으로 보인다.
+    private var usesMacPortraitPpabangLayout: Bool {
+        #if targetEnvironment(macCatalyst)
+        true
+        #else
+        false
+        #endif
     }
 
     @ViewBuilder
