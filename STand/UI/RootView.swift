@@ -858,15 +858,10 @@ struct RootView: View {
         .simultaneousGesture(clockMagnificationGesture)
         .persistentSystemOverlays(.hidden)
         .overlay {
-            if ppabang.isPresented {
+            if ppabang.isPresented && !currentIsPortrait {
                 PpabangFloatingPlayer(
                     session: ppabang,
-                    anchorFrame: ppabangCardFrame,
                     accent: settings.value.displayTheme.accentColor,
-                    onSelectCategory: { model.startPpabangPlayback(category: $0) },
-                    onPlay: model.requestPpabangPlay,
-                    onStop: model.stopPpabangPlayback,
-                    onNext: model.skipToNextPpabangTrack,
                     onFrameChanged: { ppabangPanelFrame = $0 }
                 )
                 .onDisappear { ppabangPanelFrame = .zero }
@@ -1424,17 +1419,8 @@ struct RootView: View {
     private func ppabangPlayerPanel(isPortrait: Bool) -> some View {
         PpabangPlayerPanel(
             session: ppabang,
-            accent: settings.value.displayTheme.accentColor,
-            onSelectCategory: { category in
-                model.startPpabangPlayback(category: category)
-            },
-            onPlay: model.requestPpabangPlay,
-            onStop: model.stopPpabangPlayback,
-            onNext: model.skipToNextPpabangTrack
+            accent: settings.value.displayTheme.accentColor
         )
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, isPortrait ? 20 : 32)
-        .padding(.top, 8)
         .background {
             GeometryReader { frameProxy in
                 Color.clear.preference(
@@ -1517,6 +1503,7 @@ struct RootView: View {
                 onToggleExternalMusic: model.toggleExternalMusicPlayback,
                 onSkipExternalMusic: model.skipToNextExternalMusicTrack,
                 onTogglePpabang: model.togglePpabangPlayback,
+                onNextPpabang: model.skipToNextPpabangTrack,
                 onSelectPpabangCategory: { category in
                     model.startPpabangPlayback(category: category)
                 },
@@ -1974,7 +1961,22 @@ struct RootView: View {
 
     @ViewBuilder
     private func bottomControls(isPortrait: Bool, availableWidth: CGFloat) -> some View {
-        if model.isNightSessionActive, !model.controlsVisible {
+        if isPortrait, ppabang.isPresented {
+            HStack(alignment: .bottom, spacing: HomeSharedControlMetrics.spacing) {
+                VStack(spacing: HomeSharedControlMetrics.spacing) {
+                    ForEach(visibleControlOrder(isPortrait: true)) { kind in
+                        bottomControl(
+                            for: kind,
+                            size: HomeSharedControlMetrics.size(isPhoneLandscape: false)
+                        )
+                    }
+                }
+
+                ppabangPlayerPanel(isPortrait: true)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        } else if model.isNightSessionActive, !model.controlsVisible {
             Button {
                 model.revealControls()
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -2824,6 +2826,7 @@ private struct HomeMusicStripCard: View {
     let onToggleExternalMusic: (ExternalMusicService) -> Void
     let onSkipExternalMusic: (ExternalMusicService) -> Void
     let onTogglePpabang: () -> Void
+    let onNextPpabang: () -> Void
     let onSelectPpabangCategory: (PpabangCategory) -> Void
     let onEditRadio: (UUID) -> Void
     let onRegisterRadio: () -> Void
@@ -2831,6 +2834,7 @@ private struct HomeMusicStripCard: View {
     let isReorderingCatalyst: Bool
     @Binding var draggingChannelID: String?
     let onBeginReordering: () -> Void
+    @State private var showsPpabangCategoryPicker = false
 
     var body: some View {
         #if targetEnvironment(macCatalyst)
@@ -2976,7 +2980,7 @@ private struct HomeMusicStripCard: View {
     }
     #endif
 
-    /// 빠방 카드: 왼쪽 절반은 재생·정지, 오른쪽 절반은 아홉 개 채널 메뉴.
+    /// 빠방 카드: 왼쪽 절반은 재생·정지, 오른쪽은 다음 곡이며 길게 눌러 목록을 고른다.
     private var ppabangContent: some View {
         let isOpen = ppabangState != .idle
         return ZStack {
@@ -2996,30 +3000,29 @@ private struct HomeMusicStripCard: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("빠방 \(ppabangCategory.displayName) \(isOpen ? "정지" : "재생")")
 
-                Menu {
-                    ForEach(PpabangCategory.allCases) { category in
-                        Button {
-                            onSelectPpabangCategory(category)
-                        } label: {
-                            if category == ppabangCategory {
-                                Label(category.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(category.displayName)
-                            }
-                        }
-                    }
-                } label: {
+                Button(action: onNextPpabang) {
                     Color.clear
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("빠방 채널 선택, 현재 \(ppabangCategory.displayName)")
+                .onLongPressGesture(minimumDuration: 0.5) {
+                    showsPpabangCategoryPicker = true
+                }
+                .accessibilityLabel("빠방 다음 곡")
+                .accessibilityHint("길게 누르면 재생목록을 고릅니다")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
         }
-        .accessibilityHint("왼쪽 절반은 재생과 정지, 오른쪽 절반은 아홉 개 채널 중 하나를 고릅니다")
+        .accessibilityHint("왼쪽 절반은 재생과 정지, 오른쪽 절반은 다음 곡이며 길게 누르면 재생목록을 고릅니다")
+        .confirmationDialog("빠방 재생목록", isPresented: $showsPpabangCategoryPicker) {
+            ForEach(PpabangCategory.allCases) { category in
+                Button(category.displayName) {
+                    onSelectPpabangCategory(category)
+                }
+            }
+        }
     }
 
     private var ppabangIcon: String {

@@ -547,72 +547,22 @@ struct PpabangWebView: UIViewRepresentable {
 }
 
 enum PpabangPlayerPanelMetrics {
-    static let maximumWidth: CGFloat = 272
+    static let width: CGFloat = 216
+    static let height: CGFloat = 216
     static let minimumVideoSide: CGFloat = 200
 }
 
 struct PpabangFloatingPlayer: View {
     @ObservedObject var session: PpabangPlayerSession
-    let anchorFrame: CGRect
     let accent: Color
-    let onSelectCategory: (PpabangCategory) -> Void
-    let onPlay: () -> Void
-    let onStop: () -> Void
-    let onNext: () -> Void
     let onFrameChanged: (CGRect) -> Void
-    @AppStorage("ppabang.panelOpacityPercent") private var backgroundPercent = 100
-    @AppStorage("ppabang.panelPositionX") private var savedX = -1.0
-    @AppStorage("ppabang.panelPositionY") private var savedY = -1.0
-    @State private var origin: CGPoint?
-    @GestureState private var translation = CGSize.zero
 
     var body: some View {
         GeometryReader { proxy in
-            let maxX = max(0, proxy.size.width - 272)
-            let maxY = max(0, proxy.size.height - 216)
-            let initialPosition = savedX >= 0 && savedY >= 0
-                ? CGPoint(x: savedX * maxX, y: savedY * maxY)
-                : CGPoint(x: anchorFrame.minX, y: anchorFrame.isEmpty ? 88 : anchorFrame.maxY + 8)
-            let base = origin ?? CGPoint(
-                x: min(maxX, max(0, initialPosition.x)),
-                y: min(maxY, max(0, initialPosition.y))
-            )
-            let x = min(maxX, max(0, base.x + translation.width))
-            let y = min(maxY, max(0, base.y + translation.height))
             PpabangPlayerPanel(
-                session: session, accent: accent, onSelectCategory: onSelectCategory,
-                onPlay: onPlay, onStop: onStop, onNext: onNext,
-                backgroundOpacity: Double(min(100, max(10, backgroundPercent))) / 100,
-                dragHandle: AnyView(
-                    VStack(spacing: 0) {
-                        Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text("\(backgroundPercent)%").font(.system(size: 8, weight: .medium))
-                    }
-                        .frame(width: 48, height: 32)
-                        .contentShape(Rectangle())
-                        .accessibilityLabel("플레이어 이동, 배경 진하기 \(backgroundPercent)퍼센트")
-                        .accessibilityHint("누르면 배경 진하기 변경, 끌면 이동")
-                        .onTapGesture {
-                            backgroundPercent = [10, 35, 60, 85, 100].first { $0 > backgroundPercent } ?? 10
-                        }
-                        .gesture(
-                            DragGesture(minimumDistance: 6, coordinateSpace: .global)
-                                .updating($translation) { value, state, _ in state = value.translation }
-                                .onEnded { value in
-                                    origin = CGPoint(
-                                        x: min(maxX, max(0, base.x + value.translation.width)),
-                                        y: min(maxY, max(0, base.y + value.translation.height))
-                                    )
-                                    if let origin {
-                                        savedX = maxX > 0 ? origin.x / maxX : 0
-                                        savedY = maxY > 0 ? origin.y / maxY : 0
-                                    }
-                                }
-                        )
-                )
+                session: session,
+                accent: accent
             )
-            .shadow(color: .black.opacity(0.4), radius: 6, y: 2)
             .background {
                 GeometryReader { panel in
                     Color.clear
@@ -620,7 +570,10 @@ struct PpabangFloatingPlayer: View {
                         .onChange(of: panel.frame(in: .named("stand.root"))) { _, frame in onFrameChanged(frame) }
                 }
             }
-            .offset(x: x, y: y)
+            .offset(
+                x: max(0, proxy.size.width - PpabangPlayerPanelMetrics.width),
+                y: max(0, proxy.size.height - PpabangPlayerPanelMetrics.height)
+            )
             .transaction { $0.animation = nil }
         }
     }
@@ -629,55 +582,21 @@ struct PpabangFloatingPlayer: View {
 struct PpabangPlayerPanel: View {
     @ObservedObject var session: PpabangPlayerSession
     let accent: Color
-    let onSelectCategory: (PpabangCategory) -> Void
-    let onPlay: () -> Void
-    let onStop: () -> Void
-    let onNext: () -> Void
-    var backgroundOpacity: Double = 1
-    var dragHandle: AnyView = AnyView(EmptyView())
 
     var body: some View {
-        HStack(spacing: 8) {
-            PpabangWebView(session: session)
-                .frame(width: 200, height: 200)
-                .clipShape(RoundedRectangle(cornerRadius: 7))
-                .accessibilityLabel("빠방 영상 플레이어")
-            VStack(spacing: 8) {
-                dragHandle
-                control("정지", action: onStop)
-                control("다음", enabled: session.state != .loading, action: onNext)
-                Button(action: onStop) {
-                    Image(systemName: "xmark").font(.system(size: 15, weight: .bold))
-                        .frame(width: 48, height: 48)
-                        .background(.white.opacity(0.14 * backgroundOpacity), in: RoundedRectangle(cornerRadius: 9))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("플레이어 닫기 및 정지")
-            }
-            .frame(width: 48, height: 200)
+        PpabangWebView(session: session)
+            .frame(width: PpabangPlayerPanelMetrics.minimumVideoSide, height: PpabangPlayerPanelMetrics.minimumVideoSide)
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .accessibilityLabel("빠방 영상 플레이어")
             .help(session.state.instructionText ?? session.state.statusText)
-        }
         .padding(8)
-        .frame(width: 272, height: 216)
+        .frame(width: PpabangPlayerPanelMetrics.width, height: PpabangPlayerPanelMetrics.height)
         .background {
             RoundedRectangle(cornerRadius: 12)
                 .fill(LinearGradient(colors: [accent.opacity(0.72), accent.opacity(0.50)], startPoint: .top, endPoint: .bottom))
                 .background(Color(white: 0.09), in: RoundedRectangle(cornerRadius: 12))
                 .overlay { RoundedRectangle(cornerRadius: 12).stroke(accent.opacity(0.6), lineWidth: 1) }
-                .opacity(backgroundOpacity)
         }
         .foregroundStyle(.white.opacity(0.9))
-    }
-
-    private func control(_ title: String, enabled: Bool = true, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title).font(.system(size: 13, weight: .semibold))
-                .frame(width: 48, height: 48)
-                .background(.white.opacity((enabled ? 0.14 : 0.05) * backgroundOpacity), in: RoundedRectangle(cornerRadius: 7))
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.45)
-        .accessibilityLabel("빠방 \(title)")
     }
 }
