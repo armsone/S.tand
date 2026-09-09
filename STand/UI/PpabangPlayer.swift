@@ -3,33 +3,38 @@ import SwiftUI
 import UIKit
 import WebKit
 
-/// 빠방(ppabang.net)이 제공하는 아홉 개 채널. 재생 목록과 자동 다음 곡은 웹사이트가 소유한다.
-enum PpabangCategory: String, CaseIterable, Identifiable {
-    case golfVertical
-    case golfHorizontal
-    case camping
-    case girlgroup
-    case legends
-    case ballad
-    case ccm
-    case lounge
-    case bedroom
+/// 빠방(ppabang.net)이 현재 제공하는 채널. 실제 목록은 서버 상태에서 받아오므로,
+/// 웹사이트에 카테고리가 추가·삭제되면 앱을 다시 올리지 않아도 선택 목록에 반영된다.
+struct PpabangCategory: Hashable, Identifiable {
+    let rawValue: String
 
-    static let `default` = PpabangCategory.ccm
+    static let `default` = PpabangCategory(rawValue: "ccm")
+    static let fallbackCategories = [
+        "golfVertical", "golfHorizontal", "camping", "girlgroup", "legends", "ballad", "ccm", "lounge", "bedroom"
+    ].map(PpabangCategory.init(rawValue:))
 
     var id: String { rawValue }
 
     var displayName: String {
-        switch self {
-        case .golfVertical: "세로 골프"
-        case .golfHorizontal: "가로 골프"
-        case .camping: "캠핑"
-        case .girlgroup: "아이돌 뮤비"
-        case .legends: "경연"
-        case .ballad: "가요톱텐"
-        case .ccm: "CCM"
-        case .lounge: "라운지"
-        case .bedroom: "베드룸"
+        switch rawValue {
+        case "golfVertical": "세로 골프"
+        case "golfHorizontal": "가로 골프"
+        case "camping": "캠핑"
+        case "girlgroup": "아이돌 뮤비"
+        case "legends": "경연"
+        case "ballad": "가요톱텐"
+        case "game": "게임"
+        case "mukbang": "먹방"
+        case "travel": "여행"
+        case "ccm": "CCM"
+        case "lounge": "라운지"
+        case "bedroom": "베드룸"
+        default:
+            rawValue
+                .replacingOccurrences(of: "-", with: " ")
+                .replacingOccurrences(of: "_", with: " ")
+                .replacingOccurrences(of: "([a-z])([A-Z])", with: "$1 $2", options: .regularExpression)
+                .capitalized
         }
     }
 
@@ -105,6 +110,7 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
     private static let playbackConfirmationTimeout: TimeInterval = 4
 
     @Published private(set) var category: PpabangCategory
+    @Published private(set) var categories = PpabangCategory.fallbackCategories
     @Published private(set) var isPresented = false
     @Published private(set) var state: PpabangPlaybackState = .idle
     @Published private(set) var trackTitle: String?
@@ -117,8 +123,30 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
 
     override init() {
         let stored = UserDefaults.standard.string(forKey: Self.categoryDefaultsKey)
-        category = stored.flatMap(PpabangCategory.init(rawValue:)) ?? .default
+        category = stored.map(PpabangCategory.init(rawValue:)) ?? .default
         super.init()
+        refreshCategories()
+    }
+
+    /// 빠방 서버의 현재 카테고리를 가져온다. 서버에 영상이 있는 항목만 표시해
+    /// 아직 준비되지 않은 카테고리를 선택하는 일을 막는다.
+    func refreshCategories() {
+        let statusURL = URL(string: "https://\(Self.allowedHost)/api/catalog/status")!
+        URLSession.shared.dataTask(with: statusURL) { [weak self] data, response, _ in
+            guard let data,
+                  let response = response as? HTTPURLResponse,
+                  (200...299).contains(response.statusCode),
+                  let status = try? JSONDecoder().decode(PpabangCatalogStatus.self, from: data)
+            else { return }
+
+            let current = status.categories.compactMap { rawValue, state in
+                state.count > 0 ? PpabangCategory(rawValue: rawValue) : nil
+            }.sorted { $0.displayName.localizedCompare($1.displayName) == .orderedAscending }
+            guard !current.isEmpty else { return }
+            DispatchQueue.main.async {
+                self?.categories = current
+            }
+        }.resume()
     }
 
     // MARK: - 네이티브 명령
@@ -394,6 +422,14 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
       return true;
     })();
     """
+}
+
+private struct PpabangCatalogStatus: Decodable {
+    let categories: [String: CategoryState]
+
+    struct CategoryState: Decodable {
+        let count: Int
+    }
 }
 
 extension PpabangPlayerSession: WKNavigationDelegate {

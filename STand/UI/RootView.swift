@@ -1483,6 +1483,7 @@ struct RootView: View {
                 externalMusicTrackTitle: model.externalMusicTrackTitle,
                 ppabangState: ppabang.state,
                 ppabangCategory: ppabang.category,
+                ppabangCategories: ppabang.categories,
                 orderIndex: max(0, index - 1),
                 selectionID: selectionIDs.indices.contains(index - 1) ? selectionIDs[index - 1] : channel.id,
                 onToggleRadio: model.toggleInternetRadioPlayback(channelID:),
@@ -1507,6 +1508,7 @@ struct RootView: View {
                 onSelectPpabangCategory: { category in
                     model.startPpabangPlayback(category: category)
                 },
+                onRefreshPpabangCategories: model.ppabang.refreshCategories,
                 onEditRadio: { channelID in
                     radioEditorChannelID = channelID
                     presentedSheet = .internetRadio
@@ -2821,6 +2823,7 @@ private struct MusicChannelStripEdgeMask: View {
 
 private struct PpabangCategoryPicker: View {
     let selectedCategory: PpabangCategory
+    let categories: [PpabangCategory]
     let onSelect: (PpabangCategory) -> Void
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
@@ -2842,7 +2845,7 @@ private struct PpabangCategoryPicker: View {
             }
 
             LazyVGrid(columns: columns, spacing: 10) {
-                ForEach(PpabangCategory.allCases) { category in
+                ForEach(categories) { category in
                     let isSelected = category == selectedCategory
                     Button {
                         onSelect(category)
@@ -2873,15 +2876,19 @@ private struct PpabangCategoryPicker: View {
     }
 
     private func symbol(for category: PpabangCategory) -> String {
-        switch category {
-        case .golfVertical, .golfHorizontal: "figure.golf"
-        case .camping: "tent"
-        case .girlgroup: "music.mic"
-        case .legends: "star.fill"
-        case .ballad: "radio"
-        case .ccm: "music.note"
-        case .lounge: "cup.and.saucer.fill"
-        case .bedroom: "bed.double.fill"
+        switch category.rawValue {
+        case "golfVertical", "golfHorizontal": "figure.golf"
+        case "camping": "tent"
+        case "girlgroup": "music.mic"
+        case "legends": "star.fill"
+        case "ballad": "radio"
+        case "game": "gamecontroller.fill"
+        case "mukbang": "fork.knife"
+        case "travel": "airplane"
+        case "ccm": "music.note"
+        case "lounge": "cup.and.saucer.fill"
+        case "bedroom": "bed.double.fill"
+        default: "play.rectangle.fill"
         }
     }
 }
@@ -2896,6 +2903,7 @@ private struct HomeMusicStripCard: View {
     let externalMusicTrackTitle: String?
     let ppabangState: PpabangPlaybackState
     let ppabangCategory: PpabangCategory
+    let ppabangCategories: [PpabangCategory]
     let orderIndex: Int
     let selectionID: String
     let onToggleRadio: (UUID) -> Void
@@ -2905,6 +2913,7 @@ private struct HomeMusicStripCard: View {
     let onTogglePpabang: () -> Void
     let onNextPpabang: () -> Void
     let onSelectPpabangCategory: (PpabangCategory) -> Void
+    let onRefreshPpabangCategories: () -> Void
     let onEditRadio: (UUID) -> Void
     let onRegisterRadio: () -> Void
     let onMoveChannel: (String, Int) -> Void
@@ -3085,6 +3094,7 @@ private struct HomeMusicStripCard: View {
                     .gesture(
                         LongPressGesture(minimumDuration: 0.5)
                             .onEnded { _ in
+                                onRefreshPpabangCategories()
                                 showsPpabangCategoryPicker = true
                             }
                             .exclusively(before: TapGesture().onEnded {
@@ -3106,6 +3116,7 @@ private struct HomeMusicStripCard: View {
         ) {
             PpabangCategoryPicker(
                 selectedCategory: ppabangCategory,
+                categories: ppabangCategories,
                 onSelect: { category in
                     showsPpabangCategoryPicker = false
                     onSelectPpabangCategory(category)
@@ -3118,6 +3129,7 @@ private struct HomeMusicStripCard: View {
         .sheet(isPresented: $showsPpabangCategoryPicker) {
             PpabangCategoryPicker(
                 selectedCategory: ppabangCategory,
+                categories: ppabangCategories,
                 onSelect: { category in
                     showsPpabangCategoryPicker = false
                     onSelectPpabangCategory(category)
