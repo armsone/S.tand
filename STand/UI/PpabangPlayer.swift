@@ -38,7 +38,11 @@ enum PpabangCategory: String, CaseIterable, Identifiable {
         components.scheme = "https"
         components.host = PpabangPlayerSession.allowedHost
         components.path = "/"
-        components.queryItems = [URLQueryItem(name: "category", value: rawValue)]
+        components.queryItems = [
+            URLQueryItem(name: "category", value: rawValue),
+            // WebKit의 이전 문서 캐시가 첫 항목을 되살리지 않도록 매번 새 목록을 요청한다.
+            URLQueryItem(name: "standSession", value: UUID().uuidString)
+        ]
         // 호스트·경로·쿼리가 모두 고정 문자열이므로 URL 생성은 실패하지 않는다.
         return components.url ?? URL(string: "https://ppabang.net/?category=\(rawValue)")!
     }

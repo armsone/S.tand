@@ -3021,12 +3021,26 @@ private struct HomeMusicStripCard: View {
             .contentShape(Rectangle())
         }
         .accessibilityHint("왼쪽 절반은 재생과 정지, 오른쪽 절반은 다음 곡이며 길게 누르면 재생목록을 고릅니다")
-        .confirmationDialog("빠방 재생목록", isPresented: $showsPpabangCategoryPicker) {
-            ForEach(PpabangCategory.allCases) { category in
-                Button(category.displayName) {
-                    onSelectPpabangCategory(category)
+        .popover(
+            isPresented: $showsPpabangCategoryPicker,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("빠방 재생목록")
+                    .font(.headline)
+                    .padding(.bottom, 4)
+                ForEach(PpabangCategory.allCases) { category in
+                    Button(category.displayName) {
+                        showsPpabangCategoryPicker = false
+                        onSelectPpabangCategory(category)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(minWidth: 140, alignment: .leading)
+                    .padding(.vertical, 6)
                 }
             }
+            .padding(12)
         }
     }
 
