@@ -1348,7 +1348,7 @@ struct RootView: View {
                                 .offset(x: MusicChannelStripLayoutPolicy.sideInset + musicChannelStripOffset)
                                 .frame(width: proxy.size.width, alignment: .leading)
                                 .contentShape(Rectangle())
-                                .highPriorityGesture(
+                                .simultaneousGesture(
                                     musicChannelStripDragGesture(maximumScroll: maximumScroll),
                                     including: .all
                                 )
@@ -1365,7 +1365,7 @@ struct RootView: View {
                             .offset(x: MusicChannelStripLayoutPolicy.sideInset + musicChannelStripOffset)
                             .frame(width: proxy.size.width, alignment: .leading)
                             .contentShape(Rectangle())
-                            .highPriorityGesture(
+                            .simultaneousGesture(
                                 musicChannelStripDragGesture(maximumScroll: maximumScroll),
                                 including: .all
                             )
@@ -3309,7 +3309,7 @@ private struct ExternalMusicPanel: View {
         .foregroundStyle(.white.opacity(isDimmed ? 0.46 : 0.78))
         .opacity(isDimmed ? min(1, max(0, dimmedIntensity)) : 1)
         .contentShape(Rectangle())
-                                .simultaneousGesture(
+        .highPriorityGesture(
             LongPressGesture(minimumDuration: 0.8, maximumDistance: 12)
                 .exclusively(before: TapGesture())
                 .onEnded { result in
@@ -3506,7 +3506,7 @@ private struct InternetRadioPanel: View {
                 panelContent
             } else {
                 panelContent
-                            .simultaneousGesture(
+                    .highPriorityGesture(
                         LongPressGesture(minimumDuration: 0.8, maximumDistance: 12)
                             .exclusively(before: TapGesture())
                             .onEnded { result in
