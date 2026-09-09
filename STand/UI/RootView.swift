@@ -2840,6 +2840,8 @@ private struct HomeMusicStripCard: View {
         #if targetEnvironment(macCatalyst)
         if isReorderingCatalyst {
             reorderingCardBody
+        } else if case .ppabang = channel {
+            normalCardBody
         } else {
             normalCardBody
                 .contextMenu {
@@ -3000,15 +3002,18 @@ private struct HomeMusicStripCard: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("빠방 \(ppabangCategory.displayName) \(isOpen ? "정지" : "재생")")
 
-                Button(action: onNextPpabang) {
-                    Color.clear
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .onLongPressGesture(minimumDuration: 0.5) {
-                    showsPpabangCategoryPicker = true
-                }
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        LongPressGesture(minimumDuration: 0.5)
+                            .onEnded { _ in
+                                showsPpabangCategoryPicker = true
+                            }
+                            .exclusively(before: TapGesture().onEnded {
+                                onNextPpabang()
+                            })
+                    )
                 .accessibilityLabel("빠방 다음 곡")
                 .accessibilityHint("길게 누르면 재생목록을 고릅니다")
             }
@@ -3304,7 +3309,7 @@ private struct ExternalMusicPanel: View {
         .foregroundStyle(.white.opacity(isDimmed ? 0.46 : 0.78))
         .opacity(isDimmed ? min(1, max(0, dimmedIntensity)) : 1)
         .contentShape(Rectangle())
-        .highPriorityGesture(
+                                .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.8, maximumDistance: 12)
                 .exclusively(before: TapGesture())
                 .onEnded { result in
@@ -3501,7 +3506,7 @@ private struct InternetRadioPanel: View {
                 panelContent
             } else {
                 panelContent
-                    .highPriorityGesture(
+                            .simultaneousGesture(
                         LongPressGesture(minimumDuration: 0.8, maximumDistance: 12)
                             .exclusively(before: TapGesture())
                             .onEnded { result in
