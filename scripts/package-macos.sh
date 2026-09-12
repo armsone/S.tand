@@ -8,6 +8,14 @@ archive_path="${build_dir}/STand.xcarchive"
 export_dir="${build_dir}/export"
 release_dir="${root_dir}/artifacts/macos"
 notary_profile="${NOTARY_PROFILE:-ccmb-notary}"
+asc_key_path="${STAND_ASC_KEY_PATH:-/Users/armsone/.private_keys/AuthKey_6YU37JNN2D.p8}"
+asc_key_id="${STAND_ASC_KEY_ID:-6YU37JNN2D}"
+asc_issuer_id="${STAND_ASC_ISSUER_ID:-69a6de89-aa4c-47e3-e053-5b8c7c11a4d1}"
+notary_args=(--keychain-profile "${notary_profile}")
+# Reuse the verified TestFlight API key when no explicit Keychain profile was requested.
+if [[ -z "${NOTARY_PROFILE:-}" && -r "${asc_key_path}" ]]; then
+  notary_args=(--key "${asc_key_path}" --key-id "${asc_key_id}" --issuer "${asc_issuer_id}")
+fi
 sign_identity="${CODESIGN_IDENTITY:-Developer ID Application: BYOUNG KI HAN (T7B4EPLHPK)}"
 
 build_settings=$(xcodebuild -project "${root_dir}/STand.xcodeproj" -scheme STand \
@@ -58,7 +66,7 @@ rm -f -- "${dmg_path}"
 hdiutil create -volname "S.tand" -srcfolder "${staging_dir}" -fs HFS+ -format UDZO -ov "${dmg_path}"
 codesign --force --timestamp --sign "${sign_identity}" "${dmg_path}"
 
-xcrun notarytool submit "${dmg_path}" --keychain-profile "${notary_profile}" --wait
+xcrun notarytool submit "${dmg_path}" "${notary_args[@]}" --wait
 xcrun stapler staple "${dmg_path}"
 xcrun stapler staple "${app_path}"
 xcrun stapler validate "${dmg_path}"
