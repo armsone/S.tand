@@ -951,6 +951,8 @@ struct RootView: View {
         #endif
         .onAppear {
             resetTransientInterface()
+            // 스탠드 시작 전이라도 전면이면 날씨 자동 갱신을 시작한다. 권한은 요청하지 않는다.
+            if scenePhase == .active { weather.appDidEnterForeground() }
             if !firstLaunchPermissions.shouldPresentExplanation {
                 startAppIfNeeded()
             }
@@ -960,6 +962,7 @@ struct RootView: View {
             switch newPhase {
             case .active:
                 resetTransientInterface()
+                weather.appDidEnterForeground()
                 if !firstLaunchPermissions.shouldPresentExplanation {
                     if hasStartedApp {
                         model.appDidBecomeActive()
@@ -970,6 +973,7 @@ struct RootView: View {
                 }
             case .inactive, .background:
                 resetTransientInterface()
+                weather.appDidEnterBackground()
                 didInitialize = false
                 if hasStartedApp { model.appWillResignActive() }
             @unknown default:
