@@ -276,11 +276,12 @@ struct FirstLaunchPermissionView: View {
                     } label: {
                         HStack(spacing: 9) {
                             if coordinator.isRequesting {
-                                ProgressView().tint(.white)
+                                ProgressView().tint(.black)
                             }
                             Text(coordinator.isRequesting ? "권한 확인 중…" : "권한 확인하고 시작")
                                 .font(.headline.weight(.semibold))
                         }
+                        .foregroundStyle(.black)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: 52)
                         .background(accent, in: RoundedRectangle(cornerRadius: 16))

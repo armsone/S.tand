@@ -9,8 +9,10 @@ struct PpabangCategory: Hashable, Identifiable {
     let rawValue: String
 
     static let `default` = PpabangCategory(rawValue: "ccm")
+    // 빠방 웹사이트의 재생목록 탭 순서.
     static let fallbackCategories = [
-        "golfVertical", "golfHorizontal", "camping", "girlgroup", "legends", "ballad", "ccm", "lounge", "bedroom"
+        "ccm", "ballad", "girlgroup", "legends", "golfHorizontal", "golfVertical",
+        "game", "mukbang", "camping", "travel", "lounge", "bedroom"
     ].map(PpabangCategory.init(rawValue:))
 
     var id: String { rawValue }
@@ -156,7 +158,12 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
 
             let current = status.categories.compactMap { rawValue, state in
                 state.count > 0 ? PpabangCategory(rawValue: rawValue) : nil
-            }.sorted { $0.displayName.localizedCompare($1.displayName) == .orderedAscending }
+            }.sorted {
+                let leftRank = PpabangCategory.fallbackCategories.firstIndex(of: $0) ?? Int.max
+                let rightRank = PpabangCategory.fallbackCategories.firstIndex(of: $1) ?? Int.max
+                if leftRank != rightRank { return leftRank < rightRank }
+                return $0.rawValue < $1.rawValue
+            }
             guard !current.isEmpty else { return }
             DispatchQueue.main.async {
                 self?.categories = current
