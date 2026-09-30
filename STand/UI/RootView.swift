@@ -226,10 +226,27 @@ private struct MusicChannelStripFramePreferenceKey: PreferenceKey {
 
 /// 빠방 플레이어 패널의 루트 좌표계 프레임. 밝기·음량 드래그와 화면 탭이 영상 위에서 시작되면 무시한다.
 private struct PpabangPanelFramePreferenceKey: PreferenceKey {
-    static var defaultValue = CGRect.zero
+    // .null은 합집합의 항등원이다: 영상과 재생 조작이 각자 보고하는 프레임을 합쳐도
+    // (0,0) 근방을 잘못 포함시키지 않는다. .zero를 기본값으로 쓰면 두 자식이 보고한
+    // 사각형이 CGRect.zero와 합쳐지면서 화면 왼쪽 위 모서리까지 제외 영역에 끼어든다.
+    static var defaultValue = CGRect.null
 
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
+        value = value.union(nextValue())
+    }
+}
+
+private extension View {
+    /// 이 뷰가 실제로 렌더된 프레임을 루트 좌표계로 보고해 빠방 미니플레이어 제외 영역에 합친다.
+    func reportingPpabangPanelFrame() -> some View {
+        background {
+            GeometryReader { frameProxy in
+                Color.clear.preference(
+                    key: PpabangPanelFramePreferenceKey.self,
+                    value: frameProxy.frame(in: .named(RootCoordinateSpace.name))
+                )
+            }
+        }
     }
 }
 
@@ -345,7 +362,7 @@ enum HomeSharedControlMetrics {
     static let statusLineHeight: CGFloat = 9
     static let rowGap: CGFloat = 12
     static let padding: CGFloat = 5
-    static let order: [StandControlKind] = [.recordings, .boyiso, .settings]
+    static let order: [StandControlKind] = [.recordings, .settings]
 
     static func size(isPhoneLandscape: Bool) -> CGSize {
         isPhoneLandscape ? phoneLandscapeSize : portraitSize
@@ -695,7 +712,9 @@ struct RootView: View {
                             HStack(spacing: StandControlLayoutMetrics.rowSpacing) {
                                 musicChannelStrip(isPortrait: isPortrait)
                                     .frame(maxWidth: .infinity)
-                                phoneLandscapeSideControls()
+                                if !ppabang.isPanelOpen {
+                                    phoneLandscapeSideControls()
+                                }
                             }
                             .padding(.trailing, 32)
                             .padding(.top, 8)
@@ -858,13 +877,20 @@ struct RootView: View {
         .simultaneousGesture(clockMagnificationGesture)
         .persistentSystemOverlays(.hidden)
         .overlay {
-            if ppabang.isPresented && !currentIsPortrait && !usesMacPortraitPpabangLayout {
+            if ppabang.isPanelOpen && !currentIsPortrait && !usesMacPortraitPpabangLayout {
                 PpabangFloatingPlayer(
                     session: ppabang,
                     accent: settings.value.displayTheme.accentColor,
-                    onFrameChanged: { ppabangPanelFrame = $0 }
+                    controlSize: HomeSharedControlMetrics.size(isPhoneLandscape: true),
+                    onFrameChanged: { ppabangPanelFrame = $0 },
+                    onToggle: model.toggleMiniPpabangPlayback,
+                    onNext: model.skipToNextPpabangTrack,
+                    onRefreshCategories: model.ppabang.refreshCategories,
+                    onSelectCategory: { category in
+                        model.startPpabangPlayback(category: category)
+                    }
                 )
-                .onDisappear { ppabangPanelFrame = .zero }
+                .onDisappear { ppabangPanelFrame = .null }
             }
         }
         .coordinateSpace(name: RootCoordinateSpace.name)
@@ -1425,20 +1451,26 @@ struct RootView: View {
             session: ppabang,
             accent: settings.value.displayTheme.accentColor
         )
-        .background {
-            GeometryReader { frameProxy in
-                Color.clear.preference(
-                    key: PpabangPanelFramePreferenceKey.self,
-                    value: frameProxy.frame(in: .named(RootCoordinateSpace.name))
-                )
-            }
-        }
-        .onPreferenceChange(PpabangPanelFramePreferenceKey.self) {
-            ppabangPanelFrame = $0
-        }
         .onDisappear {
-            ppabangPanelFrame = .zero
+            ppabangPanelFrame = .null
         }
+    }
+
+    /// 미니플레이어가 보일 때 잠소리·설정 카드 자리를 대신하는 빠방 재생 조작.
+    /// 재생(재생/일시정지)·다음·카테고리를 기존 공용 카드와 같은 크기로 배치한다.
+    private func ppabangMiniPlayerControls(size: CGSize) -> some View {
+        PpabangMiniPlayerControls(
+            state: ppabang.state,
+            category: ppabang.category,
+            categories: ppabang.categories,
+            size: size,
+            onToggle: model.toggleMiniPpabangPlayback,
+            onNext: model.skipToNextPpabangTrack,
+            onRefreshCategories: model.ppabang.refreshCategories,
+            onSelectCategory: { category in
+                model.startPpabangPlayback(category: category)
+            }
+        )
     }
 
     #if targetEnvironment(macCatalyst)
@@ -1487,7 +1519,7 @@ struct RootView: View {
                 externalMusicTrackTitle: model.externalMusicTrackTitle,
                 ppabangState: ppabang.state,
                 ppabangCategory: ppabang.category,
-                ppabangCategories: ppabang.categories,
+                isPpabangPanelOpen: ppabang.isPanelOpen,
                 orderIndex: max(0, index - 1),
                 selectionID: selectionIDs.indices.contains(index - 1) ? selectionIDs[index - 1] : channel.id,
                 onToggleRadio: model.toggleInternetRadioPlayback(channelID:),
@@ -1507,12 +1539,7 @@ struct RootView: View {
                 },
                 onToggleExternalMusic: model.toggleExternalMusicPlayback,
                 onSkipExternalMusic: model.skipToNextExternalMusicTrack,
-                onTogglePpabang: model.togglePpabangPlayback,
-                onNextPpabang: model.skipToNextPpabangTrack,
-                onSelectPpabangCategory: { category in
-                    model.startPpabangPlayback(category: category)
-                },
-                onRefreshPpabangCategories: model.ppabang.refreshCategories,
+                onTogglePpabangPanel: model.ppabang.togglePanel,
                 onEditRadio: { channelID in
                     radioEditorChannelID = channelID
                     presentedSheet = .internetRadio
@@ -1668,23 +1695,22 @@ struct RootView: View {
     }
 
     private var homeMusicChannels: [HomeMusicChannel] {
-        let savedChannels: [HomeMusicChannel] = settings.value.homeMusicChannels.compactMap { selection in
-            switch selection.kind {
-            case .appleMusic:
-                .external(.appleMusic)
-            case .appleClassical:
-                .external(.appleClassical)
-            case .internetRadio:
+        // 홈 화면은 빠방과 인터넷 라디오 한 개만 노출한다. 외부 음악 서비스 카드와
+        // 나머지 라디오 슬롯은 저장 설정을 건드리지 않고 화면 표시에서만 걸러낸다.
+        let firstRadioChannel: HomeMusicChannel? = settings.value.homeMusicChannels
+            .lazy
+            .compactMap { selection -> HomeMusicChannel? in
+                guard selection.kind == .internetRadio else { return nil }
                 if let configuration = selection.radioID
                     .flatMap(settings.value.internetRadioChannel(id:)) {
-                    .radio(configuration)
+                    return .radio(configuration)
                 } else {
-                    .emptyRadio(slot: selection.radioSlot ?? 0)
+                    return .emptyRadio(slot: selection.radioSlot ?? 0)
                 }
             }
-        }
+            .first
         // 빠방은 저장 설정을 건드리지 않는 추가 카드로 스트립 맨 앞에 둔다.
-        return [.ppabang] + savedChannels
+        return [.ppabang] + (firstRadioChannel.map { [$0] } ?? [])
     }
 
     private var internetRadioEditorIdentity: String {
@@ -1967,21 +1993,30 @@ struct RootView: View {
 
     @ViewBuilder
     private func bottomControls(isPortrait: Bool, availableWidth: CGFloat) -> some View {
-        if (isPortrait || usesMacPortraitPpabangLayout), ppabang.isPresented {
+        if (isPortrait || usesMacPortraitPpabangLayout), ppabang.isPanelOpen {
+            // 미니플레이어가 보이는 동안은 잠소리·설정 카드 대신 빠방 재생 조작을 오른쪽에 둔다.
             HStack(alignment: .bottom, spacing: HomeSharedControlMetrics.spacing) {
-                VStack(spacing: HomeSharedControlMetrics.spacing) {
-                    ForEach(visibleControlOrder(isPortrait: true)) { kind in
-                        bottomControl(
-                            for: kind,
-                            size: HomeSharedControlMetrics.size(isPhoneLandscape: false)
-                        )
-                    }
-                }
-
+                // 영상과 재생 조작 각각의 실제 렌더 프레임을 따로 보고해 합친다. 바깥 HStack
+                // 하나에만 GeometryReader를 붙이면 .frame(maxWidth: .infinity)로 늘어난
+                // 컨테이너가 가운데 정렬되면서 오른쪽 재생 버튼이 보고된 사각형 밖으로
+                // 밀려날 수 있었다(우측 재생 버튼 탭이 모드 전환으로 새는 원인).
                 ppabangPlayerPanel(isPortrait: true)
+                    .reportingPpabangPanelFrame()
+
+                ppabangMiniPlayerControls(
+                    size: HomeSharedControlMetrics.size(isPhoneLandscape: false)
+                )
+                .reportingPpabangPanelFrame()
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
+            .onPreferenceChange(PpabangPanelFramePreferenceKey.self) {
+                ppabangPanelFrame = $0
+            }
+        } else if ppabang.isPanelOpen, !isPortrait, !usesMacPortraitPpabangLayout {
+            // 가로 화면에서는 빠방 미니플레이어가 왼쪽 하단에 재생 조작과 함께 떠 있으므로
+            // 잠소리·설정 카드 자리는 비워 둔다.
+            EmptyView()
         } else if model.isNightSessionActive, !model.controlsVisible {
             Button {
                 model.revealControls()
@@ -2832,68 +2867,195 @@ private struct PpabangCategoryPicker: View {
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("빠방 재생목록")
-                        .font(.title3.weight(.bold))
-                    Text("원하는 음악과 영상을 골라 주세요")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "music.note.list")
-                    .font(.title3)
-                    .foregroundStyle(.tint)
-            }
+    private static let tileMinHeight: CGFloat = 82
+    private static let tileSpacing: CGFloat = 10
+    private static let headerHeight: CGFloat = 50
+    private static let sectionSpacing: CGFloat = 16
+    private static let outerPadding: CGFloat = 20
 
-            LazyVGrid(columns: columns, spacing: 10) {
-                ForEach(categories) { category in
-                    let isSelected = category == selectedCategory
-                    Button {
-                        onSelect(category)
-                    } label: {
-                        VStack(spacing: 7) {
-                            Image(systemName: symbol(for: category))
-                                .font(.system(size: 18, weight: .semibold))
-                            Text(category.displayName)
-                                .font(.caption.weight(.semibold))
-                                .lineLimit(1)
-                            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                                .font(.caption)
-                                .opacity(isSelected ? 1 : 0.22)
-                        }
-                        .foregroundStyle(isSelected ? Color.white : Color.primary)
-                        .frame(maxWidth: .infinity, minHeight: 82)
-                        .background(
-                            isSelected ? Color.accentColor : Color.primary.opacity(0.08),
-                            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(category.displayName)\(isSelected ? ", 선택됨" : "")")
-                }
-            }
-        }
-        .padding(20)
+    /// 카테고리 행 수에 맞춘 실제 필요 높이. 화면보다 크면 시트가 화면 높이로 잘리고
+    /// 내부 `ScrollView`가 나머지를 스크롤로 보여 준다.
+    static func idealHeight(for categoryCount: Int) -> CGFloat {
+        let rows = max(1, (categoryCount + 2) / 3)
+        let gridHeight = CGFloat(rows) * tileMinHeight + CGFloat(max(0, rows - 1)) * tileSpacing
+        return headerHeight + sectionSpacing + gridHeight + outerPadding * 2
     }
 
-    private func symbol(for category: PpabangCategory) -> String {
-        switch category.rawValue {
-        case "golfVertical", "golfHorizontal": "figure.golf"
-        case "camping": "tent"
-        case "girlgroup": "music.mic"
-        case "legends": "star.fill"
-        case "ballad": "radio"
-        case "game": "gamecontroller.fill"
-        case "mukbang": "fork.knife"
-        case "travel": "airplane"
-        case "ccm": "music.note"
-        case "lounge": "cup.and.saucer.fill"
-        case "bedroom": "bed.double.fill"
-        default: "play.rectangle.fill"
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Self.sectionSpacing) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("빠방 재생목록")
+                            .font(.title3.weight(.bold))
+                        Text("원하는 음악과 영상을 골라 주세요")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "music.note.list")
+                        .font(.title3)
+                        .foregroundStyle(.tint)
+                }
+
+                LazyVGrid(columns: columns, spacing: Self.tileSpacing) {
+                    ForEach(categories) { category in
+                        let isSelected = category == selectedCategory
+                        Button {
+                            onSelect(category)
+                        } label: {
+                            VStack(spacing: 7) {
+                                Text(Self.icon(for: category))
+                                    .font(.system(size: 18))
+                                    .saturation(isSelected ? 1 : 0)
+                                    .opacity(isSelected ? 1 : 0.8)
+                                Text(category.displayName)
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(isSelected ? Color.white : Color.primary)
+                            .frame(maxWidth: .infinity, minHeight: Self.tileMinHeight)
+                            .background(
+                                isSelected ? Color.accentColor : Color.primary.opacity(0.08),
+                                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(category.displayName)
+                        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+                    }
+                }
+            }
+            .padding(Self.outerPadding)
         }
+    }
+
+    static func icon(for category: PpabangCategory) -> String {
+        switch category.rawValue {
+        case "golfVertical": "⛳"
+        case "golfHorizontal": "🏌️"
+        case "camping": "⛺"
+        case "girlgroup": "💃"
+        case "legends": "🏆"
+        case "ballad": "🎤"
+        case "game": "🎮"
+        case "mukbang": "🍜"
+        case "travel": "✈️"
+        case "ccm": "🙏"
+        case "lounge": "☕"
+        case "bedroom": "🌙"
+        case "crossEdit", "cross-edit", "cross_edit": "🎬"
+        default: "▶️"
+        }
+    }
+}
+
+/// 빠방 미니플레이어가 보이는 동안 잠소리·설정 카드 자리를 대신하는 재생 조작.
+/// 기존 공용 카드와 같은 크기로 재생(재생/일시정지)·다음·카테고리를 세로로 배치한다.
+struct PpabangMiniPlayerControls: View {
+    let state: PpabangPlaybackState
+    let category: PpabangCategory
+    let categories: [PpabangCategory]
+    let size: CGSize
+    let onToggle: () -> Void
+    let onNext: () -> Void
+    let onRefreshCategories: () -> Void
+    let onSelectCategory: (PpabangCategory) -> Void
+    @State private var showsCategoryPicker = false
+
+    private var isOpen: Bool {
+        switch state {
+        case .playing, .buffering, .requested: true
+        default: false
+        }
+    }
+
+    private var playbackIconScale: CGFloat {
+        #if targetEnvironment(macCatalyst)
+        1.6
+        #else
+        1
+        #endif
+    }
+
+    var body: some View {
+        VStack(spacing: HomeSharedControlMetrics.spacing) {
+            HomeSharedControlIconOnlyCard(
+                accessibilityLabel: "재생",
+                accessibilityValue: isOpen ? "일시정지" : "재생",
+                size: size,
+                hint: "빠방 재생을 켜고 끕니다",
+                icon: { HomeSharedControlSymbolIcon(systemImage: isOpen ? "pause.fill" : "play.fill").scaleEffect(playbackIconScale) }
+            ) {
+                onToggle()
+            }
+
+            HomeSharedControlIconOnlyCard(
+                accessibilityLabel: "다음",
+                accessibilityValue: "다음 곡",
+                size: size,
+                hint: "빠방 다음 곡으로 넘어갑니다",
+                icon: { HomeSharedControlSymbolIcon(systemImage: "forward.fill").scaleEffect(playbackIconScale) }
+            ) {
+                onNext()
+            }
+
+            HomeSharedControlIconLabelCard(
+                accessibilityLabel: "카테고리",
+                accessibilityValue: category.displayName,
+                size: size,
+                label: category.displayName,
+                hint: "빠방 재생목록을 고릅니다",
+                icon: {
+                    Text(PpabangCategoryPicker.icon(for: category))
+                        #if targetEnvironment(macCatalyst)
+                        .font(.system(size: 45))
+                        #else
+                        .font(.system(size: 18))
+                        #endif
+                }
+            ) {
+                onRefreshCategories()
+                showsCategoryPicker = true
+            }
+        }
+        #if targetEnvironment(macCatalyst)
+        .popover(
+            isPresented: $showsCategoryPicker,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            PpabangCategoryPicker(
+                selectedCategory: category,
+                categories: categories,
+                onSelect: { selected in
+                    showsCategoryPicker = false
+                    onSelectCategory(selected)
+                }
+            )
+            .frame(
+                width: 338,
+                height: min(PpabangCategoryPicker.idealHeight(for: categories.count), 640)
+            )
+            .padding(12)
+        }
+        #else
+        .sheet(isPresented: $showsCategoryPicker) {
+            PpabangCategoryPicker(
+                selectedCategory: category,
+                categories: categories,
+                onSelect: { selected in
+                    showsCategoryPicker = false
+                    onSelectCategory(selected)
+                }
+            )
+            .presentationDetents([
+                .height(PpabangCategoryPicker.idealHeight(for: categories.count)),
+                .large
+            ])
+            .presentationDragIndicator(.visible)
+        }
+        #endif
     }
 }
 
@@ -2907,24 +3069,20 @@ private struct HomeMusicStripCard: View {
     let externalMusicTrackTitle: String?
     let ppabangState: PpabangPlaybackState
     let ppabangCategory: PpabangCategory
-    let ppabangCategories: [PpabangCategory]
+    let isPpabangPanelOpen: Bool
     let orderIndex: Int
     let selectionID: String
     let onToggleRadio: (UUID) -> Void
     let onSelectRadioTitle: (UUID) -> Void
     let onToggleExternalMusic: (ExternalMusicService) -> Void
     let onSkipExternalMusic: (ExternalMusicService) -> Void
-    let onTogglePpabang: () -> Void
-    let onNextPpabang: () -> Void
-    let onSelectPpabangCategory: (PpabangCategory) -> Void
-    let onRefreshPpabangCategories: () -> Void
+    let onTogglePpabangPanel: () -> Void
     let onEditRadio: (UUID) -> Void
     let onRegisterRadio: () -> Void
     let onMoveChannel: (String, Int) -> Void
     let isReorderingCatalyst: Bool
     @Binding var draggingChannelID: String?
     let onBeginReordering: () -> Void
-    @State private var showsPpabangCategoryPicker = false
 
     var body: some View {
         #if targetEnvironment(macCatalyst)
@@ -3072,77 +3230,21 @@ private struct HomeMusicStripCard: View {
     }
     #endif
 
-    /// 빠방 카드: 왼쪽 절반은 재생·정지, 오른쪽은 다음 곡이며 길게 눌러 목록을 고른다.
+    /// 빠방 카드: 카드 전체가 미니플레이어 패널을 열고 닫는 버튼이다. 재생 시작·정지·다음 곡은
+    /// 미니플레이어 쪽 조작에서만 일어나며, 이 버튼은 패널 표시 여부만 바꾼다.
     private var ppabangContent: some View {
-        let isOpen = ppabangState != .idle
-        return ZStack {
+        Button(action: onTogglePpabangPanel) {
             HomeMusicStripCardContent(
                 systemImage: ppabangIcon,
                 title: "빠방 · \(ppabangCategory.displayName)",
                 status: ppabangState.statusText,
                 scrollsTitle: true
             )
-
-            HStack(spacing: 0) {
-                Button(action: onTogglePpabang) {
-                    Color.clear
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("빠방 \(ppabangCategory.displayName) \(isOpen ? "정지" : "재생")")
-
-                Color.clear
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        LongPressGesture(minimumDuration: 0.5)
-                            .onEnded { _ in
-                                onRefreshPpabangCategories()
-                                showsPpabangCategoryPicker = true
-                            }
-                            .exclusively(before: TapGesture().onEnded {
-                                onNextPpabang()
-                            })
-                    )
-                .accessibilityLabel("빠방 다음 곡")
-                .accessibilityHint("길게 누르면 재생목록을 고릅니다")
-            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
         }
-        .accessibilityHint("왼쪽 절반은 재생과 정지, 오른쪽 절반은 다음 곡이며 길게 누르면 재생목록을 고릅니다")
-        #if targetEnvironment(macCatalyst)
-        .popover(
-            isPresented: $showsPpabangCategoryPicker,
-            attachmentAnchor: .rect(.bounds),
-            arrowEdge: .bottom
-        ) {
-            PpabangCategoryPicker(
-                selectedCategory: ppabangCategory,
-                categories: ppabangCategories,
-                onSelect: { category in
-                    showsPpabangCategoryPicker = false
-                    onSelectPpabangCategory(category)
-                }
-            )
-            .frame(width: 338)
-            .padding(12)
-        }
-        #else
-        .sheet(isPresented: $showsPpabangCategoryPicker) {
-            PpabangCategoryPicker(
-                selectedCategory: ppabangCategory,
-                categories: ppabangCategories,
-                onSelect: { category in
-                    showsPpabangCategoryPicker = false
-                    onSelectPpabangCategory(category)
-                }
-            )
-            .presentationDetents([.height(370)])
-            .presentationDragIndicator(.visible)
-        }
-        #endif
+        .buttonStyle(.plain)
+        .accessibilityLabel("빠방 미니플레이어 \(isPpabangPanelOpen ? "닫기" : "열기")")
     }
 
     private var ppabangIcon: String {
@@ -5476,7 +5578,7 @@ private struct BatteryStatusPill: View {
 }
 
 /// 잠소리·보이소·설정 카드가 공유하는 2행 본문(아이콘+제목 / 상태)과 타일 표면.
-private struct HomeSharedControlCardBody<Icon: View>: View {
+struct HomeSharedControlCardBody<Icon: View>: View {
     let title: String
     let status: String
     let size: CGSize
@@ -5522,7 +5624,7 @@ private struct HomeSharedControlCardBody<Icon: View>: View {
     }
 }
 
-private struct HomeSharedControlSymbolIcon: View {
+struct HomeSharedControlSymbolIcon: View {
     let systemImage: String
 
     var body: some View {
@@ -5531,7 +5633,7 @@ private struct HomeSharedControlSymbolIcon: View {
     }
 }
 
-private struct HomeSharedControlCard<Icon: View>: View {
+struct HomeSharedControlCard<Icon: View>: View {
     let title: String
     let status: String
     let size: CGSize
@@ -5547,6 +5649,102 @@ private struct HomeSharedControlCard<Icon: View>: View {
         .buttonStyle(.plain)
         .accessibilityLabel(title)
         .accessibilityValue(status)
+        .accessibilityHint(hint ?? "")
+    }
+}
+
+/// `HomeSharedControlCardBody`와 같은 타일 크기·색조·표면을 쓰지만 화면에는 아이콘만
+/// 보이는 판. 제목·상태 문구는 접근성 레이블·값으로만 전달한다.
+struct HomeSharedControlIconOnlyCardBody<Icon: View>: View {
+    let size: CGSize
+    @ViewBuilder let icon: () -> Icon
+
+    var body: some View {
+        icon()
+            .frame(width: HomeSharedControlMetrics.iconSize, height: HomeSharedControlMetrics.iconSize)
+            .foregroundStyle(.white.opacity(StandControlLayoutMetrics.foregroundOpacity))
+            .frame(width: size.width, height: size.height)
+            .background {
+                FlipPanelSurface(
+                    isDimmed: false,
+                    cornerRadius: HomeSharedControlMetrics.cornerRadius,
+                    splitGap: HomeSharedControlMetrics.splitGap
+                )
+            }
+            .opacity(StandControlLayoutMetrics.tileOpacity)
+    }
+}
+
+struct HomeSharedControlIconOnlyCard<Icon: View>: View {
+    let accessibilityLabel: String
+    let accessibilityValue: String
+    let size: CGSize
+    var hint: String? = nil
+    @ViewBuilder let icon: () -> Icon
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HomeSharedControlIconOnlyCardBody(size: size, icon: icon)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityHint(hint ?? "")
+    }
+}
+
+/// 아이콘 아래에 현재 선택 상태(예: 카테고리 표시 이름)를 작은 글자로 보여 주는 카드.
+/// 카드 크기·배경은 `HomeSharedControlIconOnlyCardBody`와 동일하게 유지한다.
+struct HomeSharedControlIconLabelCardBody<Icon: View>: View {
+    let size: CGSize
+    let label: String
+    @ViewBuilder let icon: () -> Icon
+
+    var body: some View {
+        VStack(spacing: 7) {
+            icon()
+            Text(label)
+                #if targetEnvironment(macCatalyst)
+                .font(.system(size: 22.5, weight: .semibold))
+                #else
+                .font(.caption.weight(.semibold))
+                #endif
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+        }
+        .scaleEffect(1 / StandPresentationMetrics.homeScale, anchor: .center)
+        .foregroundStyle(.white.opacity(StandControlLayoutMetrics.foregroundOpacity))
+        .frame(width: size.width, height: size.height)
+        .background {
+            FlipPanelSurface(
+                isDimmed: false,
+                cornerRadius: HomeSharedControlMetrics.cornerRadius,
+                splitGap: HomeSharedControlMetrics.splitGap
+            )
+        }
+        .opacity(StandControlLayoutMetrics.tileOpacity)
+    }
+}
+
+struct HomeSharedControlIconLabelCard<Icon: View>: View {
+    let accessibilityLabel: String
+    let accessibilityValue: String
+    let size: CGSize
+    let label: String
+    var hint: String? = nil
+    @ViewBuilder let icon: () -> Icon
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HomeSharedControlIconLabelCardBody(size: size, label: label, icon: icon)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(accessibilityValue)
         .accessibilityHint(hint ?? "")
     }
 }

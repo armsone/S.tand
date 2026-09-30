@@ -94,7 +94,6 @@ struct SettingsView: View {
                                 HStack(alignment: .top, spacing: 14) {
                                     LazyVStack(spacing: 14) {
                                         screenAndClockCard
-                                        boyisoCard
                                         informationCard
                                     }
                                     .frame(maxWidth: .infinity)
@@ -109,7 +108,6 @@ struct SettingsView: View {
                                 LazyVStack(spacing: 14) {
                                     screenAndClockCard
                                     permissionsCard
-                                    boyisoCard
                                     detectionCard
                                     informationCard
                                 }

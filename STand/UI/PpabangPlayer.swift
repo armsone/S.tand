@@ -11,7 +11,7 @@ struct PpabangCategory: Hashable, Identifiable {
     static let `default` = PpabangCategory(rawValue: "ccm")
     // 빠방 웹사이트의 재생목록 탭 순서.
     static let fallbackCategories = [
-        "ccm", "ballad", "girlgroup", "legends", "golfHorizontal", "golfVertical",
+        "ccm", "ballad", "girlgroup", "legends", "crossEdit", "golfHorizontal", "golfVertical",
         "game", "mukbang", "camping", "travel", "lounge", "bedroom"
     ].map(PpabangCategory.init(rawValue:))
 
@@ -31,6 +31,8 @@ struct PpabangCategory: Hashable, Identifiable {
         case "ccm": "CCM"
         case "lounge": "라운지"
         case "bedroom": "베드룸"
+        case "amv": "AMV"
+        case "crossEdit", "cross-edit", "cross_edit": "교차편집"
         default:
             rawValue
                 .replacingOccurrences(of: "-", with: " ")
@@ -117,6 +119,9 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
     @Published private(set) var category: PpabangCategory
     @Published private(set) var categories = PpabangCategory.fallbackCategories
     @Published private(set) var isPresented = false
+    /// 홈 카드의 열고/닫기 버튼이 다루는 미니플레이어 패널 표시 여부. 재생 시작·정지와는
+    /// 독립적으로 바뀌므로, 패널을 닫아도 재생은 멈추지 않고 열어도 재생이 시작되지 않는다.
+    @Published private(set) var isPanelOpen = false
     @Published private(set) var state: PpabangPlaybackState = .idle
     @Published private(set) var trackTitle: String?
 
@@ -127,10 +132,24 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
         let onExpire: (() -> Void)?
     }
 
-    private weak var webView: WKWebView?
+    /// 세로/가로 전환처럼 같은 화면 안에서 다른 SwiftUI 분기로 옮겨질 때도 웹뷰(영상·재생 위치)를
+    /// 그대로 이어 쓰도록 강한 참조로 붙잡는다. 진짜로 패널을 닫을 때만 `teardown`에서 놓아 준다.
+    private var webView: WKWebView?
+    /// 재부착(회전 등으로 잠깐 뒤 같은 웹뷰가 다시 붙는 경우) 여부를 구분하기 위한 세대 값.
+    /// `detach`가 예약한 정리 작업이 실행될 때 이 값이 바뀌어 있으면 그사이 다시 붙은 것이므로 건너뛴다.
+    private var attachToken = 0
+    private var pendingTeardown: Task<Void, Never>?
     private var hasLoadedPage = false
+    /// 사이트가 YouTube 플레이어 준비와 재생 목록 표시를 모두 마쳐 재생 명령을 받을 수 있는 상태.
+    /// 페이지 로드 직후에는 목록 요청이 끝나지 않아 플레이어에 영상이 없으므로 이 신호를 기다린다.
+    private var isSiteReady = false
     private var pendingAutoplay = false
     private var confirmationTask: Task<Void, Never>?
+    private var readinessTask: Task<Void, Never>?
+    /// 페이지 로드 뒤 사이트 준비 신호를 기다리는 최대 시간(초).
+    private static let siteReadinessTimeout: TimeInterval = 20
+    static let emptyListMessage = "재생할 수 있는 영상이 없습니다. 영상 화면을 탭하면 목록을 다시 불러옵니다."
+    static let playerUnavailableMessage = "플레이어를 준비하지 못했습니다. 정지 후 다시 재생해 주세요."
     private var generation = 0
     private var backgroundGrace: BackgroundGraceSnapshot?
     private var backgroundGraceTask: Task<Void, Never>?
@@ -182,14 +201,29 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
         // 채널 변경은 명시적 조작이므로 배경 유예 스냅샷을 버리고 새로 시작한다.
         clearBackgroundGrace()
         cancelConfirmation()
+        cancelReadinessWait()
         generation += 1
         trackTitle = nil
         hasLoadedPage = false
+        isSiteReady = false
         pendingAutoplay = true
         isPresented = true
+        isPanelOpen = true
         state = .loading
         if let webView {
             webView.load(URLRequest(url: category.url, timeoutInterval: 30))
+        }
+    }
+
+    /// 홈 카드의 열고/닫기 버튼: 열면 즉시 채널을 불러와 재생까지 시작하고(원래의
+    /// `start()`/`requestPlay()` 흐름), 닫으면 `stop()`으로 정리한다. 패널을 연 뒤 오른쪽
+    /// 재생/일시정지 버튼(`toggleMiniPpabangPlayback`)은 이 흐름과 별도로 패널을 유지한 채
+    /// 재생만 바꾼다.
+    func togglePanel() {
+        if isPresented {
+            stop()
+        } else {
+            start()
         }
     }
 
@@ -197,6 +231,7 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
     func stop() {
         clearBackgroundGrace()
         cancelConfirmation()
+        cancelReadinessWait()
         generation += 1
         if let webView {
             webView.evaluateJavaScript(Self.stopScript) { _, _ in }
@@ -204,6 +239,7 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
         }
         pendingAutoplay = false
         isPresented = false
+        isPanelOpen = false
         state = .idle
         trackTitle = nil
     }
@@ -212,8 +248,9 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
     /// 플레이어가 재생 상태를 보고하기 전까지는 재생 중으로 표시하지 않는다.
     func requestPlay() {
         guard isPresented else { return }
-        // 배경 유예 중에는 재생하지 않는다. 의도만 남겨 두고 전면 복귀 때 처리한다.
-        guard let webView, hasLoadedPage, !isSuspendedForBackground else {
+        // 페이지 로드 전, 사이트 준비 전, 배경 유예 중에는 재생하지 않는다.
+        // 의도만 남겨 두고 준비 신호·전면 복귀 때 처리한다.
+        guard let webView, hasLoadedPage, isSiteReady, !isSuspendedForBackground else {
             pendingAutoplay = true
             return
         }
@@ -230,6 +267,19 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
             }
         }
         scheduleConfirmation(generation: currentGeneration)
+    }
+
+    /// 재생 위치를 유지한 채 멈춘다. `stop()`과 달리 패널을 닫거나 웹뷰를 해제하지 않는다.
+    func pause() {
+        guard isPresented else { return }
+        cancelConfirmation()
+        pendingAutoplay = false
+        if let webView {
+            webView.evaluateJavaScript(Self.pauseScript) { _, _ in }
+        }
+        if state == .playing || state == .buffering || state == .requested {
+            state = .paused
+        }
     }
 
     /// 사이트의 다음 곡 버튼(#nextButton)을 눌러 사이트 자체 재생 목록 순서를 따른다.
@@ -310,9 +360,22 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
 
     // MARK: - 웹뷰 수명
 
+    /// 현재 붙어 있는 웹뷰. `PpabangWebView.makeUIView`가 같은 인스턴스를 재사용할 수 있도록 노출한다.
+    var currentWebView: WKWebView? { webView }
+
     func attach(_ webView: WKWebView) {
-        if let previous = self.webView, previous !== webView {
-            detach(previous)
+        pendingTeardown?.cancel()
+        pendingTeardown = nil
+        attachToken += 1
+        if self.webView === webView {
+            // 같은 웹뷰가 다른 SwiftUI 분기(세로↔가로 전환 등)로 옮겨 붙은 경우다.
+            // 영상·재생 위치를 그대로 두고 델리게이트만 다시 연결한다.
+            webView.navigationDelegate = self
+            webView.uiDelegate = self
+            return
+        }
+        if let previous = self.webView {
+            teardown(previous)
         }
         self.webView = webView
         webView.navigationDelegate = self
@@ -323,12 +386,30 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
         )
         if isPresented {
             hasLoadedPage = false
+            isSiteReady = false
             state = .loading
             webView.load(URLRequest(url: category.url, timeoutInterval: 30))
         }
     }
 
+    /// SwiftUI가 웹뷰를 다른 분기로 옮기며 잠깐 떼어낼 때도 곧바로 정리하지 않는다.
+    /// 다음 실행 루프 턴까지 기다려 같은 웹뷰가 다시 붙지 않았을 때만(진짜로 패널이 닫힌 경우) 정리한다.
     func detach(_ webView: WKWebView) {
+        guard self.webView === webView else { return }
+        let tokenAtDetach = attachToken
+        pendingTeardown?.cancel()
+        pendingTeardown = Task { @MainActor [weak self] in
+            // 회전으로 인한 레이아웃 재구성은 다음 화면 갱신에서 곧바로 끝나지 않을 수 있어
+            // 한 프레임보다 넉넉한 여유를 두고 진짜로 재부착됐는지 확인한다.
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled, let self,
+                  self.attachToken == tokenAtDetach, self.webView === webView
+            else { return }
+            self.teardown(webView)
+        }
+    }
+
+    private func teardown(_ webView: WKWebView) {
         webView.configuration.userContentController.removeScriptMessageHandler(
             forName: Self.bridgeMessageName
         )
@@ -342,11 +423,14 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
             self.webView = nil
         }
         hasLoadedPage = false
+        isSiteReady = false
         cancelConfirmation()
+        cancelReadinessWait()
         clearBackgroundGrace()
         if isPresented {
             // 패널이 화면에서 사라지면(편집 모드, 씬 전환 등) 재생도 함께 끝난다.
             isPresented = false
+            isPanelOpen = false
             state = .idle
             trackTitle = nil
             pendingAutoplay = false
@@ -366,8 +450,56 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
             let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
             trackTitle = trimmed.isEmpty ? nil : trimmed
         }
+        if let siteEvent = body["site"] as? String {
+            apply(siteEvent: siteEvent)
+        }
         guard let rawState = body["state"] as? Int else { return }
         apply(playerState: rawState)
+    }
+
+    /// 브리지가 보고하는 사이트 상태.
+    /// - `ready`: 플레이어와 재생 목록이 준비됐다. 남은 재생 의도가 있으면 지금 보낸다.
+    /// - `empty`: 사이트가 재생할 영상이 없다고 표시했다(목록 소진·목록 요청 실패).
+    /// - `emptyCleared`: 빈 목록 표시가 사라지고 새 영상 재생이 시작됐다.
+    private func apply(siteEvent: String) {
+        switch siteEvent {
+        case "ready":
+            isSiteReady = true
+            cancelReadinessWait()
+            if pendingAutoplay, state != .requested {
+                requestPlay()
+            }
+        case "empty":
+            cancelConfirmation()
+            // 준비 신호가 아직 없으면 목록이 뒤늦게 도착할 때 자동으로 다시 시작하도록 의도를 남긴다.
+            pendingAutoplay = pendingAutoplay || !isSiteReady
+            state = .failed(Self.emptyListMessage)
+        case "emptyCleared":
+            if case .failed = state {
+                state = .requested
+                scheduleConfirmation(generation: generation)
+            }
+        default:
+            break
+        }
+    }
+
+    /// 페이지 로드 뒤 사이트 준비 신호가 오지 않으면 대기 중임을 숨기지 않고 실패로 표시한다.
+    /// 늦게라도 준비 신호가 오면 남은 재생 의도로 정상 재개한다.
+    private func scheduleReadinessWait(generation: Int) {
+        cancelReadinessWait()
+        readinessTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.siteReadinessTimeout))
+            guard !Task.isCancelled, let self, self.generation == generation, self.isPresented else { return }
+            if !self.isSiteReady, self.state == .ready {
+                self.state = .failed(Self.playerUnavailableMessage)
+            }
+        }
+    }
+
+    private func cancelReadinessWait() {
+        readinessTask?.cancel()
+        readinessTask = nil
     }
 
     /// YouTube IFrame API의 플레이어 상태 코드.
@@ -430,7 +562,8 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
     // MARK: - 스크립트
 
     /// 메인 프레임에만 주입한다. #player iframe의 src에서 유도한 YouTube origin에서 온
-    /// IFrame API 상태 메시지만 네이티브로 전달한다.
+    /// IFrame API 상태 메시지만 네이티브로 전달한다. 사이트 준비·빈 목록 상태도 함께 보고하고,
+    /// 로고 이미지는 모든 상태(시작 덮개·빈 목록 안내·상단 바)에서 숨긴다.
     static let bridgeScript = """
     (function () {
       if (window.location.origin !== 'https://ppabang.net') { return; }
@@ -438,6 +571,9 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
       style.textContent = `
         html,body{margin:0!important;padding:0!important;width:100%!important;height:100%!important;overflow:hidden!important;background:transparent!important;}
         .brand-bar,.queue,.player-help{display:none!important;}
+        .brand-mark img,.start-cover img,.empty-state img{display:none!important;}
+        .empty-state{cursor:pointer!important;padding:16px!important;}
+        .empty-state strong{font-size:17px!important;}
         .shorts-shell,.stage,#playerFrame,.video-surface{margin:0!important;padding:0!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;min-width:200px!important;min-height:200px!important;box-sizing:border-box!important;}
         .shorts-shell,.stage{display:block!important;}
         #playerFrame{border-radius:0!important;aspect-ratio:auto!important;}
@@ -450,9 +586,46 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
       `;
       document.head.appendChild(style);
       if (window.__standPpabangBridge) { return; }
-      window.__standPpabangBridge = true;
+      var bridge = { playerReady: false, readySent: false, started: false };
+      window.__standPpabangBridge = bridge;
       function post(payload) {
         try { window.webkit.messageHandlers.\(bridgeMessageName).postMessage(payload); } catch (error) {}
+      }
+      var queueList = document.getElementById('queueList');
+      var tasteState = document.getElementById('tasteState');
+      var emptyState = document.getElementById('emptyState');
+      var startCover = document.getElementById('startCover');
+      // 사이트는 목록 요청이 끝난 뒤에야 영상을 큐에 넣는다. 플레이어와 목록이 모두 준비됐을 때만
+      // 준비 신호를 보내고, 목록 요청이 끝났는데도 영상이 없으면 사이트의 빈 목록 안내를 띄운다.
+      function evaluateSite() {
+        if (!bridge.playerReady) { return; }
+        var hasQueue = !!(queueList && queueList.querySelector('.queue-item'));
+        if (hasQueue) {
+          if (!bridge.readySent) { bridge.readySent = true; post({ site: 'ready' }); }
+          return;
+        }
+        var settled = !tasteState || tasteState.textContent.trim() !== '준비 중';
+        if (settled && emptyState && emptyState.hidden) { emptyState.hidden = false; }
+      }
+      if (emptyState) {
+        new MutationObserver(function () {
+          post({ site: emptyState.hidden ? 'emptyCleared' : 'empty' });
+        }).observe(emptyState, { attributes: true, attributeFilter: ['hidden'] });
+        // 빈 목록 안내를 탭하면 사이트의 시작 버튼 경로로 목록을 다시 불러온다.
+        // 사이트 CSS가 시작 덮개를 숨겨도 click()은 동작한다.
+        emptyState.setAttribute('role', 'button');
+        emptyState.setAttribute('tabindex', '0');
+        function retryFromEmpty() { if (startCover && !startCover.disabled) { startCover.click(); } }
+        emptyState.addEventListener('click', retryFromEmpty);
+        emptyState.addEventListener('keydown', function (event) {
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); retryFromEmpty(); }
+        });
+      }
+      if (queueList) {
+        new MutationObserver(evaluateSite).observe(queueList, { childList: true });
+      }
+      if (tasteState) {
+        new MutationObserver(evaluateSite).observe(tasteState, { childList: true, characterData: true, subtree: true });
       }
       window.addEventListener('message', function (event) {
         var frame = document.getElementById('player');
@@ -466,13 +639,20 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
           try { data = JSON.parse(data); } catch (error) { return; }
         }
         if (!data || typeof data !== 'object') { return; }
+        if (data.event === 'onReady' || data.event === 'infoDelivery' || data.event === 'onStateChange') {
+          if (!bridge.playerReady) { bridge.playerReady = true; evaluateSite(); }
+        }
         if (data.event === 'onStateChange' && typeof data.info === 'number') {
+          if (data.info === 1) { bridge.started = true; }
           post({ state: data.info });
           return;
         }
         if (data.event === 'infoDelivery' && data.info && typeof data.info === 'object') {
           var payload = {};
-          if (typeof data.info.playerState === 'number') { payload.state = data.info.playerState; }
+          if (typeof data.info.playerState === 'number') {
+            payload.state = data.info.playerState;
+            if (data.info.playerState === 1) { bridge.started = true; }
+          }
           if (data.info.videoData && typeof data.info.videoData.title === 'string') {
             payload.title = data.info.videoData.title;
           }
@@ -493,20 +673,19 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
     }
     """
 
+    /// 빈 목록 상태나 첫 시작은 사이트의 시작 버튼 경로(목록 재요청·playAt)를 그대로 쓴다.
+    /// 사이트 CSS가 시작 덮개를 숨기고 있어 보이는지로 판단하지 않고 click()으로 호출한다.
+    /// 이미 한 번 재생된 뒤에는 현재 영상에 playVideo만 보내 사이트 재생 순서를 방해하지 않는다.
     static let playScript = """
     (function () {
       \(playerCommandHelper)
-      function isVisible(element) {
-        if (!element) { return false; }
-        var style = window.getComputedStyle(element);
-        if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) { return false; }
-        var rect = element.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0;
-      }
+      var bridge = window.__standPpabangBridge;
       var start = document.getElementById('startCover');
-      if (isVisible(start)) { start.click(); return 'start'; }
+      var empty = document.getElementById('emptyState');
       var resume = document.getElementById('resumeCover');
-      if (isVisible(resume)) { resume.click(); return 'resume'; }
+      if (empty && !empty.hidden && start && !start.disabled) { start.click(); return 'reload'; }
+      if (resume && !resume.hidden) { resume.click(); return 'resume'; }
+      if (bridge && typeof bridge === 'object' && !bridge.started && start && !start.disabled) { start.click(); return 'start'; }
       return standPpabangCommand('playVideo') ? 'play' : 'none';
     })();
     """
@@ -571,15 +750,20 @@ extension PpabangPlayerSession: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         hasLoadedPage = false
+        isSiteReady = false
+        cancelReadinessWait()
         if isPresented { state = .loading }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard isPresented else { return }
         hasLoadedPage = true
-        state = .ready
+        if case .failed = state {} else { state = .ready }
         if pendingAutoplay {
             requestPlay()
+        }
+        if !isSiteReady {
+            scheduleReadinessWait(generation: generation)
         }
     }
 
@@ -598,7 +782,9 @@ extension PpabangPlayerSession: WKNavigationDelegate {
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard isPresented else { return }
         hasLoadedPage = false
+        isSiteReady = false
         cancelConfirmation()
+        cancelReadinessWait()
         state = .failed("플레이어가 종료되었습니다. 재생을 다시 눌러 주세요.")
         pendingAutoplay = true
     }
@@ -608,7 +794,9 @@ extension PpabangPlayerSession: WKNavigationDelegate {
         let nsError = error as NSError
         if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled { return }
         hasLoadedPage = false
+        isSiteReady = false
         cancelConfirmation()
+        cancelReadinessWait()
         pendingAutoplay = true
         state = .failed("빠방을 열지 못했습니다. \(error.localizedDescription)")
     }
@@ -661,6 +849,12 @@ struct PpabangWebView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> WKWebView {
+        // 세로↔가로 전환처럼 같은 패널이 다른 SwiftUI 분기로 옮겨 붙을 때는 기존 웹뷰를
+        // 그대로 재사용해 영상·재생 위치가 끊기지 않게 한다.
+        if let existing = context.coordinator.session.currentWebView {
+            context.coordinator.session.attach(existing)
+            return existing
+        }
         let configuration = WKWebViewConfiguration()
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         configuration.preferences.isFraudulentWebsiteWarningEnabled = true
@@ -707,23 +901,43 @@ enum PpabangPlayerPanelMetrics {
 struct PpabangFloatingPlayer: View {
     @ObservedObject var session: PpabangPlayerSession
     let accent: Color
+    let controlSize: CGSize
     let onFrameChanged: (CGRect) -> Void
+    let onToggle: () -> Void
+    let onNext: () -> Void
+    let onRefreshCategories: () -> Void
+    let onSelectCategory: (PpabangCategory) -> Void
 
     var body: some View {
         GeometryReader { proxy in
-            PpabangPlayerPanel(
-                session: session,
-                accent: accent
-            )
+            // 빠방을 시작하면 미니플레이어를 왼쪽 하단에 띄우고, 재생 조작은 오른쪽에 둔다.
+            HStack(alignment: .bottom, spacing: HomeSharedControlMetrics.spacing) {
+                PpabangPlayerPanel(
+                    session: session,
+                    accent: accent
+                )
+
+                PpabangMiniPlayerControls(
+                    state: session.state,
+                    category: session.category,
+                    categories: session.categories,
+                    size: controlSize,
+                    onToggle: onToggle,
+                    onNext: onNext,
+                    onRefreshCategories: onRefreshCategories,
+                    onSelectCategory: onSelectCategory
+                )
+            }
+            // 미니플레이어(영상+재생 조작) 전체 영역을 모드 전환 탭/드래그 인식기에서 제외한다.
             .background {
-                GeometryReader { panel in
+                GeometryReader { frame in
                     Color.clear
-                        .onAppear { onFrameChanged(panel.frame(in: .named("stand.root"))) }
-                        .onChange(of: panel.frame(in: .named("stand.root"))) { _, frame in onFrameChanged(frame) }
+                        .onAppear { onFrameChanged(frame.frame(in: .named("stand.root"))) }
+                        .onChange(of: frame.frame(in: .named("stand.root"))) { _, rect in onFrameChanged(rect) }
                 }
             }
             .offset(
-                x: max(0, proxy.size.width - PpabangPlayerPanelMetrics.width),
+                x: 0,
                 y: max(0, proxy.size.height - PpabangPlayerPanelMetrics.height)
             )
             .transaction { $0.animation = nil }

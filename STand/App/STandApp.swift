@@ -5,7 +5,9 @@ import WidgetKit
 final class OrientationController {
     static let shared = OrientationController()
 
-    let supportedMask: UIInterfaceOrientationMask = .allButUpsideDown
+    let supportedMask: UIInterfaceOrientationMask = {
+        UIDevice.current.userInterfaceIdiom == .phone ? .portrait : .allButUpsideDown
+    }()
 
     private init() {}
 

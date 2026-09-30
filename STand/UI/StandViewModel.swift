@@ -1415,6 +1415,20 @@ final class StandViewModel: ObservableObject {
         }
     }
 
+    /// 미니플레이어 오른쪽 재생/일시정지 버튼: 패널을 열고 닫지 않고 재생 상태만 토글한다.
+    func toggleMiniPpabangPlayback() {
+        guard ppabang.isPresented else {
+            startPpabangPlayback()
+            return
+        }
+        switch ppabang.state {
+        case .playing, .buffering, .requested:
+            ppabang.pause()
+        default:
+            ppabang.requestPlay()
+        }
+    }
+
     /// 플레이어 패널의 재생 버튼. 닫혀 있으면 열고, 열려 있으면 플레이어에 재생을 요청한다.
     func requestPpabangPlay() {
         if ppabang.isPresented {

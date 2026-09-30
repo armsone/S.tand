@@ -28,6 +28,108 @@ enum RecordingSwipeDeletePolicy {
     }
 }
 
+/// 잠소리 삭제·병합 확인 대화상자 모음. 본문의 단일 수정자 체인에 그대로 두면
+/// 컴파일러 타입 추론이 시간 안에 끝나지 못해 별도 `ViewModifier`로 분리했다.
+private struct RecordingsDeletionDialogs: ViewModifier {
+    @Binding var confirmsDeleteAll: Bool
+    @Binding var confirmsDeleteSelected: Bool
+    @Binding var confirmsMergeAndDelete: Bool
+    @Binding var confirmsDeleteSelectedSessions: Bool
+    @Binding var pendingClipDeletion: RecordingClip?
+    @Binding var mergeErrorMessage: String?
+    let selectedClipsCount: Int
+    let selectedSessionIDsCount: Int
+    let isMerging: Bool
+    let onConfirmDeleteAll: () -> Void
+    let onConfirmDeleteSelected: () -> Void
+    let onConfirmMergeAndDelete: () -> Void
+    let onConfirmDeleteSelectedSessions: () -> Void
+    let onConfirmDeleteClip: (RecordingClip) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(
+                "저장된 잠소리를 모두 삭제할까요?",
+                isPresented: $confirmsDeleteAll,
+                titleVisibility: .visible
+            ) {
+                Button("모두 삭제", role: .destructive) {
+                    guard !isMerging else { return }
+                    onConfirmDeleteAll()
+                }
+                Button("취소", role: .cancel) {}
+            } message: {
+                Text("잠자리 기록과 녹음이 모두 사라지며 복구할 수 없습니다.")
+            }
+            .confirmationDialog(
+                "선택한 녹음 \(selectedClipsCount)개를 삭제할까요?",
+                isPresented: $confirmsDeleteSelected,
+                titleVisibility: .visible
+            ) {
+                Button("선택 항목 삭제", role: .destructive) {
+                    guard !isMerging else { return }
+                    onConfirmDeleteSelected()
+                }
+                Button("취소", role: .cancel) {}
+            } message: {
+                Text("삭제한 원본 녹음은 복구할 수 없습니다.")
+            }
+            .confirmationDialog(
+                "합친 뒤 원본 \(selectedClipsCount)개를 삭제할까요?",
+                isPresented: $confirmsMergeAndDelete,
+                titleVisibility: .visible
+            ) {
+                Button("합치고 지우기", role: .destructive) {
+                    onConfirmMergeAndDelete()
+                }
+                Button("취소", role: .cancel) {}
+            } message: {
+                Text("합본은 남지만 선택한 원본 녹음은 복구할 수 없습니다.")
+            }
+            .confirmationDialog(
+                "선택한 잠자리 \(selectedSessionIDsCount)개를 삭제할까요?",
+                isPresented: $confirmsDeleteSelectedSessions,
+                titleVisibility: .visible
+            ) {
+                Button("선택 잠자리 삭제", role: .destructive) {
+                    guard !isMerging else { return }
+                    onConfirmDeleteSelectedSessions()
+                }
+                Button("취소", role: .cancel) {}
+            } message: {
+                Text("선택한 잠자리의 녹음과 기록이 모두 사라지며 복구할 수 없습니다.")
+            }
+            .confirmationDialog(
+                "이 녹음을 삭제할까요?",
+                isPresented: Binding(
+                    get: { pendingClipDeletion != nil },
+                    set: { if !$0 { pendingClipDeletion = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let clip = pendingClipDeletion {
+                    Button("녹음 삭제", role: .destructive) {
+                        onConfirmDeleteClip(clip)
+                    }
+                }
+                Button("취소", role: .cancel) { pendingClipDeletion = nil }
+            } message: {
+                Text("삭제한 녹음은 복구할 수 없습니다.")
+            }
+            .alert(
+                "작업을 완료하지 못했습니다",
+                isPresented: Binding(
+                    get: { mergeErrorMessage != nil },
+                    set: { if !$0 { mergeErrorMessage = nil } }
+                )
+            ) {
+                Button("확인", role: .cancel) {}
+            } message: {
+                Text(mergeErrorMessage ?? "알 수 없는 오류가 발생했습니다.")
+            }
+    }
+}
+
 struct RecordingsView: View {
     @ObservedObject var library: RecordingLibrary
     let playbackDisabled: Bool
@@ -77,223 +179,128 @@ struct RecordingsView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                RecordingBackground(accent: accent)
-
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        if selectedPage == .sounds, isSessionSelectionMode {
-                            SessionSelectionActionsRow(
-                                allSelected: allSessionsSelected,
-                                accent: accent,
-                                canMerge: canMergeSelectedSessions,
-                                canDelete: !selectedSessionIDs.isEmpty && !isMerging,
-                                isMerging: isMerging,
-                                hasSessions: !library.recordingSessions.isEmpty,
-                                toggleSelectAll: toggleSelectAllSessions,
-                                merge: mergeSelectedSessions,
-                                delete: { confirmsDeleteSelectedSessions = true }
-                            )
+            recordingsScaffold
+                .modifier(RecordingsDeletionDialogs(
+                    confirmsDeleteAll: $confirmsDeleteAll,
+                    confirmsDeleteSelected: $confirmsDeleteSelected,
+                    confirmsMergeAndDelete: $confirmsMergeAndDelete,
+                    confirmsDeleteSelectedSessions: $confirmsDeleteSelectedSessions,
+                    pendingClipDeletion: $pendingClipDeletion,
+                    mergeErrorMessage: $mergeErrorMessage,
+                    selectedClipsCount: selectedClips.count,
+                    selectedSessionIDsCount: selectedSessionIDs.count,
+                    isMerging: isMerging,
+                    onConfirmDeleteAll: {
+                        player.stop()
+                        do {
+                            try library.deleteAllIncludingSessions()
+                            selectedClipURLs.removeAll()
+                            expandedSessionIDs.removeAll()
+                            playbackQueue.removeAll()
+                        } catch {
+                            mergeErrorMessage = error.localizedDescription
                         }
-
-                        pagePicker
-
-                        switch selectedPage {
-                        case .lastNight:
-                            lastNightContent
-                        case .sounds:
-                            soundListContent
-                        }
-                    }
-                    .frame(maxWidth: recordingsContentMaxWidth)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 14)
-                    .padding(.top, 10)
-                    .padding(.bottom, 30)
-                }
-                .scrollIndicators(.hidden)
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 0) {
-                    if selectedPage == .sounds, !selectedClipURLs.isEmpty {
-                        RecordingSelectionDock(
-                            count: selectedClipURLs.count,
-                            accent: accent,
-                            canMerge: !playbackDisabled && !isMerging && selectedClips.count >= 2,
-                            clear: { selectedClipURLs.removeAll() },
-                            merge: { mergeSelectedRecordings(deleteSources: false) },
-                            delete: { confirmsDeleteSelected = true },
-                            isBusy: isMerging
-                        )
-                    }
-                    if let playingURL = player.playingURL,
-                       let clip = library.clips.first(where: { $0.url == playingURL }) {
-                        PlaybackProgressBar(clip: clip, player: player, accent: accent)
+                    },
+                    onConfirmDeleteSelected: { deleteSelectedRecordings() },
+                    onConfirmMergeAndDelete: { mergeSelectedRecordings(deleteSources: true) },
+                    onConfirmDeleteSelectedSessions: { deleteSelectedSessions() },
+                    onConfirmDeleteClip: { clip in _ = deleteClip(clip) }
+                ))
+                .onAppear {
+                    library.reload()
+                    player.onPlaybackFinished = { playNextQueuedClip() }
+                    if expandedSessionIDs.isEmpty, let firstSession = library.recordingSessions.first {
+                        expandedSessionIDs.insert(firstSession.id)
                     }
                 }
-            }
-            .navigationTitle("잠소리")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("완료") {
-                        if isSessionSelectionMode {
-                            exitSessionSelectionMode()
-                        } else if let onClose {
-                            onClose()
-                        } else {
-                            dismiss()
-                        }
-                    }
-                        .fontWeight(.semibold)
-                        .foregroundStyle(accent)
-                }
-                if selectedPage == .sounds, isSessionSelectionMode {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Text("\(selectedSessionIDs.count)개 선택")
-                            .font(.subheadline.monospacedDigit().weight(.semibold))
-                            .lineLimit(1)
-                            .foregroundStyle(accent)
-                    }
-                } else if selectedPage == .sounds, !library.clips.isEmpty {
-                    ToolbarItem(placement: .primaryAction) {
-                        Menu {
-                            Button("전체 선택", systemImage: "checkmark.square.fill") {
-                                selectedClipURLs = RecordingSelectionPolicy.all(
-                                    in: library.mergeableClips
-                                )
-                            }
-                            .disabled(isMerging)
-                            Button("오늘 선택", systemImage: "calendar.badge.checkmark") {
-                                selectedClipURLs = RecordingSelectionPolicy.today(
-                                    in: library.mergeableClips
-                                )
-                            }
-                            .disabled(isMerging || todayClips.isEmpty)
-                            Button("선택 모두 해제", systemImage: "checkmark.circle.badge.xmark") {
-                                selectedClipURLs.removeAll()
-                            }
-                            .disabled(isMerging || selectedClipURLs.isEmpty)
-
-                            Divider()
-
-                            Button("전체 삭제", systemImage: "trash", role: .destructive) {
-                                confirmsDeleteAll = true
-                            }
-                            .disabled(isMerging)
-                        } label: {
-                            Label("목록 작업", systemImage: "ellipsis.circle")
-                                .foregroundStyle(accent)
-                        }
-                    }
-                }
-            }
-            .confirmationDialog(
-                "저장된 잠소리를 모두 삭제할까요?",
-                isPresented: $confirmsDeleteAll,
-                titleVisibility: .visible
-            ) {
-                Button("모두 삭제", role: .destructive) {
-                    guard !isMerging else { return }
+                .onDisappear {
+                    playbackQueue.removeAll()
+                    player.onPlaybackFinished = nil
                     player.stop()
-                    do {
-                        try library.deleteAllIncludingSessions()
-                        selectedClipURLs.removeAll()
-                        expandedSessionIDs.removeAll()
-                        playbackQueue.removeAll()
-                    } catch {
-                        mergeErrorMessage = error.localizedDescription
-                    }
                 }
-                Button("취소", role: .cancel) {}
-            } message: {
-                Text("잠자리 기록과 녹음이 모두 사라지며 복구할 수 없습니다.")
-            }
-            .confirmationDialog(
-                "선택한 녹음 \(selectedClips.count)개를 삭제할까요?",
-                isPresented: $confirmsDeleteSelected,
-                titleVisibility: .visible
-            ) {
-                Button("선택 항목 삭제", role: .destructive) {
-                    guard !isMerging else { return }
-                    deleteSelectedRecordings()
-                }
-                Button("취소", role: .cancel) {}
-            } message: {
-                Text("삭제한 원본 녹음은 복구할 수 없습니다.")
-            }
-            .confirmationDialog(
-                "합친 뒤 원본 \(selectedClips.count)개를 삭제할까요?",
-                isPresented: $confirmsMergeAndDelete,
-                titleVisibility: .visible
-            ) {
-                Button("합치고 지우기", role: .destructive) {
-                    mergeSelectedRecordings(deleteSources: true)
-                }
-                Button("취소", role: .cancel) {}
-            } message: {
-                Text("합본은 남지만 선택한 원본 녹음은 복구할 수 없습니다.")
-            }
-            .confirmationDialog(
-                "선택한 잠자리 \(selectedSessionIDs.count)개를 삭제할까요?",
-                isPresented: $confirmsDeleteSelectedSessions,
-                titleVisibility: .visible
-            ) {
-                Button("선택 잠자리 삭제", role: .destructive) {
-                    guard !isMerging else { return }
-                    deleteSelectedSessions()
-                }
-                Button("취소", role: .cancel) {}
-            } message: {
-                Text("선택한 잠자리의 녹음과 기록이 모두 사라지며 복구할 수 없습니다.")
-            }
-            .confirmationDialog(
-                "이 녹음을 삭제할까요?",
-                isPresented: Binding(
-                    get: { pendingClipDeletion != nil },
-                    set: { if !$0 { pendingClipDeletion = nil } }
-                ),
-                titleVisibility: .visible
-            ) {
-                if let clip = pendingClipDeletion {
-                    Button("녹음 삭제", role: .destructive) {
-                        _ = deleteClip(clip)
-                    }
-                }
-                Button("취소", role: .cancel) { pendingClipDeletion = nil }
-            } message: {
-                Text("삭제한 녹음은 복구할 수 없습니다.")
-            }
-            .alert(
-                "작업을 완료하지 못했습니다",
-                isPresented: Binding(
-                    get: { mergeErrorMessage != nil },
-                    set: { if !$0 { mergeErrorMessage = nil } }
-                )
-            ) {
-                Button("확인", role: .cancel) {}
-            } message: {
-                Text(mergeErrorMessage ?? "알 수 없는 오류가 발생했습니다.")
-            }
-            .onAppear {
-                library.reload()
-                player.onPlaybackFinished = { playNextQueuedClip() }
-                if expandedSessionIDs.isEmpty, let firstSession = library.recordingSessions.first {
-                    expandedSessionIDs.insert(firstSession.id)
-                }
-            }
-            .onDisappear {
-                playbackQueue.removeAll()
-                player.onPlaybackFinished = nil
-                player.stop()
-            }
         }
         .preferredColorScheme(.dark)
         .tint(accent)
         .grayscale(theme == .grayscale ? 1 : 0)
+    }
+
+    private var recordingsScaffold: some View {
+        ZStack {
+            RecordingBackground(accent: accent)
+
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    if selectedPage == .sounds, isSessionSelectionMode {
+                        SessionSelectionActionsRow(
+                            allSelected: allSessionsSelected,
+                            accent: accent,
+                            canMerge: canMergeSelectedSessions,
+                            canDelete: !selectedSessionIDs.isEmpty && !isMerging,
+                            isMerging: isMerging,
+                            hasSessions: !library.recordingSessions.isEmpty,
+                            toggleSelectAll: toggleSelectAllSessions,
+                            merge: mergeSelectedSessions,
+                            delete: { confirmsDeleteSelectedSessions = true }
+                        )
+                    }
+
+                    pagePicker
+
+                    switch selectedPage {
+                    case .lastNight:
+                        lastNightContent
+                    case .sounds:
+                        soundListContent
+                    }
+                }
+                .frame(maxWidth: recordingsContentMaxWidth)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
+                .padding(.bottom, 30)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                if selectedPage == .sounds, !selectedClipURLs.isEmpty {
+                    RecordingSelectionDock(
+                        count: selectedClipURLs.count,
+                        accent: accent,
+                        canMerge: !playbackDisabled && !isMerging && selectedClips.count >= 2,
+                        clear: { selectedClipURLs.removeAll() },
+                        merge: { mergeSelectedRecordings(deleteSources: false) },
+                        delete: { confirmsDeleteSelected = true },
+                        isBusy: isMerging
+                    )
+                }
+                if let playingURL = player.playingURL,
+                   let clip = library.clips.first(where: { $0.url == playingURL }) {
+                    PlaybackProgressBar(clip: clip, player: player, accent: accent)
+                }
+            }
+        }
+        .navigationTitle("잠소리")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("완료") {
+                    if isSessionSelectionMode {
+                        exitSessionSelectionMode()
+                    } else if let onClose {
+                        onClose()
+                    } else {
+                        dismiss()
+                    }
+                }
+                    .fontWeight(.semibold)
+                    .foregroundStyle(accent)
+            }
+            soundsToolbarContent
+        }
     }
 
     private var accent: Color { theme.accentColor }
@@ -731,6 +738,51 @@ struct RecordingsView: View {
 
     private var todayClips: [RecordingClip] {
         library.mergeableClips(on: Date())
+    }
+
+    /// 목록 화면 전용 툴바 항목. 상위 `.toolbar` 클로저 안에 그대로 두면
+    /// 컴파일러 타입 추론이 시간 안에 끝나지 못해 별도 빌더로 분리했다.
+    @ToolbarContentBuilder
+    private var soundsToolbarContent: some ToolbarContent {
+        if selectedPage == .sounds, isSessionSelectionMode {
+            ToolbarItem(placement: .topBarLeading) {
+                Text("\(selectedSessionIDs.count)개 선택")
+                    .font(.subheadline.monospacedDigit().weight(.semibold))
+                    .lineLimit(1)
+                    .foregroundStyle(accent)
+            }
+        } else if selectedPage == .sounds, !library.clips.isEmpty {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button("전체 선택", systemImage: "checkmark.square.fill") {
+                        selectedClipURLs = RecordingSelectionPolicy.all(
+                            in: library.mergeableClips
+                        )
+                    }
+                    .disabled(isMerging)
+                    Button("오늘 선택", systemImage: "calendar.badge.checkmark") {
+                        selectedClipURLs = RecordingSelectionPolicy.today(
+                            in: library.mergeableClips
+                        )
+                    }
+                    .disabled(isMerging || todayClips.isEmpty)
+                    Button("선택 모두 해제", systemImage: "checkmark.circle.badge.xmark") {
+                        selectedClipURLs.removeAll()
+                    }
+                    .disabled(isMerging || selectedClipURLs.isEmpty)
+
+                    Divider()
+
+                    Button("전체 삭제", systemImage: "trash", role: .destructive) {
+                        confirmsDeleteAll = true
+                    }
+                    .disabled(isMerging)
+                } label: {
+                    Label("목록 작업", systemImage: "ellipsis.circle")
+                        .foregroundStyle(accent)
+                }
+            }
+        }
     }
 
     private var originalDuration: TimeInterval {
