@@ -206,7 +206,11 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
         trackTitle = nil
         hasLoadedPage = false
         isSiteReady = false
-        pendingAutoplay = true
+        // 패널을 열 때 자동 재생을 요청하지 않는다. 첫 영상은 준비된 모습(일시정지)으로 보여 주고,
+        // 실제 재생은 사용자가 재생 버튼을 눌렀을 때 `requestPlay()`로 시작한다. 사이트의 시작
+        // 덮개(`#startCover`)는 재생이 시작돼야 숨겨지므로, `bridgeScript`가 큐 준비 신호를 볼 때
+        // 덮개를 대신 숨겨 cue된 첫 영상이 보이게 한다(`evaluateSite` 참고).
+        pendingAutoplay = false
         isPresented = true
         isPanelOpen = true
         state = .loading
@@ -215,10 +219,9 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
         }
     }
 
-    /// 홈 카드의 열고/닫기 버튼: 열면 즉시 채널을 불러와 재생까지 시작하고(원래의
-    /// `start()`/`requestPlay()` 흐름), 닫으면 `stop()`으로 정리한다. 패널을 연 뒤 오른쪽
-    /// 재생/일시정지 버튼(`toggleMiniPpabangPlayback`)은 이 흐름과 별도로 패널을 유지한 채
-    /// 재생만 바꾼다.
+    /// 홈 카드의 열고/닫기 버튼: 열면 채널을 불러와 첫 영상을 일시정지 상태로 준비해 두고(`start()`),
+    /// 닫으면 `stop()`으로 정리한다. 패널을 연 뒤 오른쪽 재생/일시정지 버튼(`toggleMiniPpabangPlayback`)을
+    /// 눌러야 `requestPlay()`가 호출되어 실제 재생이 시작된다.
     func togglePanel() {
         if isPresented {
             stop()
@@ -597,15 +600,23 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
       var startCover = document.getElementById('startCover');
       // 사이트는 목록 요청이 끝난 뒤에야 영상을 큐에 넣는다. 플레이어와 목록이 모두 준비됐을 때만
       // 준비 신호를 보내고, 목록 요청이 끝났는데도 영상이 없으면 사이트의 빈 목록 안내를 띄운다.
+      // 사이트는 시작 덮개(`#startCover`)를 사용자가 직접 누르거나 영상이 재생될 때만 숨긴다.
+      // 네이티브는 재생 요청을 사용자가 재생 버튼을 누를 때까지 미루므로, 그 사이 덮개가 "지금
+      // 재생할 수 있는 쇼츠가 없어요" 문구를 그대로 띄운 채 있게 된다. 큐가 준비되면 이미 첫
+      // 영상이 cue된 상태이므로 덮개만 숨겨 그 모습을 보여 준다.
       function evaluateSite() {
         if (!bridge.playerReady) { return; }
         var hasQueue = !!(queueList && queueList.querySelector('.queue-item'));
         if (hasQueue) {
+          if (startCover && !bridge.started) { startCover.hidden = true; }
           if (!bridge.readySent) { bridge.readySent = true; post({ site: 'ready' }); }
           return;
         }
         var settled = !tasteState || tasteState.textContent.trim() !== '준비 중';
-        if (settled && emptyState && emptyState.hidden) { emptyState.hidden = false; }
+        if (settled) {
+          if (emptyState && emptyState.hidden) { emptyState.hidden = false; }
+          if (startCover && startCover.hidden && !bridge.started) { startCover.hidden = false; }
+        }
       }
       if (emptyState) {
         new MutationObserver(function () {
