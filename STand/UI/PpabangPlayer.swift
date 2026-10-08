@@ -11,8 +11,8 @@ struct PpabangCategory: Hashable, Identifiable {
     static let `default` = PpabangCategory(rawValue: "ccm")
     // 빠방 웹사이트의 재생목록 탭 순서.
     static let fallbackCategories = [
-        "ccm", "ballad", "girlgroup", "legends", "crossEdit", "golfHorizontal", "golfVertical",
-        "game", "mukbang", "camping", "travel", "lounge", "bedroom"
+        "ccm", "ballad", "girlgroup", "legends", "crossEdit", "hiphop", "golfHorizontal",
+        "golfVertical", "game", "mukbang", "camping", "travel", "lounge", "bedroom", "amv"
     ].map(PpabangCategory.init(rawValue:))
 
     var id: String { rawValue }
@@ -33,6 +33,7 @@ struct PpabangCategory: Hashable, Identifiable {
         case "bedroom": "베드룸"
         case "amv": "AMV"
         case "crossEdit", "cross-edit", "cross_edit": "교차편집"
+        case "hiphop": "힙합"
         default:
             rawValue
                 .replacingOccurrences(of: "-", with: " ")
@@ -112,9 +113,8 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
     private static let categoryDefaultsKey = "ppabang.selectedCategory"
     /// 재생 명령 뒤 플레이어 응답을 기다리는 최대 시간(초). 한 번만 확인하고 재시도하지 않는다.
     private static let playbackConfirmationTimeout: TimeInterval = 4
-    /// 앱이 비활성·배경으로 갔을 때 플레이어(웹뷰·영상·재생 위치)를 붙잡아 두는 시간.
-    /// 이 안에 전면으로 돌아오면 같은 화면을 되살리고, 넘기면 평소처럼 완전히 정지한다.
-    static let foregroundReturnGracePeriod: Duration = .seconds(60)
+    /// 앱이 비활성·배경으로 갔을 때 플레이어(웹뷰·영상·재생 위치)를 붙잡아 두는 시간은 두지 않는다.
+    /// 화면을 벗어나면 즉시 멈추고, 복귀 시각과 관계없이 같은 미니플레이어·곡을 그대로 유지한다.
 
     @Published private(set) var category: PpabangCategory
     @Published private(set) var categories = PpabangCategory.fallbackCategories
@@ -124,13 +124,6 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
     @Published private(set) var isPanelOpen = false
     @Published private(set) var state: PpabangPlaybackState = .idle
     @Published private(set) var trackTitle: String?
-
-    /// 배경 전환 순간의 재생 의도. 비활성→배경처럼 연달아 호출돼도 처음 값을 유지한다.
-    private struct BackgroundGraceSnapshot {
-        let startedAt: ContinuousClock.Instant
-        let wasPlaying: Bool
-        let onExpire: (() -> Void)?
-    }
 
     /// 세로/가로 전환처럼 같은 화면 안에서 다른 SwiftUI 분기로 옮겨질 때도 웹뷰(영상·재생 위치)를
     /// 그대로 이어 쓰도록 강한 참조로 붙잡는다. 진짜로 패널을 닫을 때만 `teardown`에서 놓아 준다.
@@ -151,11 +144,10 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
     static let emptyListMessage = "재생할 수 있는 영상이 없습니다. 영상 화면을 탭하면 목록을 다시 불러옵니다."
     static let playerUnavailableMessage = "플레이어를 준비하지 못했습니다. 정지 후 다시 재생해 주세요."
     private var generation = 0
-    private var backgroundGrace: BackgroundGraceSnapshot?
-    private var backgroundGraceTask: Task<Void, Never>?
+    private var isBackgroundSuspended = false
 
-    /// 배경 유예 중이면 참. 이 동안에는 어떤 경로로도 재생을 시작하지 않는다.
-    var isSuspendedForBackground: Bool { backgroundGrace != nil }
+    /// 화면을 벗어나 배경 정지 중이면 참. 이 동안에는 어떤 경로로도 재생을 시작하지 않는다.
+    var isSuspendedForBackground: Bool { isBackgroundSuspended }
 
     override init() {
         let stored = UserDefaults.standard.string(forKey: Self.categoryDefaultsKey)
@@ -198,8 +190,8 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
             category = requested
             UserDefaults.standard.set(requested.rawValue, forKey: Self.categoryDefaultsKey)
         }
-        // 채널 변경은 명시적 조작이므로 배경 유예 스냅샷을 버리고 새로 시작한다.
-        clearBackgroundGrace()
+        // 채널 변경은 명시적 조작이므로 배경 정지 상태를 버리고 새로 시작한다.
+        isBackgroundSuspended = false
         cancelConfirmation()
         cancelReadinessWait()
         generation += 1
@@ -232,7 +224,7 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
 
     /// 정지: 플레이어 재생을 초기화하고 패널을 닫는다. 패널이 사라지면 웹뷰도 해제된다.
     func stop() {
-        clearBackgroundGrace()
+        isBackgroundSuspended = false
         cancelConfirmation()
         cancelReadinessWait()
         generation += 1
@@ -291,67 +283,32 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
         webView.evaluateJavaScript(Self.nextScript) { _, _ in }
     }
 
-    // MARK: - 배경 유예
+    // MARK: - 배경 정지
 
-    /// 앱이 비활성·배경으로 갈 때 호출한다. 영상은 즉시 멈추되 웹뷰·영상·재생 위치는
-    /// `foregroundReturnGracePeriod` 동안 유지한다. 비활성→배경처럼 연달아 불려도
-    /// 처음 스냅샷(시각·재생 의도)을 그대로 둔다. 유예가 끝나면 `onExpire`를 호출하고,
-    /// 호출자가 없으면 `stop()`으로 정리한다. 호출자는 `onExpire`에서 반드시 `stop()`을 부른다.
-    func suspendForBackground(onExpire: (() -> Void)? = nil) {
+    /// 앱이 비활성·배경으로 갈 때 호출한다. 영상은 즉시 멈추지만 미니플레이어와 선택한
+    /// 곡·웹뷰는 그대로 유지한다. 시간이 얼마나 지나 돌아오든 패널을 닫거나 재생 정보를
+    /// 비우지 않으며, 재생 재개는 사용자가 재생 버튼을 눌렀을 때만 이뤄진다.
+    func suspendForBackground() {
         guard isPresented else { return }
         pauseMediaForBackground()
-        guard backgroundGrace == nil else { return }
-        let wasPlaying: Bool
-        switch state {
-        case .playing, .buffering, .requested:
-            wasPlaying = true
+        if state == .playing || state == .buffering || state == .requested {
             state = .paused
-        case .idle, .loading, .ready, .paused, .blocked, .failed:
-            wasPlaying = pendingAutoplay
         }
         cancelConfirmation()
-        backgroundGrace = BackgroundGraceSnapshot(
-            startedAt: .now,
-            wasPlaying: wasPlaying,
-            onExpire: onExpire
-        )
-        backgroundGraceTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: Self.foregroundReturnGracePeriod)
-            guard !Task.isCancelled, let self, self.isSuspendedForBackground else { return }
-            self.expireBackgroundGrace()
-        }
+        // 배경으로 물러나는 동안 남은 재생 의도를 지워, 복귀 후 준비 신호(`ready`)가
+        // 뒤늦게 와도 사용자 조작 없이 자동 재생되지 않게 한다.
+        pendingAutoplay = false
+        isBackgroundSuspended = true
     }
 
-    /// 앱이 전면 활성으로 돌아왔을 때만 호출한다. 유예 안이면 같은 화면을 이어 가고,
-    /// 배경 전환 전에 재생 중이었을 때만 재생을 다시 요청한다. OS 일시 중단으로
-    /// 타이머 콜백이 늦어졌을 수 있으므로 경과 시간을 여기서도 확인해 만료를 적용한다.
+    /// 앱이 전면 활성으로 돌아왔을 때 호출한다. 배경 정지 중이었다면 재생 요청을 다시
+    /// 받을 수 있게 하되, 자동으로 재생을 시작하지는 않는다. 배경 중 `empty`·로드 실패
+    /// 등 콜백이 재생 의도(`pendingAutoplay`)를 다시 세워 뒀을 수 있으므로 함께 지워,
+    /// 복귀 뒤 뒤늦게 오는 `ready`·`didFinish` 콜백이 사용자 조작 없이 재생을 시작하지
+    /// 않게 한다.
     func resumeAfterForegroundReturn() {
-        guard let snapshot = backgroundGrace else { return }
-        if snapshot.startedAt.duration(to: .now) >= Self.foregroundReturnGracePeriod {
-            expireBackgroundGrace()
-            return
-        }
-        clearBackgroundGrace()
-        if snapshot.wasPlaying {
-            requestPlay()
-        }
-    }
-
-    private func expireBackgroundGrace() {
-        guard let snapshot = backgroundGrace else { return }
-        clearBackgroundGrace()
-        if let onExpire = snapshot.onExpire {
-            onExpire()
-        }
-        if isPresented {
-            stop()
-        }
-    }
-
-    private func clearBackgroundGrace() {
-        backgroundGraceTask?.cancel()
-        backgroundGraceTask = nil
-        backgroundGrace = nil
+        isBackgroundSuspended = false
+        pendingAutoplay = false
     }
 
     /// 배경에서 YouTube 재생이 이어지지 않도록 iframe 플레이어와 웹뷰 미디어를 모두 멈춘다.
@@ -429,7 +386,7 @@ final class PpabangPlayerSession: NSObject, ObservableObject {
         isSiteReady = false
         cancelConfirmation()
         cancelReadinessWait()
-        clearBackgroundGrace()
+        isBackgroundSuspended = false
         if isPresented {
             // 패널이 화면에서 사라지면(편집 모드, 씬 전환 등) 재생도 함께 끝난다.
             isPresented = false

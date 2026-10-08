@@ -998,8 +998,8 @@ final class StandViewModel: ObservableObject {
             return
         }
         OrientationController.shared.reapply()
-        // 전면 활성으로 돌아왔으므로 배경 유예 중이던 빠방 플레이어를 되살린다.
-        // 유예가 지났으면 여기서 정리되고, 감시는 아래 `syncSleepCareMonitoring`이 맞춘다.
+        // 전면 활성으로 돌아왔으므로 배경 정지 중이던 빠방 플레이어의 정지 상태를 해제한다.
+        // 재생은 자동으로 다시 시작되지 않으며, 사용자가 재생 버튼을 눌러야 이어진다.
         ppabang.resumeAfterForegroundReturn()
         guard isNightSessionActive else {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -1046,9 +1046,9 @@ final class StandViewModel: ObservableObject {
         brightnessEndpointLockTask?.cancel()
         brightnessEndpointLockTask = nil
         stopInternetRadioPlayback()
-        // 앱이 비활성화되면 빠방 영상은 즉시 멈추되, 60초 안에 돌아오면 같은 화면을 잇도록
-        // 플레이어를 붙잡아 둔다. 그동안 `.ppabang` 감시 중단은 유지되고, 유예가 끝나면
-        // 평소 정지와 같이 정리한다. 감시 재개는 아래 활성 상태 판정이 맡는다.
+        // 앱이 비활성화되면 빠방 영상은 즉시 멈추되, 패널과 웹뷰는 그대로 붙잡아 둬 돌아왔을 때
+        // 같은 화면을 잇는다. 그동안 `.ppabang` 감시 중단은 유지되고, 재생 재개는 사용자가
+        // 다시 재생 버튼을 눌렀을 때만 이뤄진다. 감시 재개는 아래 활성 상태 판정이 맡는다.
         suspendPpabangForBackground()
         manualDimmingHoldActive = false
         automaticDimmingPaused = false
@@ -1456,14 +1456,11 @@ final class StandViewModel: ObservableObject {
         }
     }
 
-    /// 배경 전환 시 빠방을 즉시 멈추고 60초 유예를 건다. 이미 유예 중이면 시각·의도를 바꾸지 않는다.
-    /// 유예 만료는 배경에서 올 수도 있으므로, 전면 활성일 때만 잠자리 감시를 되살린다.
+    /// 배경 전환 시 빠방을 즉시 멈춘다. 미니플레이어와 선택한 곡은 그대로 유지되며,
+    /// 패널을 닫지 않으므로 잠자리 감시 재개 여부도 바꾸지 않는다.
     private func suspendPpabangForBackground() {
         guard ppabang.isPresented else { return }
-        ppabang.suspendForBackground { [weak self] in
-            guard let self else { return }
-            endPpabangPlayback(resumesMonitoring: appIsActive)
-        }
+        ppabang.suspendForBackground()
     }
 
     private func beginExternalMusicSession(_ service: ExternalMusicService) {
